@@ -44,6 +44,17 @@ const link = runPlugin(manifest, {
         link.changed({ [c.param]: c.value });
       }, c.afterMs);
     }
+    const recall = settings.sceneRecall as { afterMs: number; level: number } | undefined;
+    if (recall) {
+      setTimeout(() => {
+        const moved: Values = {};
+        for (let i = 1; i <= cap.inputs; i++) {
+          board.set(levelParam(i, 1), settle("level", recall.level));
+          moved[levelParam(i, 1)] = board.get(levelParam(i, 1))!;
+        }
+        link.changed(moved);
+      }, recall.afterMs);
+    }
     link.event("console.connected", { model: "simulated" });
   },
 

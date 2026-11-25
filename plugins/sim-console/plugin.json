@@ -33,6 +33,16 @@
           }
         }
       },
+      "sceneRecall": {
+        "description": "Recalls a pretend scene: every send into bus 1 jumps to one level, in a single message. For tests.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["afterMs", "level"],
+        "properties": {
+          "afterMs": { "type": "integer", "minimum": 0 },
+          "level": { "type": "number" }
+        }
+      },
       "answerDelayMs": {
         "description": "How long the pretend board takes to answer a command.",
         "type": "integer",
@@ -42,5 +52,5 @@
       }
     }
   },
-  "limits": { "writesPerSecond": 30, "memoryMb": 128 }
+  "limits": { "writesPerSecond": 30, "memoryMb": 256 }
 }

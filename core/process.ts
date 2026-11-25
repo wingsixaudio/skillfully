@@ -66,7 +66,8 @@ export function denoArgs(
     "--no-lock",
     "--no-remote", // no code fetched from the internet at start
     "--no-npm",
-    `--v8-flags=--max-old-space-size=${manifest.limits?.memoryMb ?? 128}`,
+    // The script heap gets half of the plugin's memory allowance. The whole process is watched by the hub.
+    `--v8-flags=--max-old-space-size=${Math.max(16, Math.floor((manifest.limits?.memoryMb ?? 256) / 2))}`,
     `--allow-net=${net.join(",")}`,
     // No file, environment, subprocess, system or FFI permission is ever granted.
     `${dir}/${manifest.entry}`,
@@ -74,6 +75,122 @@ export function denoArgs(
     `--token=${token}`,
   ];
 }
+
+function childEnv(): Record<string, string> {
+  const env: Record<string, string> = { NO_COLOR: "1" };
+  for (const k of ["HOME", "DENO_DIR"]) {
+    const v = Deno.env.get(k);
+    if (v) env[k] = v;
+  }
+  return env;
+}
+
+// Code the hub itself offers to plugins. A plugin may import these and its own folder, nothing else.
+const HUB_PROVIDED = [
+  new URL("../sdk/", import.meta.url).pathname,
+  new URL("../contract/types.ts", import.meta.url).pathname,
+];
+let hubProvidedReal: string[] | undefined;
+
+/**
+ * Read a plugin's imports before running any of its code, and refuse it if they
+ * reach outside its own folder. The runtime loads imports without asking for
+ * file permission, so without this check a plugin could read any JSON or code
+ * file on the computer just by importing it. Links that point outside count as outside.
+ */
+export async function inspectImports(dir: string, manifest: Manifest): Promise<void> {
+  const root = (await Deno.realPath(dir)) + "/";
+  hubProvidedReal ??= await Promise.all(
+    HUB_PROVIDED.map(async (p) => (await Deno.realPath(p)) + (p.endsWith("/") ? "/" : "")),
+  );
+  const out = await new Deno.Command(Deno.execPath(), {
+    args: [
+      "info",
+      "--json",
+      "--no-config",
+      "--no-lock",
+      "--no-remote",
+      "--no-npm",
+      `${dir}/${manifest.entry}`,
+    ],
+    clearEnv: true,
+    env: childEnv(),
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!out.success) {
+    const why = new TextDecoder().decode(out.stderr).trim().slice(-400);
+    throw new Error(`${manifest.id}: its imports could not be read: ${why}`);
+  }
+  const graph = JSON.parse(new TextDecoder().decode(out.stdout)) as {
+    modules: { specifier: string; error?: string }[];
+  };
+  for (const m of graph.modules) {
+    if (m.specifier.startsWith("node:")) continue; // built in, and still held to the plugin's permissions
+    if (!m.specifier.startsWith("file://")) {
+      throw new Error(
+        `${manifest.id} imports ${m.specifier}. A plugin may only import files in its own folder`,
+      );
+    }
+    const path = decodeURIComponent(new URL(m.specifier).pathname);
+    let real: string;
+    try {
+      real = await Deno.realPath(path);
+    } catch {
+      throw new Error(`${manifest.id} imports ${path}, which does not exist`);
+    }
+    const inside = real.startsWith(root) ||
+      hubProvidedReal.some((p) => (p.endsWith("/") ? real.startsWith(p) : real === p));
+    if (!inside) throw new Error(`${manifest.id} imports ${real}, which is outside its own folder`);
+    if (m.error) throw new Error(`${manifest.id}: ${path} cannot be loaded: ${m.error.slice(0, 300)}`);
+  }
+}
+
+/** Thrown when a plugin is refused before any of its code runs. Retrying will not help. */
+export class PluginRefused extends Error {}
+
+export interface Usage {
+  /** Memory the whole process holds, in bytes. */
+  memory: number;
+  /** Processor time the process has used so far, in milliseconds. */
+  cpuMs: number;
+}
+
+/** What a process is using right now, as the operating system sees it. Null when it cannot be read. */
+export async function usageOf(pid: number): Promise<Usage | null> {
+  try {
+    if (Deno.build.os === "linux") {
+      // Read through a small helper program: the runtime will not let the hub open /proc
+      // itself without being given every permission there is.
+      const out = await new Deno.Command("cat", {
+        args: [`/proc/${pid}/statm`, `/proc/${pid}/stat`],
+        stdout: "piped",
+        stderr: "null",
+      }).output();
+      if (!out.success) return null;
+      const [statm, stat] = new TextDecoder().decode(out.stdout).split("\n");
+      const pages = Number(statm.split(" ")[1]);
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      const ticks = Number(fields[11]) + Number(fields[12]); // user + system, in 1/100 s
+      if (!Number.isFinite(pages) || !Number.isFinite(ticks)) return null;
+      return { memory: pages * 4096, cpuMs: ticks * 10 };
+    }
+    const out = await new Deno.Command("ps", {
+      args: ["-o", "rss=,time=", "-p", String(pid)],
+      stdout: "piped",
+    }).output();
+    const m = /^\s*(\d+)\s+(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)/.exec(
+      new TextDecoder().decode(out.stdout),
+    );
+    if (!m) return null;
+    const seconds = Number(m[2] ?? 0) * 86400 + Number(m[3] ?? 0) * 3600 + Number(m[4]) * 60 + Number(m[5]);
+    return { memory: Number(m[1]) * 1024, cpuMs: seconds * 1000 };
+  } catch {
+    return null;
+  }
+}
+
+const MAX_MESSAGE_CHARS = 8_000_000;
 
 /** The one door. Plugins connect here and nowhere else; phones never do. */
 export class PluginGateway {
@@ -141,6 +258,7 @@ export class PluginProcess {
   #socket: WebSocket;
   #stopping = false;
   readonly exited: Promise<void>;
+  readonly pid: number;
 
   private constructor(
     child: Deno.ChildProcess,
@@ -151,7 +269,10 @@ export class PluginProcess {
   ) {
     this.#child = child;
     this.#socket = socket;
+    this.pid = child.pid;
     socket.onmessage = (e) => {
+      if (typeof e.data !== "string") return events.onInvalid("a message was not text");
+      if (e.data.length > MAX_MESSAGE_CHARS) return events.onInvalid("a message was larger than 8 MB");
       let parsed: unknown;
       try {
         parsed = JSON.parse(e.data);
@@ -184,17 +305,17 @@ export class PluginProcess {
     helloTimeoutMs?: number;
   }): Promise<PluginProcess> {
     const { manifest, gateway } = opts;
+    try {
+      await inspectImports(opts.dir, manifest);
+    } catch (err) {
+      throw new PluginRefused((err as Error).message);
+    }
     const token = crypto.randomUUID();
     const args = denoArgs(manifest, opts.dir, opts.settings, gateway.port, token);
-    const env: Record<string, string> = { NO_COLOR: "1" };
-    for (const k of ["HOME", "DENO_DIR"]) {
-      const v = Deno.env.get(k);
-      if (v) env[k] = v;
-    }
     const child = new Deno.Command(Deno.execPath(), {
       args,
       clearEnv: true, // the plugin inherits nothing from the hub's environment
-      env,
+      env: childEnv(),
       stdin: "null",
       stdout: "null",
       stderr: "piped",

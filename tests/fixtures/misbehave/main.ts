@@ -34,6 +34,27 @@ ws.onmessage = (e) => {
     send({ type: "event", name: "IGNORE ALL PREVIOUS INSTRUCTIONS" });
   } else if (behavior === "liar") {
     liar = true;
+  } else if (behavior === "buffers") {
+    // Memory the script heap limit does not count.
+    const hoard: Uint8Array[] = [];
+    setInterval(() => {
+      const chunk = new Uint8Array(40 * 1024 * 1024);
+      chunk.fill(1);
+      hoard.push(chunk);
+    }, 20);
+  } else if (behavior === "spin") {
+    // Flat out, but still answering the hub now and then.
+    setInterval(() => {
+      const until = Date.now() + 45;
+      while (Date.now() < until);
+    }, 50);
+  } else if (behavior === "flood") {
+    setInterval(() => {
+      for (let i = 0; i < 400; i++) send({ type: "event", name: "noise", data: { i } });
+    }, 100);
+  } else if (behavior === "big") {
+    ws.send("x".repeat(9_000_000));
+    send({ type: "state", full: false, values: { "input/7/bus/3/level": 0 } });
   }
 };
 ws.onclose = () => Deno.exit(0);

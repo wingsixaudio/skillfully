@@ -66,7 +66,7 @@ Deno.test("a plugin's command line grants the hub link, its declared hosts and n
   const args = denoArgs(m, "/plugins/example", { host: "192.168.1.50" }, 4567, "tok");
   const allows = args.filter((a) => a.startsWith("--allow") || a === "-A");
   assertEquals(allows, ["--allow-net=127.0.0.1:4567,192.168.1.50:2223"]);
-  for (const needed of ["--no-prompt", "--no-remote", "--no-npm", "--v8-flags=--max-old-space-size=64"]) {
+  for (const needed of ["--no-prompt", "--no-remote", "--no-npm", "--v8-flags=--max-old-space-size=32"]) {
     assert(args.includes(needed), `missing ${needed}`);
   }
 });

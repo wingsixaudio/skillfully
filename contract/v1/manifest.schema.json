@@ -73,11 +73,25 @@
           "default": 30
         },
         "memoryMb": {
-          "description": "Memory cap for the plugin's process.",
+          "description": "Most memory the plugin's whole process may hold. The hub stops a plugin that goes over.",
           "type": "integer",
-          "minimum": 16,
-          "maximum": 1024,
-          "default": 128
+          "minimum": 64,
+          "maximum": 4096,
+          "default": 256
+        },
+        "cpuPercent": {
+          "description": "Most processor the plugin may use, as a percentage of one core, averaged over 10 seconds.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 400,
+          "default": 50
+        },
+        "messagesPerSecond": {
+          "description": "Most messages per second the plugin may send the hub.",
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 5000,
+          "default": 200
         }
       }
     }

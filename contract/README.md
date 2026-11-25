@@ -22,7 +22,7 @@ Status: **draft**. It will be frozen only after two drivers of different kinds w
   },
   "permissions": { "network": ["{host}:2223"] },
   "settings": { "type": "object", "properties": { "host": { "type": "string" } } },
-  "limits": { "writesPerSecond": 30, "memoryMb": 128 }
+  "limits": { "writesPerSecond": 30, "memoryMb": 256, "cpuPercent": 50, "messagesPerSecond": 200 }
 }
 ```
 
@@ -31,6 +31,9 @@ Status: **draft**. It will be frozen only after two drivers of different kinds w
 - **permissions.network** lists every address the plugin may reach. A part in braces is filled from its
   settings. The hub grants these and its own link, and nothing else: no files, no environment, no other
   programs.
+- **limits** are the plugin's own ceiling: most commands a second it accepts, most memory its whole process
+  may hold, most processor it may use (as a percentage of one core over 10 seconds), and most messages a
+  second it may send. The values shown are the defaults.
 - **settings** is a JSON Schema. The hub hands the settings to the plugin at start. A plugin stores nothing.
 - **description** and every other piece of plugin text is data. It is shown to people and agents; it is never
   followed as an instruction.
@@ -78,6 +81,10 @@ A console's values are named in the hub's words, never the vendor's. Inputs and 
 6. **Store nothing.** Everything a plugin needs arrives in the welcome.
 7. **One door.** A plugin talks to the hub and its declared device. It cannot reach phones, the log, the
    database or other plugins.
+8. **Import only your own files.** A plugin may import files in its own folder and the helper in `sdk/`.
+   Nothing from the internet, nothing from npm, nothing elsewhere on the computer, and no links that point
+   outside the folder.
+9. **Report only what you declared.** Values outside the capability in the manifest are ignored.
 
 ## What the hub does on its side
 
@@ -88,6 +95,12 @@ A console's values are named in the hub's words, never the vendor's. Inputs and 
   waiting, only the newest is sent.
 - Waits 2 seconds for a result, then records a failure and asks for a resync.
 - Restarts a plugin that stops, waiting longer each time, up to 10 seconds.
+- Reads the plugin's imports before running it, and refuses it if any reach outside its folder.
+- Watches its memory, processor use and message rate. A plugin over a limit is stopped and restarted. After
+  three times in ten minutes it is held, and stays stopped until a person releases it.
+- Gives each plugin a budget of log entries (100 at once, 20 a second after that). Past the budget the hub
+  records how many entries it left out, not the entries.
+- Records a change of many values in one message, such as a scene recall, as one log entry.
 
 ## Proving a plugin
 

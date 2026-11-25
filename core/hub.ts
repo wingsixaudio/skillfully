@@ -3,7 +3,7 @@
 // port, so a plugin can never pose as a phone or read the log.
 
 import type { Mode, Value, Values } from "../contract/mod.ts";
-import { PluginHost } from "./host.ts";
+import { PluginHost, type Tuning } from "./host.ts";
 import { Log, newId } from "./log.ts";
 import { loadManifest, PluginGateway } from "./process.ts";
 
@@ -11,6 +11,8 @@ export interface PluginConfig {
   dir: string;
   settings?: Record<string, unknown>;
   mode?: Mode;
+  /** Timings a test may shorten. */
+  tuning?: Tuning;
 }
 
 export interface HubOptions {
@@ -78,7 +80,15 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     try {
       const manifest = await loadManifest(cfg.dir);
       if (hosts.has(manifest.id)) throw new Error(`a plugin called ${manifest.id} is already loaded`);
-      const host = new PluginHost(manifest, cfg.dir, cfg.settings ?? {}, cfg.mode ?? "listen", log, gateway);
+      const host = new PluginHost(
+        manifest,
+        cfg.dir,
+        cfg.settings ?? {},
+        cfg.mode ?? "listen",
+        log,
+        gateway,
+        cfg.tuning,
+      );
       hosts.set(manifest.id, host);
       host.onHealth(() => tellAll({ type: "plugins", plugins: pluginList() }));
     } catch (err) {

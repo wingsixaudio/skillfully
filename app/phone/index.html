@@ -1,268 +1,521 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Skillfully: one fader</title>
-<link rel="icon" href="data:,">
-<style>
-  :root {
-    --chassis: #000;
-    --panel: #121214;
-    --rail: #26262b;
-    --text: #f4f4f5;
-    --dim: #a1a1aa;
-    --accent: #f7941d;
-    --ok: #4ade80;
-    --bad: #f87171;
-    --font: "Montserrat", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--chassis); color: var(--text); font-family: var(--font); }
-  body { min-height: 100dvh; padding: 16px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left)); }
-  main { max-width: 520px; margin: 0 auto; display: grid; gap: 16px; }
-
-  header { display: flex; align-items: center; gap: 10px; padding: 4px 2px 8px; }
-  header svg { width: 30px; height: 30px; flex: none; }
-  header svg .core { stroke: var(--text); }
-  header svg .mod { fill: var(--accent); }
-  header b { font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
-  header b span { color: var(--accent); }
-  header .link { margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--dim); }
-  .led { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); }
-  .led.on { background: var(--ok); }
-
-  .card { background: var(--panel); border-radius: 16px; padding: 18px; }
-  .who { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-  .who h1 { font-size: 17px; font-weight: 600; margin: 0; }
-  .who p { margin: 2px 0 0; font-size: 13px; color: var(--dim); }
-  .db { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; white-space: nowrap; }
-  .db small { font-size: 14px; font-weight: 500; color: var(--dim); margin-left: 3px; }
-
-  .fader { position: relative; height: 56px; margin-top: 18px; border-radius: 14px; background: var(--rail);
-           touch-action: pan-y; cursor: ew-resize; outline-offset: 4px; user-select: none; -webkit-user-select: none; }
-  .fader:focus-visible { outline: 2px solid var(--accent); }
-  .fill { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 14px 0 0 14px; background: var(--accent); opacity: .28; }
-  .thumb { position: absolute; top: 6px; bottom: 6px; left: 0; width: 22px; margin-left: -11px; border-radius: 11px; background: var(--accent); }
-  .zero { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--chassis); opacity: .7; }
-  .scale { position: relative; height: 16px; margin-top: 8px; font-size: 12px; color: var(--dim); }
-  .scale span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
-  .scale span:first-child { transform: none; }
-  .scale span:last-child { transform: translateX(-100%); }
-
-  .note { margin: 14px 0 0; font-size: 13px; color: var(--dim); min-height: 1.4em; }
-  .note.bad { color: var(--bad); }
-  .note:empty { margin: 0; min-height: 0; }
-
-  h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
-  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
-  dt { color: var(--dim); }
-  dd { margin: 0; }
-  ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-  li { font-size: 14px; line-height: 1.35; }
-  li time { display: block; font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; }
-  .empty { color: var(--dim); font-size: 14px; }
-</style>
-</head>
-<body>
-<main>
-  <header>
-    <svg viewBox="0 0 48 48" aria-hidden="true"><rect class="core" x="16" y="16" width="16" height="16" rx="4.5" fill="none" stroke-width="3.6"/><g class="mod"><rect x="19" y="3.5" width="10" height="7" rx="2.5"/><rect x="19" y="37.5" width="10" height="7" rx="2.5"/><rect x="3.5" y="19" width="7" height="10" rx="2.5"/><rect x="37.5" y="19" width="7" height="10" rx="2.5"/></g></svg>
-    <b>skillfully<span>.live</span></b>
-    <div class="link" aria-live="polite"><i class="led" id="led"></i><span id="linkText">Connecting</span></div>
-  </header>
-
-  <section class="card" aria-labelledby="t">
-    <div class="who">
-      <div>
-        <h1 id="t">Input 1 in bus 1</h1>
-        <p id="inputName">Waiting for the board</p>
-      </div>
-      <div class="db" id="db" aria-hidden="true">&nbsp;</div>
-    </div>
-    <div class="fader" id="fader" role="slider" tabindex="0" aria-labelledby="t" aria-valuemin="-90" aria-valuemax="10" aria-valuenow="-90">
-      <div class="fill" id="fill"></div>
-      <div class="zero" id="zero"></div>
-      <div class="thumb" id="thumb"></div>
-    </div>
-    <div class="scale" id="scale" aria-hidden="true"></div>
-    <p class="note" id="note" aria-live="polite"></p>
-  </section>
-
-  <section class="card" aria-labelledby="b">
-    <h2 id="b">Board plugin</h2>
-    <dl id="plugin"><dt>Status</dt><dd>Unknown</dd></dl>
-  </section>
-
-  <section class="card" aria-labelledby="l">
-    <h2 id="l">From the log</h2>
-    <ol id="log"><li class="empty">Nothing yet. Move the fader.</li></ol>
-  </section>
-</main>
-
-<script>
-(() => {
-  const PARAM = "input/1/bus/1/level", NAME = "input/1/name";
-  const MIN = -90, KNEE = -60, MAX = 10, KNEE_AT = 0.1; // the first tenth of travel covers off to -60 dB
-  const $ = (id) => document.getElementById(id);
-  const fader = $("fader"), thumb = $("thumb"), fill = $("fill"), note = $("note");
-
-  let ws, value = MIN, dragging = false, quietUntil = 0, lastSent = 0, queued = null, ref = 0;
-
-  const toPos = (db) => db <= KNEE ? (db - MIN) / (KNEE - MIN) * KNEE_AT : KNEE_AT + (db - KNEE) / (MAX - KNEE) * (1 - KNEE_AT);
-  const toDb = (pos) => {
-    const p = Math.min(1, Math.max(0, pos));
-    const db = p <= KNEE_AT ? MIN + p / KNEE_AT * (KNEE - MIN) : KNEE + (p - KNEE_AT) / (1 - KNEE_AT) * (MAX - KNEE);
-    return Math.round(db * 2) / 2;
-  };
-  const words = (db) => db <= MIN ? "Off" : (db > 0 ? "+" : "") + db.toFixed(1);
-
-  $("zero").style.left = toPos(0) * 100 + "%";
-  // Scale marks sit where those levels really are on the fader.
-  for (const [db, label] of [[MIN, "Off"], [-40, "-40"], [-20, "-20"], [0, "0"], [MAX, "+10"]]) {
-    const mark = document.createElement("span");
-    mark.textContent = label;
-    mark.style.left = toPos(db) * 100 + "%";
-    $("scale").append(mark);
-  }
-
-  function paint() {
-    const pct = toPos(value) * 100 + "%";
-    thumb.style.left = pct;
-    fill.style.width = pct;
-    $("db").innerHTML = value <= MIN ? "Off" : words(value) + "<small>dB</small>";
-    fader.setAttribute("aria-valuenow", value);
-    fader.setAttribute("aria-valuetext", value <= MIN ? "Off" : words(value) + " decibels");
-  }
-
-  function say(text, bad) {
-    note.textContent = text;
-    note.classList.toggle("bad", !!bad);
-  }
-
-  // At most one message every 33 ms. The hub also keeps only the newest value, so nothing queues up.
-  function send(db) {
-    value = db;
-    paint();
-    quietUntil = performance.now() + 400;
-    const now = performance.now();
-    if (now - lastSent < 33) {
-      if (queued === null) setTimeout(() => { const v = queued; queued = null; if (v !== null) push(v); }, 33 - (now - lastSent));
-      queued = db;
-      return;
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Skillfully: one fader</title>
+    <link rel="icon" href="data:,">
+    <style>
+    :root {
+      --chassis: #000;
+      --panel: #121214;
+      --rail: #26262b;
+      --text: #f4f4f5;
+      --dim: #a1a1aa;
+      --accent: #f7941d;
+      --ok: #4ade80;
+      --bad: #f87171;
+      --font: "Montserrat", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
-    push(db);
-  }
-  function push(db) {
-    lastSent = performance.now();
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "set", param: PARAM, value: db, ref: ++ref }));
-    else say("Not connected to the hub, so this was not sent.", true);
-  }
-
-  const fromPointer = (e) => {
-    const r = fader.getBoundingClientRect();
-    return toDb((e.clientX - r.left) / r.width);
-  };
-  fader.addEventListener("pointerdown", (e) => { dragging = true; fader.setPointerCapture(e.pointerId); send(fromPointer(e)); });
-  fader.addEventListener("pointermove", (e) => { if (dragging) send(fromPointer(e)); });
-  const release = () => { dragging = false; };
-  fader.addEventListener("pointerup", release);
-  fader.addEventListener("pointercancel", release);
-  fader.addEventListener("keydown", (e) => {
-    const step = { ArrowRight: 0.5, ArrowUp: 0.5, ArrowLeft: -0.5, ArrowDown: -0.5, PageUp: 5, PageDown: -5 }[e.key];
-    if (e.key === "Home") send(MIN);
-    else if (e.key === "End") send(MAX);
-    else if (step) send(Math.min(MAX, Math.max(MIN, value + step)));
-    else return;
-    e.preventDefault();
-  });
-
-  function showPlugins(list) {
-    const p = list.find((x) => x.capabilities && x.capabilities.console);
-    const rows = p
-      ? [["Name", p.name], ["Status", p.status === "running" ? "Running" : p.status === "starting" ? "Starting" : "Stopped"],
-         ["Mode", p.mode === "act" ? "Act: changes are sent to the board" : "Listen: nothing is sent to the board"],
-         ["May reach", (p.permissions.network || []).length ? p.permissions.network.join(", ") : "Only the hub"],
-         ["Restarts", String(p.restarts)]]
-      : [["Status", "No board plugin is loaded"]];
-    $("plugin").innerHTML = "";
-    for (const [k, v] of rows) {
-      const dt = document.createElement("dt"), dd = document.createElement("dd");
-      dt.textContent = k; dd.textContent = v; // plugin text is shown as text, never run
-      $("plugin").append(dt, dd);
+    * {
+      box-sizing: border-box;
     }
-  }
-
-  const line = (e) => {
-    const d = e.data, who = e.actor ? e.actor.replace("person:", "Person ") : "";
-    switch (e.type) {
-      case "skillfully.command.confirmed":
-        return `${who} set the level to ${words(d.value)} dB. It was ${words(d.before)}.` +
-          (d.adjusted ? ` Asked for ${d.requested}; the board holds ${d.value}.` : "") + ` Confirmed by the board in ${d.ms} ms.`;
-      case "skillfully.command.failed": return `${who} asked for ${d.requested} dB. It failed: ${d.message}.`;
-      case "skillfully.command.blocked": return `${who} asked for ${d.requested} dB. Not sent: the board plugin is in Listen mode.`;
-      case "skillfully.command.rejected": return `${who} asked for ${d.requested}. Refused: ${d.message}.`;
-      case "skillfully.state.changed": return `Changed at the board itself: now ${words(d.value)} dB, was ${words(d.before)}.`;
-      case "skillfully.plugin.crashed": return "The board plugin stopped unexpectedly. The hub is restarting it.";
-      case "skillfully.plugin.ready": return `The board plugin is ready with ${d.values} values.`;
-      case "skillfully.plugin.mode": return `The board plugin was switched from ${d.before} to ${d.mode}.`;
-      default: return null;
+    html,
+    body {
+      margin: 0;
+      background: var(--chassis);
+      color: var(--text);
+      font-family: var(--font);
     }
-  };
-  let logTimer;
-  async function showLog() {
-    try {
-      const entries = await (await fetch("/api/log?limit=40")).json();
-      const items = [];
-      for (const e of entries.reverse()) {
-        if (e.subject && e.subject.includes(":") && !e.subject.endsWith(PARAM)) continue;
-        const text = line(e);
-        if (text) items.push([e.time, text]);
-        if (items.length === 6) break;
-      }
-      const ol = $("log");
-      ol.innerHTML = items.length ? "" : '<li class="empty">Nothing yet. Move the fader.</li>';
-      for (const [time, text] of items) {
-        const li = document.createElement("li"), t = document.createElement("time");
-        t.textContent = new Date(time).toLocaleTimeString();
-        li.append(t, document.createTextNode(text));
-        ol.append(li);
-      }
-    } catch { /* the log list is a convenience; the fader does not depend on it */ }
-  }
-  const showLogSoon = () => { clearTimeout(logTimer); logTimer = setTimeout(showLog, 150); };
+    body {
+      min-height: 100dvh;
+      padding: 16px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left));
+    }
+    main {
+      max-width: 520px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
 
-  function connect() {
-    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-    ws.onopen = () => {
-      $("led").classList.add("on"); $("linkText").textContent = "Connected";
-      ws.send(JSON.stringify({ type: "hello", actor: "person:p1" }));
-      say(""); showLog();
-    };
-    ws.onclose = () => {
-      $("led").classList.remove("on"); $("linkText").textContent = "Reconnecting";
-      setTimeout(connect, 1000);
-    };
-    ws.onmessage = (ev) => {
-      const m = JSON.parse(ev.data);
-      if (m.type === "plugins") { showPlugins(m.plugins); showLogSoon(); }
-      if (m.type === "state") {
-        if (typeof m.values[NAME] === "string") $("inputName").textContent = m.values[NAME] + " on the board";
-        // While a thumb is on the fader, the thumb is in charge. Otherwise the board is.
-        if (typeof m.values[PARAM] === "number" && !dragging && performance.now() > quietUntil) { value = m.values[PARAM]; paint(); }
-        if (!m.full) showLogSoon();
-      }
-      if (m.type === "ack") {
-        if (m.ok && !m.superseded && m.ref === ref && !dragging) { value = m.value; paint(); say(""); }
-        if (!m.ok) { say(m.error.message, true); quietUntil = 0; fetch("/api/state").then((r) => r.json()).then((s) => { if (!dragging && typeof s[PARAM] === "number") { value = s[PARAM]; paint(); } }); }
-        showLogSoon();
-      }
-    };
-  }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 2px 8px;
+    }
+    header svg {
+      width: 30px;
+      height: 30px;
+      flex: none;
+    }
+    header svg .core {
+      stroke: var(--text);
+    }
+    header svg .mod {
+      fill: var(--accent);
+    }
+    header b {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+    }
+    header b span {
+      color: var(--accent);
+    }
+    header .link {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--dim);
+    }
+    .led {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--bad);
+    }
+    .led.on {
+      background: var(--ok);
+    }
 
-  paint();
-  connect();
-})();
-</script>
-</body>
+    .card {
+      background: var(--panel);
+      border-radius: 16px;
+      padding: 18px;
+    }
+    .who {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .who h1 {
+      font-size: 17px;
+      font-weight: 600;
+      margin: 0;
+    }
+    .who p {
+      margin: 2px 0 0;
+      font-size: 13px;
+      color: var(--dim);
+    }
+    .db {
+      font-size: 30px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -.02em;
+      white-space: nowrap;
+    }
+    .db small {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--dim);
+      margin-left: 3px;
+    }
+
+    .fader {
+      position: relative;
+      height: 56px;
+      margin-top: 18px;
+      border-radius: 14px;
+      background: var(--rail);
+      touch-action: pan-y;
+      cursor: ew-resize;
+      outline-offset: 4px;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .fader:focus-visible {
+      outline: 2px solid var(--accent);
+    }
+    .fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 0;
+      border-radius: 14px 0 0 14px;
+      background: var(--accent);
+      opacity: .28;
+    }
+    .thumb {
+      position: absolute;
+      top: 6px;
+      bottom: 6px;
+      left: 0;
+      width: 22px;
+      margin-left: -11px;
+      border-radius: 11px;
+      background: var(--accent);
+    }
+    .zero {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: var(--chassis);
+      opacity: .7;
+    }
+    .scale {
+      position: relative;
+      height: 16px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--dim);
+    }
+    .scale span {
+      position: absolute;
+      top: 0;
+      transform: translateX(-50%);
+      white-space: nowrap;
+    }
+    .scale span:first-child {
+      transform: none;
+    }
+    .scale span:last-child {
+      transform: translateX(-100%);
+    }
+
+    .note {
+      margin: 14px 0 0;
+      font-size: 13px;
+      color: var(--dim);
+      min-height: 1.4em;
+    }
+    .note.bad {
+      color: var(--bad);
+    }
+    .note:empty {
+      margin: 0;
+      min-height: 0;
+    }
+
+    h2 {
+      font-size: 14px;
+      font-weight: 600;
+      margin: 0 0 10px;
+    }
+    dl {
+      margin: 0;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 14px;
+      font-size: 14px;
+    }
+    dt {
+      color: var(--dim);
+    }
+    dd {
+      margin: 0;
+    }
+    ol {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+    }
+    li {
+      font-size: 14px;
+      line-height: 1.35;
+    }
+    li time {
+      display: block;
+      font-size: 12px;
+      color: var(--dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .empty {
+      color: var(--dim);
+      font-size: 14px;
+    }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <svg viewBox="0 0 48 48" aria-hidden="true">
+          <rect class="core" x="16" y="16" width="16" height="16" rx="4.5" fill="none" stroke-width="3.6" />
+          <g class="mod">
+            <rect x="19" y="3.5" width="10" height="7" rx="2.5" />
+            <rect x="19" y="37.5" width="10" height="7" rx="2.5" />
+            <rect x="3.5" y="19" width="7" height="10" rx="2.5" />
+            <rect x="37.5" y="19" width="7" height="10" rx="2.5" />
+          </g>
+        </svg>
+        <b>skillfully<span>.live</span></b>
+        <div class="link"
+          aria-live="polite"><i class="led" id="led"></i><span id="linkText">Connecting</span></div>
+      </header>
+
+      <section class="card" aria-labelledby="t">
+        <div class="who">
+          <div>
+            <h1 id="t">Input 1 in bus 1</h1>
+            <p id="inputName">Waiting for the board</p>
+          </div>
+          <div class="db" id="db" aria-hidden="true">&nbsp;</div>
+        </div>
+        <div class="fader" id="fader" role="slider" tabindex="0" aria-labelledby="t" aria-valuemin="-90"
+          aria-valuemax="10" aria-valuenow="-90">
+          <div class="fill" id="fill"></div>
+          <div class="zero" id="zero"></div>
+          <div class="thumb" id="thumb"></div>
+        </div>
+        <div class="scale" id="scale" aria-hidden="true"></div>
+        <p class="note" id="note" aria-live="polite"></p>
+      </section>
+
+      <section class="card" aria-labelledby="b">
+        <h2 id="b">Board plugin</h2>
+        <dl id="plugin">
+          <dt>Status</dt>
+          <dd>Unknown</dd>
+        </dl>
+      </section>
+
+      <section class="card" aria-labelledby="l">
+        <h2 id="l">From the log</h2>
+        <ol id="log">
+          <li class="empty">Nothing yet. Move the fader.</li>
+        </ol>
+      </section>
+    </main>
+
+    <script>
+    (() => {
+      const PARAM = "input/1/bus/1/level", NAME = "input/1/name";
+      const MIN = -90, KNEE = -60, MAX = 10, KNEE_AT = 0.1; // the first tenth of travel covers off to -60 dB
+      const $ = (id) => document.getElementById(id);
+      const fader = $("fader"), thumb = $("thumb"), fill = $("fill"), note = $("note");
+
+      let ws, value = MIN, dragging = false, quietUntil = 0, lastSent = 0, queued = null, ref = 0;
+
+      const toPos = (db) =>
+        db <= KNEE ? (db - MIN) / (KNEE - MIN) * KNEE_AT : KNEE_AT + (db - KNEE) / (MAX - KNEE) * (1 - KNEE_AT);
+      const toDb = (pos) => {
+        const p = Math.min(1, Math.max(0, pos));
+        const db = p <= KNEE_AT
+          ? MIN + p / KNEE_AT * (KNEE - MIN)
+          : KNEE + (p - KNEE_AT) / (1 - KNEE_AT) * (MAX - KNEE);
+        return Math.round(db * 2) / 2;
+      };
+      const words = (db) => db <= MIN ? "Off" : (db > 0 ? "+" : "") + db.toFixed(1);
+
+      $("zero").style.left = toPos(0) * 100 + "%";
+      // Scale marks sit where those levels really are on the fader.
+      for (const [db, label] of [[MIN, "Off"], [-40, "-40"], [-20, "-20"], [0, "0"], [MAX, "+10"]]) {
+        const mark = document.createElement("span");
+        mark.textContent = label;
+        mark.style.left = toPos(db) * 100 + "%";
+        $("scale").append(mark);
+      }
+
+      function paint() {
+        const pct = toPos(value) * 100 + "%";
+        thumb.style.left = pct;
+        fill.style.width = pct;
+        $("db").innerHTML = value <= MIN ? "Off" : words(value) + "<small>dB</small>";
+        fader.setAttribute("aria-valuenow", value);
+        fader.setAttribute("aria-valuetext", value <= MIN ? "Off" : words(value) + " decibels");
+      }
+
+      function say(text, bad) {
+        note.textContent = text;
+        note.classList.toggle("bad", !!bad);
+      }
+
+      // At most one message every 33 ms. The hub also keeps only the newest value, so nothing queues up.
+      function send(db) {
+        value = db;
+        paint();
+        quietUntil = performance.now() + 400;
+        const now = performance.now();
+        if (now - lastSent < 33) {
+          if (queued === null) {
+            setTimeout(() => {
+              const v = queued;
+              queued = null;
+              if (v !== null) push(v);
+            }, 33 - (now - lastSent));
+          }
+          queued = db;
+          return;
+        }
+        push(db);
+      }
+      function push(db) {
+        lastSent = performance.now();
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "set", param: PARAM, value: db, ref: ++ref }));
+        } else say("Not connected to the hub, so this was not sent.", true);
+      }
+
+      const fromPointer = (e) => {
+        const r = fader.getBoundingClientRect();
+        return toDb((e.clientX - r.left) / r.width);
+      };
+      fader.addEventListener("pointerdown", (e) => {
+        dragging = true;
+        fader.setPointerCapture(e.pointerId);
+        send(fromPointer(e));
+      });
+      fader.addEventListener("pointermove", (e) => {
+        if (dragging) send(fromPointer(e));
+      });
+      const release = () => {
+        dragging = false;
+      };
+      fader.addEventListener("pointerup", release);
+      fader.addEventListener("pointercancel", release);
+      fader.addEventListener("keydown", (e) => {
+        const step =
+          { ArrowRight: 0.5, ArrowUp: 0.5, ArrowLeft: -0.5, ArrowDown: -0.5, PageUp: 5, PageDown: -5 }[e.key];
+        if (e.key === "Home") send(MIN);
+        else if (e.key === "End") send(MAX);
+        else if (step) send(Math.min(MAX, Math.max(MIN, value + step)));
+        else return;
+        e.preventDefault();
+      });
+
+      function showPlugins(list) {
+        const p = list.find((x) => x.capabilities && x.capabilities.console);
+        const rows = p
+          ? [["Name", p.name], [
+            "Status",
+            {
+              running: "Running",
+              starting: "Starting",
+              quarantined: "Held by the hub until someone releases it",
+            }[p.status] || "Stopped",
+          ], [
+            "Mode",
+            p.mode === "act" ? "Act: changes are sent to the board" : "Listen: nothing is sent to the board",
+          ], [
+            "May reach",
+            (p.permissions.network || []).length ? p.permissions.network.join(", ") : "Only the hub",
+          ], ["Restarts", String(p.restarts)]]
+          : [["Status", "No board plugin is loaded"]];
+        $("plugin").innerHTML = "";
+        for (const [k, v] of rows) {
+          const dt = document.createElement("dt"), dd = document.createElement("dd");
+          dt.textContent = k;
+          dd.textContent = v; // plugin text is shown as text, never run
+          $("plugin").append(dt, dd);
+        }
+      }
+
+      const line = (e) => {
+        const d = e.data, who = e.actor ? e.actor.replace("person:", "Person ") : "";
+        switch (e.type) {
+          case "skillfully.command.confirmed":
+            return `${who} set the level to ${words(d.value)} dB. It was ${words(d.before)}.` +
+              (d.adjusted ? ` Asked for ${d.requested}; the board holds ${d.value}.` : "") +
+              ` Confirmed by the board in ${d.ms} ms.`;
+          case "skillfully.command.failed":
+            return `${who} asked for ${d.requested} dB. It failed: ${d.message}.`;
+          case "skillfully.command.blocked":
+            return `${who} asked for ${d.requested} dB. Not sent: the board plugin is in Listen mode.`;
+          case "skillfully.command.rejected":
+            return `${who} asked for ${d.requested}. Refused: ${d.message}.`;
+          case "skillfully.state.changed": {
+            const c = d.changes && d.changes[PARAM];
+            return c ? `Changed at the board itself: now ${words(c.value)} dB, was ${words(c.before)}.` : null;
+          }
+          case "skillfully.plugin.limit":
+            return `The board plugin went over its ${d.limit} limit (${d.used}, allowed ${d.allowed}). The hub stopped it.`;
+          case "skillfully.plugin.quarantined":
+            return "The board plugin broke its limits three times. The hub will not restart it until someone releases it.";
+          case "skillfully.plugin.crashed":
+            return "The board plugin stopped unexpectedly. The hub is restarting it.";
+          case "skillfully.plugin.ready":
+            return `The board plugin is ready with ${d.values} values.`;
+          case "skillfully.plugin.mode":
+            return `The board plugin was switched from ${d.before} to ${d.mode}.`;
+          default:
+            return null;
+        }
+      };
+      let logTimer;
+      async function showLog() {
+        try {
+          const entries = await (await fetch("/api/log?limit=40")).json();
+          const items = [];
+          for (const e of entries.reverse()) {
+            if (e.subject && e.subject.includes(":") && !e.subject.endsWith(PARAM)) continue;
+            const text = line(e);
+            if (text) items.push([e.time, text]);
+            if (items.length === 6) break;
+          }
+          const ol = $("log");
+          ol.innerHTML = items.length ? "" : '<li class="empty">Nothing yet. Move the fader.</li>';
+          for (const [time, text] of items) {
+            const li = document.createElement("li"), t = document.createElement("time");
+            t.textContent = new Date(time).toLocaleTimeString();
+            li.append(t, document.createTextNode(text));
+            ol.append(li);
+          }
+        } catch { /* the log list is a convenience; the fader does not depend on it */ }
+      }
+      const showLogSoon = () => {
+        clearTimeout(logTimer);
+        logTimer = setTimeout(showLog, 150);
+      };
+
+      function connect() {
+        ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+        ws.onopen = () => {
+          $("led").classList.add("on");
+          $("linkText").textContent = "Connected";
+          ws.send(JSON.stringify({ type: "hello", actor: "person:p1" }));
+          say("");
+          showLog();
+        };
+        ws.onclose = () => {
+          $("led").classList.remove("on");
+          $("linkText").textContent = "Reconnecting";
+          setTimeout(connect, 1000);
+        };
+        ws.onmessage = (ev) => {
+          const m = JSON.parse(ev.data);
+          if (m.type === "plugins") {
+            showPlugins(m.plugins);
+            showLogSoon();
+          }
+          if (m.type === "state") {
+            if (typeof m.values[NAME] === "string") $("inputName").textContent = m.values[NAME] + " on the board";
+            // While a thumb is on the fader, the thumb is in charge. Otherwise the board is.
+            if (typeof m.values[PARAM] === "number" && !dragging && performance.now() > quietUntil) {
+              value = m.values[PARAM];
+              paint();
+            }
+            if (!m.full) showLogSoon();
+          }
+          if (m.type === "ack") {
+            if (m.ok && !m.superseded && m.ref === ref && !dragging) {
+              value = m.value;
+              paint();
+              say("");
+            }
+            if (!m.ok) {
+              say(m.error.message, true);
+              quietUntil = 0;
+              fetch("/api/state").then((r) => r.json()).then((s) => {
+                if (!dragging && typeof s[PARAM] === "number") {
+                  value = s[PARAM];
+                  paint();
+                }
+              });
+            }
+            showLogSoon();
+          }
+        };
+      }
+
+      paint();
+      connect();
+    })();
+    </script>
+  </body>
 </html>

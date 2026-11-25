@@ -39,7 +39,7 @@ export interface Manifest {
   capabilities: { console?: ConsoleCapability };
   permissions?: { network?: string[] };
   settings?: Record<string, unknown>;
-  limits?: { writesPerSecond?: number; memoryMb?: number };
+  limits?: { writesPerSecond?: number; memoryMb?: number; cpuPercent?: number; messagesPerSecond?: number };
 }
 
 // Plugin to hub
@@ -113,6 +113,15 @@ export function parseParam(param: string): ParsedParam | null {
   if (!m) return null;
   if (m[2] === "name") return { input: Number(m[1]), field: "name" };
   return { input: Number(m[1]), bus: Number(m[3]), field: m[4] as "level" | "pan" };
+}
+
+/** Does a console with this capability have this value at all? */
+export function consoleHas(cap: ConsoleCapability, param: string): boolean {
+  const p = parseParam(param);
+  if (!p || p.input > cap.inputs) return false;
+  if (p.field === "name") return true;
+  if (p.bus! > cap.buses) return false;
+  return p.field === "level" || !!cap.pan;
 }
 
 export const levelParam = (input: number, bus: number) => `input/${input}/bus/${bus}/level`;

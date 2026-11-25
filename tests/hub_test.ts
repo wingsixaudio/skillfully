@@ -106,7 +106,8 @@ Deno.test("a change made at the board is logged as the board's and phones are to
   const [change] = ofType(hub, "skillfully.state.changed");
   assertEquals(change.via, "board");
   assertEquals(change.actor, undefined, "nobody in Skillfully asked for it");
-  assertEquals(change.data, { param: LEVEL, before: -90, value: -3 });
+  assertEquals(change.subject, `sim-console:${LEVEL}`);
+  assertEquals(change.data, { count: 1, changes: { [LEVEL]: { before: -90, value: -3 } } });
   await phone.close();
   await hub.stop();
 });
@@ -141,8 +142,8 @@ Deno.test("a crash is logged, the plugin comes back, and the fader works again",
   assertEquals(ofType(hub, "skillfully.plugin.crashed").length, 1);
   assertEquals(hub.console!.restarts, 1);
   // The simulated board lost its memory in the crash. The hub noticed the difference and logged it.
-  const found = ofType(hub, "skillfully.state.changed").find((e) => e.data.param === LEVEL);
-  assertEquals(found?.data, { param: LEVEL, before: -8, value: -90, foundBy: "resync" });
+  const [found] = ofType(hub, "skillfully.state.changed");
+  assertEquals(found.data, { count: 1, changes: { [LEVEL]: { before: -8, value: -90 } }, foundBy: "resync" });
   assert((await phone.set(LEVEL, -8)).ok, "the fader works again");
 
   await phone.close();
@@ -217,13 +218,15 @@ Deno.test("a plugin that claims success without answering is caught", async () =
   await hub.stop();
 });
 
-Deno.test("a plugin that uses more memory than its cap is stopped and logged", async () => {
+Deno.test("a plugin whose script heap outgrows its cap is stopped and logged", async () => {
   const hub = await hubWith([
     { dir: SIM, mode: "act" },
     { dir: `${FIXTURES}/misbehave`, mode: "act", settings: { behavior: "hog" } },
   ]);
-  await until("the memory hog is stopped", () => ofType(hub, "skillfully.plugin.crashed").length >= 1, 20000);
-  assertEquals(ofType(hub, "skillfully.plugin.crashed")[0].subject, "misbehave");
+  // Two things race to stop it: the runtime's own heap cap (a crash) and the hub's memory watch (a limit).
+  const stopped = () =>
+    ofType(hub, "skillfully.plugin.crashed").length + ofType(hub, "skillfully.plugin.limit").length;
+  await until("the memory hog is stopped", () => stopped() >= 1, 20000);
   assertEquals(hub.console!.status, "running");
   assert((await hub.console!.set(LEVEL, -8, { via: "test" })).ok);
   await hub.stop();

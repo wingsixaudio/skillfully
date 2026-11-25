@@ -5,6 +5,7 @@
 
 import {
   checkConsoleValue,
+  consoleHas,
   type FromPlugin,
   type HealthStatus,
   type Hello,
@@ -14,7 +15,7 @@ import {
   type Values,
 } from "../contract/mod.ts";
 import { type Log, newId } from "./log.ts";
-import { type PluginGateway, PluginProcess, resolveNetwork } from "./process.ts";
+import { type PluginGateway, PluginProcess, PluginRefused, resolveNetwork, usageOf } from "./process.ts";
 
 export interface SetContext {
   /** Who asked. An ID, never a name. */
@@ -29,7 +30,16 @@ export type SetOutcome =
   | { ok: true; superseded: true }
   | { ok: false; error: { code: string; message: string } };
 
-export type HostStatus = "starting" | "running" | "down" | "stopped";
+/** quarantined: stopped by the hub and not restarted until a person releases it. */
+export type HostStatus = "starting" | "running" | "down" | "stopped" | "quarantined";
+
+/** Timings a test may shorten. Real hubs use the defaults. */
+export interface Tuning {
+  /** How often the hub looks at a plugin's memory, processor and message rate. */
+  pollMs?: number;
+  /** The span processor use is averaged over. */
+  cpuWindowMs?: number;
+}
 
 interface Pending {
   value: Value;
@@ -44,6 +54,14 @@ type Timer = ReturnType<typeof setTimeout>;
 
 const COMMAND_TIMEOUT_MS = 2000;
 const SILENCE_MS = 6000;
+const MB = 1024 * 1024;
+/** A plugin stopped for breaking a limit this many times is quarantined. */
+const STRIKES = 3;
+const STRIKES_FORGOTTEN_MS = 10 * 60 * 1000;
+/** A plugin's own entries in the log: this many at once, refilled at this many a second. */
+const LOG_BURST = 100;
+const LOG_PER_SECOND = 20;
+const MAX_EVENT_DATA_CHARS = 4000;
 
 export class PluginHost {
   readonly state = new Map<string, Value>();
@@ -59,6 +77,18 @@ export class PluginHost {
   #restartTimer?: Timer;
   #restartDelay = 250;
   #lastHeard = 0;
+  #strikes = 0;
+  #lastStrikeAt = 0;
+  #exitBecause?: string;
+  #limitsUnreadable = false;
+  #cpuSamples: { at: number; cpuMs: number }[] = [];
+  #messages = 0;
+  #messagesSince = 0;
+  #floodSeconds = 0;
+  #logTokens = LOG_BURST;
+  #logRefilledAt = 0;
+  #logDropped = 0;
+  #checking = false;
   #readyWaiters: (() => void)[] = [];
   #changeListeners = new Set<(values: Values) => void>();
   #healthListeners = new Set<() => void>();
@@ -70,6 +100,7 @@ export class PluginHost {
     public mode: Mode,
     private log: Log,
     private gateway: PluginGateway,
+    private tuning: Tuning = {},
   ) {}
 
   get id(): string {
@@ -90,7 +121,7 @@ export class PluginHost {
   async start(): Promise<void> {
     const perSecond = this.manifest.limits?.writesPerSecond ?? 30;
     this.#ticker = setInterval(() => this.#flush(), Math.max(10, Math.round(1000 / perSecond)));
-    this.#watchdog = setInterval(() => this.#checkSilence(), 1000);
+    this.#watchdog = setInterval(() => this.#watch(), this.tuning.pollMs ?? 250);
     await this.#launch();
   }
 
@@ -110,8 +141,13 @@ export class PluginHost {
   }
 
   async #launch(): Promise<void> {
-    if (this.status === "stopped") return;
+    if (this.status === "stopped" || this.status === "quarantined") return;
     this.status = "starting";
+    this.#cpuSamples = [];
+    this.#messages = 0;
+    this.#messagesSince = Date.now();
+    this.#floodSeconds = 0;
+    this.#exitBecause = undefined;
     try {
       const network = resolveNetwork(this.manifest, this.settings);
       this.#proc = await PluginProcess.start({
@@ -122,8 +158,10 @@ export class PluginHost {
         gateway: this.gateway,
         events: {
           onMessage: (m) => this.#onMessage(m),
-          onInvalid: (problem) =>
-            this.log.append({ type: "skillfully.plugin.invalid", source: this.#source, data: { problem } }),
+          onInvalid: (problem) => {
+            this.#messages++;
+            this.#plog({ type: "skillfully.plugin.invalid", source: this.#source, data: { problem } });
+          },
           onExit: (info) => this.#onExit(info),
         },
       });
@@ -135,6 +173,14 @@ export class PluginHost {
         data: { version: this.manifest.version, mode: this.mode, network, restarts: this.restarts },
       });
     } catch (err) {
+      if (err instanceof PluginRefused) {
+        // Refused before any of its code ran. Trying again would give the same answer.
+        return this.#quarantine(
+          "skillfully.plugin.refused",
+          { message: err.message.slice(0, 800) },
+          "refused",
+        );
+      }
       this.status = "down";
       this.#setHealth("down", "failed to start");
       this.log.append({
@@ -148,7 +194,7 @@ export class PluginHost {
   }
 
   #scheduleRestart(): void {
-    if (this.status === "stopped") return;
+    if (this.status === "stopped" || this.status === "quarantined") return;
     const delay = this.#restartDelay;
     this.#restartDelay = Math.min(this.#restartDelay * 2, 10000);
     this.#restartTimer = setTimeout(() => {
@@ -157,8 +203,25 @@ export class PluginHost {
     }, delay);
   }
 
+  /** Write an entry that a plugin caused directly. Budgeted, so a plugin cannot fill the log. */
+  #plog(input: Parameters<Log["append"]>[0]): void {
+    const now = Date.now();
+    this.#logTokens = Math.min(
+      LOG_BURST,
+      this.#logTokens + ((now - this.#logRefilledAt) / 1000) * LOG_PER_SECOND,
+    );
+    this.#logRefilledAt = now;
+    if (this.#logTokens < 1) {
+      this.#logDropped++;
+      return;
+    }
+    this.#logTokens--;
+    this.log.append(input);
+  }
+
   #onMessage(m: Exclude<FromPlugin, Hello>): void {
     this.#lastHeard = Date.now();
+    this.#messages++;
     switch (m.type) {
       case "state":
         return this.#onState(m.full, m.values);
@@ -168,11 +231,18 @@ export class PluginHost {
         return this.#setHealth(m.status, m.reason);
       case "event":
         // A plugin's own words. Stored as data under its name, never acted on.
-        this.log.append({
+        this.#plog({
           type: "skillfully.plugin.event",
           source: this.#source,
           subject: this.id,
-          data: { name: m.name, ...(m.data ? { detail: m.data } : {}) },
+          data: {
+            name: m.name,
+            ...(m.data
+              ? JSON.stringify(m.data).length <= MAX_EVENT_DATA_CHARS
+                ? { detail: m.data }
+                : { detail: { leftOut: "the event's data was larger than the log keeps" } }
+              : {}),
+          },
         });
     }
   }
@@ -181,23 +251,44 @@ export class PluginHost {
     const firstFull = full && this.status !== "running";
     const hadState = this.state.size > 0;
     const changed: Values = {};
+    // Changes we did not ask for happened at the device itself. A value we are in
+    // the middle of setting is ours and gets logged when its result arrives.
+    const atDevice: Record<string, { before: Value | null; value: Value }> = {};
+    const cap = this.manifest.capabilities.console;
+    let undeclared = 0;
     for (const [param, value] of Object.entries(values)) {
+      // A value the manifest never promised is not taken on trust.
+      if (cap && !consoleHas(cap, param)) {
+        undeclared++;
+        continue;
+      }
       const before = this.state.get(param);
       if (before === value) continue;
       this.state.set(param, value);
       changed[param] = value;
-      // A change we did not ask for happened at the device itself. A value we are
-      // in the middle of setting is ours and gets logged when its result arrives.
-      const ours = this.#inflight?.items.has(param);
-      if (!ours && (hadState || !full)) {
-        this.log.append({
-          type: "skillfully.state.changed",
-          source: this.#source,
-          subject: `${this.id}:${param}`,
-          via: "board",
-          data: { param, before: before ?? null, value, ...(full ? { foundBy: "resync" } : {}) },
-        });
+      if (!this.#inflight?.items.has(param) && (hadState || !full)) {
+        atDevice[param] = { before: before ?? null, value };
       }
+    }
+    if (undeclared) {
+      this.#plog({
+        type: "skillfully.plugin.invalid",
+        source: this.#source,
+        data: {
+          problem: `it reported ${undeclared} values its manifest does not declare; they were ignored`,
+        },
+      });
+    }
+    const params = Object.keys(atDevice);
+    if (params.length) {
+      // One entry for one message, however many values moved: a scene recall is one event, not 1,500.
+      this.#plog({
+        type: "skillfully.state.changed",
+        source: this.#source,
+        subject: params.length === 1 ? `${this.id}:${params[0]}` : this.id,
+        via: "board",
+        data: { count: params.length, changes: atDevice, ...(full ? { foundBy: "resync" } : {}) },
+      });
     }
     if (full) {
       for (const param of [...this.state.keys()]) if (!(param in values)) this.state.delete(param);
@@ -295,7 +386,7 @@ export class PluginHost {
   #onResult(id: string, values: Values, errors: Record<string, { code: string; message: string }>): void {
     const flight = this.#inflight;
     if (!flight || flight.id !== id) {
-      this.log.append({
+      this.#plog({
         type: "skillfully.plugin.invalid",
         source: this.#source,
         data: { problem: `a result arrived for command ${id}, which is not waiting for one` },
@@ -372,7 +463,7 @@ export class PluginHost {
     if (this.health.status === status && this.health.reason === reason) return;
     const before = this.health.status;
     this.health = reason ? { status, reason } : { status };
-    this.log.append({
+    this.#plog({
       type: "skillfully.plugin.health",
       source: this.#source,
       subject: this.id,
@@ -381,16 +472,136 @@ export class PluginHost {
     for (const l of this.#healthListeners) l();
   }
 
-  #checkSilence(): void {
-    if (this.status === "running" && Date.now() - this.#lastHeard > SILENCE_MS) {
+  /** Runs a few times a second: silence, flooding, memory and processor. */
+  async #watch(): Promise<void> {
+    const now = Date.now();
+
+    if (this.#logDropped && this.#logTokens + ((now - this.#logRefilledAt) / 1000) * LOG_PER_SECOND >= 1) {
+      this.log.append({
+        type: "skillfully.plugin.muted",
+        source: "core",
+        subject: this.id,
+        data: {
+          leftOut: this.#logDropped,
+          because: `it caused more than ${LOG_PER_SECOND} log entries a second`,
+        },
+      });
+      this.#logDropped = 0;
+    }
+
+    const proc = this.#proc;
+    if (!proc || (this.status !== "running" && this.status !== "starting")) return;
+
+    if (this.status === "running" && now - this.#lastHeard > SILENCE_MS) {
       this.#setHealth("down", "the plugin has gone silent");
     }
+
+    if (now - this.#messagesSince >= 1000) {
+      const allowed = this.manifest.limits?.messagesPerSecond ?? 200;
+      const perSecond = Math.round((this.#messages * 1000) / (now - this.#messagesSince));
+      this.#messages = 0;
+      this.#messagesSince = now;
+      this.#floodSeconds = perSecond > allowed ? this.#floodSeconds + 1 : 0;
+      if (this.#floodSeconds >= 3) {
+        return this.#overLimit("messages", `${allowed} a second`, `${perSecond} a second for 3 seconds`);
+      }
+    }
+
+    if (this.#checking) return;
+    this.#checking = true;
+    const usage = await usageOf(proc.pid);
+    this.#checking = false;
+    if (proc !== this.#proc) return; // it stopped while we were looking
+    if (!usage) {
+      if (!this.#limitsUnreadable) {
+        this.#limitsUnreadable = true;
+        this.log.append({
+          type: "skillfully.plugin.limits.unreadable",
+          source: "core",
+          subject: this.id,
+          data: {
+            message:
+              "memory and processor use cannot be read on this computer, so those limits are not enforced",
+          },
+        });
+      }
+      return;
+    }
+
+    const memoryMb = this.manifest.limits?.memoryMb ?? 256;
+    if (usage.memory > memoryMb * MB) {
+      return this.#overLimit("memory", `${memoryMb} MB`, `${Math.round(usage.memory / MB)} MB`);
+    }
+
+    const window = this.tuning.cpuWindowMs ?? 10000;
+    this.#cpuSamples.push({ at: now, cpuMs: usage.cpuMs });
+    while (this.#cpuSamples.length > 2 && now - this.#cpuSamples[1].at >= window) this.#cpuSamples.shift();
+    const oldest = this.#cpuSamples[0];
+    if (now - oldest.at >= window) {
+      const cpuPercent = this.manifest.limits?.cpuPercent ?? 50;
+      const used = Math.round(((usage.cpuMs - oldest.cpuMs) / (now - oldest.at)) * 100);
+      if (used > cpuPercent) {
+        return this.#overLimit(
+          "processor",
+          `${cpuPercent}% of one core`,
+          `${used}% over ${Math.round(window / 1000)} s`,
+        );
+      }
+    }
+  }
+
+  /** A plugin went over a limit in its manifest. Stop it; after three times, stop restarting it. */
+  #overLimit(limit: "memory" | "processor" | "messages", allowed: string, used: string): void {
+    const now = Date.now();
+    if (now - this.#lastStrikeAt > STRIKES_FORGOTTEN_MS) this.#strikes = 0;
+    this.#strikes++;
+    this.#lastStrikeAt = now;
+    this.log.append({
+      type: "skillfully.plugin.limit",
+      source: "core",
+      subject: this.id,
+      data: { limit, allowed, used, strike: this.#strikes, of: STRIKES },
+    });
+    if (this.#strikes >= STRIKES) {
+      return this.#quarantine(
+        "skillfully.plugin.quarantined",
+        { because: `it went over a limit ${STRIKES} times`, last: limit },
+        "quarantined",
+      );
+    }
+    this.#exitBecause = `over its ${limit} limit`;
+    this.#proc?.kill();
+  }
+
+  #quarantine(type: string, data: Record<string, unknown>, reason: string): void {
+    this.status = "quarantined";
+    this.log.append({ type, source: "core", subject: this.id, data });
+    this.#exitBecause = reason;
+    this.#proc?.kill();
+    this.#setHealth("down", reason);
+  }
+
+  /** A person has looked at a quarantined plugin and wants it running again. */
+  release(ctx: SetContext): void {
+    if (this.status !== "quarantined") return;
+    this.log.append({
+      type: "skillfully.plugin.released",
+      source: "core",
+      subject: this.id,
+      actor: ctx.actor,
+      via: ctx.via,
+      traceid: ctx.traceid,
+    });
+    this.#strikes = 0;
+    this.#restartDelay = 250;
+    this.status = "down";
+    this.#launch();
   }
 
   #onExit(info: { code: number; expected: boolean; stderr: string }): void {
     this.#proc = undefined;
-    const wasStopped = this.status === "stopped";
-    if (!wasStopped) this.status = "down";
+    const held = this.status === "stopped" || this.status === "quarantined";
+    if (!held) this.status = "down";
     if (this.#inflight) {
       clearTimeout(this.#inflight.timer);
       const items = this.#inflight.items;
@@ -401,13 +612,18 @@ export class PluginHost {
     this.#pending.clear();
     this.#failItems(waiting, "plugin_down", `${this.id} stopped before this was sent`);
     this.log.append({
-      type: info.expected ? "skillfully.plugin.stopped" : "skillfully.plugin.crashed",
+      // Stopped on purpose (by a person, or by the hub over a limit) is not a crash.
+      type: info.expected || this.#exitBecause ? "skillfully.plugin.stopped" : "skillfully.plugin.crashed",
       source: "core",
       subject: this.id,
-      data: { exit: info.code, ...(info.expected ? {} : { lastWords: info.stderr.trim().slice(-600) }) },
+      data: {
+        exit: info.code,
+        ...(this.#exitBecause ? { because: this.#exitBecause } : {}),
+        ...(info.expected || this.#exitBecause ? {} : { lastWords: info.stderr.trim().slice(-600) }),
+      },
     });
-    this.#setHealth("down", info.expected ? "stopped" : "crashed");
-    if (!info.expected) this.#scheduleRestart();
+    if (!held) this.#setHealth("down", info.expected ? "stopped" : this.#exitBecause ?? "crashed");
+    if (!info.expected && !held) this.#scheduleRestart();
   }
 
   /** Change the mode. In Listen the hub never sends the plugin a command. */
