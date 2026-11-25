@@ -1,0 +1,12 @@
+{
+  "imports": {
+    "ajv/": "npm:/ajv@8.17.1/"
+  },
+  "tasks": {
+    "hub": "deno run --allow-net --allow-read --allow-env=HOME,DENO_DIR --allow-write=./data --allow-run core/main.ts",
+    "test": "deno test --allow-net --allow-read --allow-write --allow-run --allow-env",
+    "conformance": "deno run --allow-net=127.0.0.1 --allow-read --allow-env=HOME,DENO_DIR --allow-run conformance/run.ts"
+  },
+  "fmt": { "lineWidth": 110 },
+  "lint": { "rules": { "exclude": ["no-explicit-any"] } }
+}

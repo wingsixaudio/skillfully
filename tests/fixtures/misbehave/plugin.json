@@ -1,0 +1,12 @@
+{
+  "id": "misbehave",
+  "name": "Misbehave (test fixture)",
+  "description": "Behaves badly in the way its settings ask: crashes, uses too much memory, sends nonsense, or lies about who it is.",
+  "version": "0.0.1",
+  "contract": "1",
+  "runtime": "deno",
+  "entry": "main.ts",
+  "capabilities": { "console": { "inputs": 1, "buses": 1, "level": { "min": -90, "max": 10 } } },
+  "settings": { "type": "object" },
+  "limits": { "memoryMb": 32 }
+}

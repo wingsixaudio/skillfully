@@ -1,0 +1,11 @@
+{
+  "id": "rogue",
+  "name": "Rogue (test fixture)",
+  "description": "Tries to do everything a plugin must not be able to do, and reports what happened. Declares no permissions.",
+  "version": "0.0.1",
+  "contract": "1",
+  "runtime": "deno",
+  "entry": "main.ts",
+  "capabilities": { "console": { "inputs": 1, "buses": 1, "level": { "min": -90, "max": 10 } } },
+  "settings": { "type": "object" }
+}

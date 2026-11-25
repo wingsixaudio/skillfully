@@ -1,0 +1,46 @@
+{
+  "id": "sim-console",
+  "name": "Simulated board",
+  "description": "A pretend soundboard held in memory. It behaves like a real one: it clamps values to its range, rounds levels to 0.1 dB and reports what it actually set. Used for tests and for trying Skillfully without a board.",
+  "version": "0.1.0",
+  "contract": "1",
+  "runtime": "deno",
+  "entry": "main.ts",
+  "capabilities": {
+    "console": {
+      "inputs": 48,
+      "buses": 16,
+      "level": { "min": -90, "max": 10 },
+      "pan": true
+    }
+  },
+  "permissions": { "network": [] },
+  "settings": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "boardChanges": {
+        "description": "Changes the pretend board makes by itself, as if someone moved a fader at the desk. For tests.",
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["afterMs", "param", "value"],
+          "properties": {
+            "afterMs": { "type": "integer", "minimum": 0 },
+            "param": { "type": "string" },
+            "value": { "type": ["number", "string"] }
+          }
+        }
+      },
+      "answerDelayMs": {
+        "description": "How long the pretend board takes to answer a command.",
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 5000,
+        "default": 0
+      }
+    }
+  },
+  "limits": { "writesPerSecond": 30, "memoryMb": 128 }
+}

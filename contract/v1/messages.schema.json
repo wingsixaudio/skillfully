@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:skillfully:contract:1:messages",
+  "title": "Skillfully plugin messages, contract 1",
+  "description": "Every message that may cross between the hub and a plugin. Each is one JSON object with a type.",
+  "$defs": {
+    "param": {
+      "description": "A value on a console, in the hub's own vocabulary. Vendor names never appear here.",
+      "type": "string",
+      "pattern": "^input/[1-9][0-9]{0,2}/(name|bus/[1-9][0-9]{0,2}/(level|pan))$"
+    },
+    "value": { "type": ["number", "string", "boolean"] },
+    "values": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/param" },
+      "additionalProperties": { "$ref": "#/$defs/value" }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "unknown_param",
+            "out_of_range",
+            "read_only",
+            "invalid",
+            "device_unreachable",
+            "timeout",
+            "internal"
+          ]
+        },
+        "message": { "type": "string", "maxLength": 300 }
+      }
+    },
+
+    "hello": {
+      "description": "Plugin to hub. Always the first message.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "contract", "id", "version", "token"],
+      "properties": {
+        "type": { "const": "hello" },
+        "contract": { "const": "1" },
+        "id": { "type": "string" },
+        "version": { "type": "string" },
+        "token": { "description": "The one-time token the hub gave this process at start.", "type": "string" }
+      }
+    },
+    "state": {
+      "description": "Plugin to hub. What the device says is true. full means every value the plugin knows; otherwise only what changed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "full", "values"],
+      "properties": {
+        "type": { "const": "state" },
+        "full": { "type": "boolean" },
+        "values": { "$ref": "#/$defs/values" }
+      }
+    },
+    "event": {
+      "description": "Plugin to hub. Something happened that is not a value, such as the device connecting.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "name"],
+      "properties": {
+        "type": { "const": "event" },
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$", "maxLength": 80 },
+        "data": { "type": "object" }
+      }
+    },
+    "result": {
+      "description": "Plugin to hub. The answer to one command. Every value the command set appears exactly once: in values with what the device read back, or in errors.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "values", "errors"],
+      "properties": {
+        "type": { "const": "result" },
+        "id": { "type": "string" },
+        "values": { "$ref": "#/$defs/values" },
+        "errors": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/param" },
+          "additionalProperties": { "$ref": "#/$defs/error" }
+        }
+      }
+    },
+    "health": {
+      "description": "Plugin to hub. Sent after the welcome, on every change, and at least every 5 seconds.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "status"],
+      "properties": {
+        "type": { "const": "health" },
+        "status": { "enum": ["ok", "degraded", "down"] },
+        "reason": { "type": "string", "maxLength": 300 }
+      }
+    },
+
+    "welcome": {
+      "description": "Hub to plugin. The answer to hello. Carries the plugin's settings, because a plugin stores nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "contract", "mode", "settings"],
+      "properties": {
+        "type": { "const": "welcome" },
+        "contract": { "const": "1" },
+        "mode": { "enum": ["listen", "act"] },
+        "settings": { "type": "object" }
+      }
+    },
+    "command": {
+      "description": "Hub to plugin. Set these values. A command always names the value wanted, never a change to it, so sending it twice is harmless.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "set"],
+      "properties": {
+        "type": { "const": "command" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "set": { "type": "object", "$ref": "#/$defs/values", "minProperties": 1 }
+      }
+    },
+    "resync": {
+      "description": "Hub to plugin. Send a full state now.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": { "type": { "const": "resync" } }
+    },
+    "mode": {
+      "description": "Hub to plugin. For information only. The hub enforces the mode itself: in listen it never sends a command.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "mode"],
+      "properties": { "type": { "const": "mode" }, "mode": { "enum": ["listen", "act"] } }
+    },
+    "shutdown": {
+      "description": "Hub to plugin. Stop within 2 seconds.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": { "type": { "const": "shutdown" } }
+    }
+  }
+}

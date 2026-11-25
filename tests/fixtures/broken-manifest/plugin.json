@@ -1,0 +1,10 @@
+{
+  "id": "Broken Manifest",
+  "name": "Broken manifest (test fixture)",
+  "version": "one",
+  "contract": "1",
+  "runtime": "deno",
+  "entry": "../../../core/main.ts",
+  "capabilities": { "console": { "inputs": 1, "buses": 1, "level": { "min": -90, "max": 10 } } },
+  "permissions": { "network": ["*:*"], "files": ["/"] }
+}

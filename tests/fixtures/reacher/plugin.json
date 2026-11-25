@@ -1,0 +1,12 @@
+{
+  "id": "reacher",
+  "name": "Reacher (test fixture)",
+  "description": "Declares one device address and tries to reach it and one other address.",
+  "version": "0.0.1",
+  "contract": "1",
+  "runtime": "deno",
+  "entry": "main.ts",
+  "capabilities": { "console": { "inputs": 1, "buses": 1, "level": { "min": -90, "max": 10 } } },
+  "permissions": { "network": ["{host}:{port}"] },
+  "settings": { "type": "object" }
+}
