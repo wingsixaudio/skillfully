@@ -434,3 +434,55 @@ a.line .status {
 .need:last-child {
   padding-bottom: 0;
 }
+#catalog h3 {
+  font-size: 17px;
+  margin: 22px 0 8px;
+}
+#catCompanion {
+  border-top: 1px solid var(--rail);
+  margin-top: 18px;
+}
+#catKinds {
+  margin: 4px 0 10px;
+}
+button.chip {
+  min-height: 32px;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+.letter {
+  margin: 14px 0 0;
+  color: var(--dim);
+  font-size: 13px;
+}
+button.line {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  min-height: 0;
+  border-radius: 0;
+  border-top: 1px solid var(--rail);
+  background: none;
+  color: var(--text);
+  font-weight: 500;
+  text-align: left;
+}
+.letter + button.line {
+  border-top: 0;
+}
+button.chip {
+  color: var(--text);
+}
+button.chip.on {
+  color: #000;
+}
+#catCount {
+  font-weight: 400;
+  font-size: 13px;
+  margin-left: 6px;
+}

@@ -54,6 +54,11 @@ export function readCompanionPackage(files: PackedFile[]): PackageContents | und
       description,
       makes: [words(theirs.manufacturer, 60), products.slice(0, 3).join(", ")].filter(Boolean).join(" ")
         .slice(0, 120),
+      // The same facts apart, for a catalog to sort and file by. All of it is the module's own words: data.
+      maker: words(theirs.manufacturer, 60),
+      products: products.filter(Boolean).slice(0, 12),
+      keywords: (Array.isArray(theirs.keywords) ? theirs.keywords : [])
+        .map((k: unknown) => words(k, 40).toLowerCase()).filter(Boolean).slice(0, 12),
     },
     idStart: `companion-${id}`,
     manifest: {

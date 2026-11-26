@@ -320,6 +320,15 @@ itself, or always. The choice is kept in the hub's database and each change to i
 file, because a file that could turn it could approve itself. The hour exists because a hub left trusting by
 accident is the mistake most worth preventing.
 
+**The catalog is a page, and Bitfocus Companion modules are a section of it.** "Add a device" opens the
+catalog at its own address. It is searched first: one box that looks through names, makers, products and
+kinds. Below it are two sections. What was written for this hub is short and shown whole. Bitfocus Companion
+modules are many, so that section is browsed by maker, in order, with a count beside each, and by kind once
+the store files entries under kinds. The section credits Bitfocus and says what running a module here means.
+The hub never sends the whole list to the page: it sends a page of entries and the counts. Until the store's
+list names a maker for each entry, the hub works the name out from the entry's id and what it says it makes.
+Choosing an entry opens the same few questions as before, and adding ends at the new device's own address.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins

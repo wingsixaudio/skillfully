@@ -38,6 +38,13 @@ export interface StoreModule {
   advise: Advice[];
   /** Who makes the device and what it is called, as the package says. Something to search by. */
   makes: string;
+  /** Which part of the catalog it is in: written for this hub, or a Bitfocus Companion module run as it is. */
+  section: "skillfully" | "companion";
+  /** Who makes the device, for browsing by maker. Worked out from the other fields when the list has none. */
+  maker: string;
+  products: string[];
+  /** What kind of thing it is (Audio, Video ...), as the store filed it. Empty when the store has not. */
+  kinds: string[];
   /**
    * Which way of building packages made this one. With the source commit it says exactly which package
    * this is: the same commit built the same way is the same package, however often the store publishes.
@@ -58,6 +65,27 @@ const GRANT =
   /^(lan|listen|(\{[A-Za-z][A-Za-z0-9]*\}|[A-Za-z0-9.-]+):(\{[A-Za-z][A-Za-z0-9]*\}|[0-9]{1,5}))$/;
 const words = (v: unknown, max: number) =>
   [...String(v ?? "")].map((c) => (c.charCodeAt(0) < 32 ? " " : c)).join("").trim().slice(0, max);
+
+/** A short list of short strings out of whatever a list holds there. */
+const list = (v: unknown, most: number, long: number): string[] =>
+  (Array.isArray(v) ? v : []).map((x) => words(x, long)).filter(Boolean).slice(0, most);
+
+/**
+ * Who makes something, when the list does not say. A module's id starts with its maker ("allenheath-cq")
+ * and what it makes starts with the maker's name as people write it ("Allen & Heath CQ"). The name is as
+ * much of the second as spells the first. Failing that, the id's first part.
+ */
+export function makerFrom(id: string, makes: string): string {
+  const slug = id.split("-")[0];
+  let spelled = "";
+  for (let i = 0; i < makes.length && spelled.length < slug.length; i++) {
+    const c = makes[i].toLowerCase();
+    if (/[a-z0-9]/.test(c)) spelled += c;
+    if (spelled === slug) return makes.slice(0, i + 1).trim();
+    if (!slug.startsWith(spelled)) break;
+  }
+  return slug ? slug[0].toUpperCase() + slug.slice(1) : "";
+}
 
 /** The advice in a list, with anything malformed left out. */
 function advice(raw: unknown): Advice[] {
@@ -122,6 +150,10 @@ function entry(raw: unknown, signed: boolean): StoreModule | null {
     notes: words(m.notes, 600),
     advise: advice(m.advise),
     makes: words(m.makes, 160),
+    section: m.section === "skillfully" ? "skillfully" : "companion",
+    maker: words(m.maker, 60) || makerFrom(String(m.id), words(m.makes, 160)),
+    products: list(m.products, 12, 60),
+    kinds: list(m.kinds, 4, 30),
     recipe: Number.isInteger(m.recipe) && m.recipe >= 0 && m.recipe < 1e6 ? m.recipe : 0,
     package: {
       ...(elsewhere ? { url: m.package.url } : { path: m.package.path }),
