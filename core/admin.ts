@@ -62,6 +62,28 @@ export function adminApi(deps: AdminDeps) {
     })),
   });
 
+  /** Is b a later version than a? Versions are three numbers; anything else is not later. */
+  const later = (a: string, b: string) => {
+    const [x, y] = [a, b].map((v) => (/^(\d+)\.(\d+)\.(\d+)/.exec(v) ?? []).slice(1).map(Number));
+    if (x.length < 3 || y.length < 3) return false;
+    for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return y[i] > x[i];
+    return false;
+  };
+  /** What the store has for a device this hub added from it, when that is not what the hub is running. */
+  const newerFor = (id: string) => {
+    const origin = devices.record(id)?.origin;
+    const listed = origin?.store ? store.listed(origin.store.id) : undefined;
+    return listed && origin && listed.package.sha256 !== origin.sha256 ? { listed, origin } : undefined;
+  };
+  /** Where a device from the store came from, as the hub's record keeps it. */
+  const storeOrigin = (m: StoreModule, pkg: Package): Origin => ({
+    from: "store",
+    package: { id: pkg.about.id, name: pkg.about.name, version: pkg.about.version },
+    sha256: pkg.sha256,
+    added: new Date().toISOString(),
+    store: { id: m.id, repo: m.source.repo, commit: m.source.commit, license: m.license, tested: m.tested },
+  });
+
   /** Everything the admin page shows. */
   function overview(me: Person) {
     return {
@@ -74,6 +96,7 @@ export function adminApi(deps: AdminDeps) {
       drivers: [...devices.hosts.values()].map((h) => {
         const record = devices.record(h.id);
         const secret = new Set((h.settingsForm ?? []).filter((f) => f.kind === "secret").map((f) => f.id));
+        const other = newerFor(h.id);
         return {
           ...screens.describe(h),
           // What it asks for, as its manifest says. What it holds is under grants.
@@ -83,6 +106,17 @@ export function adminApi(deps: AdminDeps) {
           // Where it came from, when that is the store: its license, its source, how far it is proven.
           store: record.origin?.store
             ? { ...record.origin.store, proven: PROVEN[record.origin.store.tested] ?? "" }
+            : null,
+          // The store has another version of it than the one running here.
+          update: other
+            ? {
+              version: other.listed.version,
+              newer: later(other.origin.package?.version ?? "", other.listed.version),
+              proven: PROVEN[other.listed.tested] ?? "",
+              source: other.listed.source.repo,
+              // What a signed list allows in advance that this device does not hold yet.
+              also: advance(other.listed).filter((g) => !h.granted.includes(g)).map((g) => grantWords(g)),
+            }
             : null,
           form: h.settingsForm ?? null,
           // What is set now, so the form opens filled in. A secret is never sent back, only whether it is set.
@@ -303,6 +337,36 @@ export function adminApi(deps: AdminDeps) {
         return json({ ok: true });
       }
 
+      case "driver/update": {
+        // Replace a device from the store with the version the store lists now. Everything decided for it stays.
+        if (!devices.hosts.has(id)) return refuse(400, "No such device.");
+        if (!devices.record(id).origin?.store) return refuse(400, "This device did not come from the store.");
+        try {
+          // About to act on it, so the list is read now, not from a few minutes ago.
+          store.forget();
+          await store.list();
+        } catch (err) {
+          return refuse(400, sentence(err));
+        }
+        const other = newerFor(id);
+        if (!other) return refuse(400, "It is already the version the store lists.");
+        const no = await sure();
+        if (no) return no;
+        try {
+          const got = await store.download(other.listed.id);
+          const pkg = await readPackage(got.bytes);
+          if (pkg.about.id !== other.origin.package?.id) {
+            throw new Error("what the store lists under that name is no longer the same module");
+          }
+          const host = await devices.update(id, pkg, {
+            origin: { ...storeOrigin(got.module, pkg), added: other.origin.added },
+            alsoGranted: advance(got.module),
+          }, who);
+          return json({ ok: true, id: host.id, version: pkg.about.version });
+        } catch (err) {
+          return refuse(400, sentence(err));
+        }
+      }
       case "store/fetch": {
         // Download one package from the store and check it against the list. Nothing is added by this.
         if (!devices.canAdd) return refuse(400, NO_PLACE);
@@ -344,22 +408,11 @@ export function adminApi(deps: AdminDeps) {
         if (no) return no;
         try {
           const about = up.pkg.about;
-          const origin: Origin = {
-            from: up.from ? "store" : "file",
+          const origin: Origin = up.from ? storeOrigin(up.from, up.pkg) : {
+            from: "file",
             package: { id: about.id, name: about.name, version: about.version },
             sha256: up.pkg.sha256,
             added: new Date().toISOString(),
-            ...(up.from
-              ? {
-                store: {
-                  id: up.from.id,
-                  repo: up.from.source.repo,
-                  commit: up.from.source.commit,
-                  license: up.from.license,
-                  tested: up.from.tested,
-                },
-              }
-              : {}),
           };
           // From the store, it holds what a signed list allows in advance and starts with the store's settings.
           // From a file, it holds nothing unless the superuser chose otherwise.

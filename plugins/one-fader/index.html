@@ -287,7 +287,7 @@
       const toHub = (m) => parent.postMessage(m, "*");
 
       let linked = false, board = null, value = MIN, held = MIN;
-      let dragging = false, quietUntil = 0, lastSent = 0, queued = null, ref = 0;
+      let dragging = false, quietUntil = 0, lastSent = 0, queued = null, waiting = null, ref = 0, answered = 0;
 
       const toPos = (db) =>
         db <= KNEE ? (db - MIN) / (KNEE - MIN) * KNEE_AT : KNEE_AT + (db - KNEE) / (MAX - KNEE) * (1 - KNEE_AT);
@@ -330,16 +330,19 @@
         quietUntil = performance.now() + 400;
         const now = performance.now();
         if (now - lastSent < 33) {
-          if (queued === null) {
-            setTimeout(() => {
+          queued = db;
+          if (!waiting) {
+            waiting = setTimeout(() => {
+              waiting = null;
               const v = queued;
               queued = null;
               if (v !== null) push(v);
             }, 33 - (now - lastSent));
           }
-          queued = db;
           return;
         }
+        // Anything still waiting to go is older than this. It must never be sent after it.
+        queued = null;
         push(db);
       }
       function push(db) {
@@ -369,6 +372,12 @@
       });
       const release = () => {
         dragging = false;
+        // While the thumb was down the board's answers were not shown. If it has already answered the last
+        // thing sent, show what it holds now. Otherwise the answer still to come will.
+        if (queued === null && answered === ref) {
+          value = held;
+          paint();
+        }
       };
       fader.addEventListener("pointerup", release);
       fader.addEventListener("pointercancel", release);
@@ -499,6 +508,7 @@
           if (!m.full) askLogSoon();
         }
         if (m.type === "ack") {
+          if (typeof m.ref === "number" && m.ref > answered) answered = m.ref;
           if (m.ok && !m.superseded) held = m.value;
           if (m.ok && !m.superseded && m.ref === ref && !dragging) {
             value = m.value;

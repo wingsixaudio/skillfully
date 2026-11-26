@@ -161,6 +161,17 @@ exact address comes before advice about the kind of place, and an entry's own ad
 general advice. "We expect this" starts the box ticked and "we advise against" starts it unticked. Either way
 the superuser confirms with their own PIN, and nothing is allowed by advice alone.
 
+**A signed list says when it was made, and a hub does not go backwards.** A hub remembers the date of the
+newest signed list it has read, across restarts, and refuses one made before it. Without that, someone who
+could change what the store's address serves could hand out last month's list with last month's real
+signature, and bring back whatever it allowed.
+
+**An update replaces the package and nothing else.** A device from the store is offered the version the store
+lists now. Taking it asks for the superuser's PIN. The device keeps its id, its name, its settings, its mode,
+the screens it was given to, and everything allowed or refused; it gains only what a signed list now allows in
+advance, and that is said before the PIN is asked for. The new version is unpacked and checked beside the
+running one first, so a version this hub cannot run never stops a device that works.
+
 **A dropped-in module starts in Listen mode.** It connects and reports, and the hub sends it nothing until
 someone decides it may act.
 
@@ -280,12 +291,12 @@ on each system, because a test that fails one time in twenty is found by repetit
 - **The store's key has one keeper.** The private half is a secret of the store repository's publishing
   environment, made on its owner's computer. Nobody else can sign a list, and if it is lost a new key has to
   reach every hub through a new version of the hub.
-- **An old signed list is still a signed list.** Someone who could change what the store's address serves
-  could hand out last month's list with last month's signature. A hub does not yet remember the newest list it
-  has seen.
 - **Advice is about where, not what.** The store can advise on a kind of place or one address. It cannot yet
   say "this action is the dangerous one".
-- **A hub does not notice a newer version in the store.** There is no update, only adding again.
+- **Updating is one device at a time, by hand.** A hub notices a newer version and offers it. Nothing updates
+  by itself, and a device added from a file has no update except adding it again.
+- **A version cannot be gone back to.** The hub keeps no copy of the version it replaced. If the store lists
+  an older one again, that can be taken; otherwise the newer one stays.
 - **The first real download has not happened.** The tests use a stand-in store on the same computer.
 - **A question an admin cannot judge.** "Send to every device on your network, port 9999" is worded plainly
   and carries a warning, but someone still has to decide. The reviewed list is what will answer it for them.
