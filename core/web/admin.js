@@ -423,6 +423,9 @@ function drawDrivers() {
             style: "margin:0 0 6px",
             textContent: d.update.newer
               ? "The store has a newer version, " + d.update.version + "."
+              : d.update.rebuilt
+              ? "The store has packaged version " + d.update.version +
+                " again, with a fix to how it is put together."
               : "The store now lists version " + d.update.version + ", which is not the one running here.",
           }),
         );
@@ -882,16 +885,36 @@ $("addDevice").onclick = () => {
       el("p", { className: "dim", textContent: "Looking at the store" }),
     );
     pick.append(shelf);
-    call("/admin/api/store").then((r) => {
-      shelf.innerHTML = "";
+    // The store may list hundreds of things. The shelf shows a few, and typing finds the rest.
+    const find = el("input", {
+      id: "shelfFind",
+      type: "search",
+      placeholder: "Find a device by its name or its maker",
+      hidden: true,
+    });
+    find.setAttribute("aria-label", "Find a device in the store");
+    const list = el(
+      "div",
+      { id: "shelfList" },
+      el("p", { className: "dim", textContent: "Looking at the store" }),
+    );
+    shelf.innerHTML = "";
+    shelf.append(find, list);
+    let asked = 0;
+    const look = async () => {
+      const mine = ++asked;
+      const r = await call("/admin/api/store?find=" + encodeURIComponent(find.value.trim()));
+      if (mine !== asked) return; // something newer was typed while this was on its way
+      list.innerHTML = "";
       if (!r.on) {
-        return shelf.append(
+        return list.append(
           el("p", { className: "dim", textContent: "This hub is not set up to use a store." }),
         );
       }
-      if (r.message) shelf.append(el("p", { className: "dim", textContent: r.message }));
+      find.hidden = !(r.total > 5);
+      if (r.message) list.append(el("p", { className: "dim", textContent: r.message }));
       else if (!r.signed) {
-        shelf.append(
+        list.append(
           el("p", {
             className: "dim",
             id: "unsigned",
@@ -899,8 +922,16 @@ $("addDevice").onclick = () => {
               "This hub cannot check who published this list. You can add from it, and each thing will ask you before it reaches anything.",
           }),
         );
+      } else if (!r.total) {
+        list.append(el("p", { className: "dim", textContent: "The store has nothing listed yet." }));
       } else if (!r.modules.length) {
-        shelf.append(el("p", { className: "dim", textContent: "The store has nothing listed yet." }));
+        list.append(
+          el("p", {
+            className: "dim",
+            textContent:
+              "Nothing in the store matches that. A module that is not here can still be added from a file.",
+          }),
+        );
       }
       for (const m of r.modules || []) {
         const b = el("button", { type: "button", className: "small quiet", textContent: "Choose" });
@@ -910,7 +941,7 @@ $("addDevice").onclick = () => {
           if (!got.ok) return say("dlgMsg", got.message, "bad");
           chosen(got);
         };
-        shelf.append(
+        list.append(
           el(
             "div",
             { className: "item shelfItem" },
@@ -921,7 +952,22 @@ $("addDevice").onclick = () => {
           ),
         );
       }
-    });
+      if (r.found > r.modules.length) {
+        list.append(
+          el("p", {
+            className: "help",
+            id: "shelfMore",
+            textContent: "Showing " + r.modules.length + " of " + r.found + ". Type to narrow it down.",
+          }),
+        );
+      }
+    };
+    let typing;
+    find.oninput = () => {
+      clearTimeout(typing);
+      typing = setTimeout(look, 250);
+    };
+    look();
 
     // From a file.
     pick.append(el("h3", { textContent: "From a file", style: "font-size:15px;margin:18px 0 0" }));

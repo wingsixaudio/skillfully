@@ -36,10 +36,22 @@ export interface StoreModule {
   notes: string;
   /** What the store's reviewers say about things it may ask for. */
   advise: Advice[];
-  package: { path: string; sha256: string; bytes: number };
+  /** Who makes the device and what it is called, as the package says. Something to search by. */
+  makes: string;
+  /**
+   * Which way of building packages made this one. With the source commit it says exactly which package
+   * this is: the same commit built the same way is the same package, however often the store publishes.
+   */
+  recipe: number;
+  /**
+   * Where the package is: a path beside the list, or, in a list the store signed, any https address.
+   * Either way what arrives must match the checksum.
+   */
+  package: { path?: string; url?: string; sha256: string; bytes: number };
 }
 
-const LIST_MAX = 2 * 1024 * 1024;
+const LIST_MAX = 16 * 1024 * 1024;
+const LISTED_MAX = 20000;
 const PACKAGE_MAX = 64 * 1024 * 1024;
 const KEPT_MS = 5 * 60 * 1000;
 const GRANT =
@@ -62,7 +74,7 @@ function advice(raw: unknown): Advice[] {
 }
 
 /** One entry of the list, if it is one this hub can use. Anything malformed is left out, not repaired. */
-function entry(raw: unknown): StoreModule | null {
+function entry(raw: unknown, signed: boolean): StoreModule | null {
   // deno-lint-ignore no-explicit-any
   const m = raw as any;
   if (!m || typeof m !== "object") return null;
@@ -75,9 +87,12 @@ function entry(raw: unknown): StoreModule | null {
   ) {
     return null;
   }
-  if (
-    !/^packages\/[A-Za-z0-9._-]+\.tgz$/.test(String(m.package?.path)) || String(m.package.path).includes("..")
-  ) return null;
+  // Beside the list, or somewhere a signed list names. A list nobody signed cannot send this hub anywhere.
+  const beside = /^packages\/[A-Za-z0-9._/-]+\.tgz$/.test(String(m.package?.path)) &&
+    !String(m.package.path).includes("..") && !String(m.package.path).includes("//");
+  const elsewhere = signed && typeof m.package?.url === "string" && m.package.url.length <= 500 &&
+    /^https:\/\/[A-Za-z0-9.-]+(:[0-9]{1,5})?\/[A-Za-z0-9._~%\/+@=-]+$/.test(m.package.url);
+  if (!beside && !elsewhere) return null;
   if (!/^[0-9a-f]{64}$/.test(String(m.package?.sha256))) return null;
   if (typeof m.package.bytes !== "number" || m.package.bytes <= 0 || m.package.bytes > PACKAGE_MAX) {
     return null;
@@ -106,7 +121,13 @@ function entry(raw: unknown): StoreModule | null {
     tested: m.tested,
     notes: words(m.notes, 600),
     advise: advice(m.advise),
-    package: { path: m.package.path, sha256: m.package.sha256, bytes: m.package.bytes },
+    makes: words(m.makes, 160),
+    recipe: Number.isInteger(m.recipe) && m.recipe >= 0 && m.recipe < 1e6 ? m.recipe : 0,
+    package: {
+      ...(elsewhere ? { url: m.package.url } : { path: m.package.path }),
+      sha256: m.package.sha256,
+      bytes: m.package.bytes,
+    },
   };
 }
 
@@ -221,7 +242,9 @@ export class Store {
       if (made < seen) throw new Error(OLDER);
       if (!(made <= seen)) this.#newest?.set(new Date(made).toISOString());
     }
-    this.#list = parsed.modules.slice(0, 5000).map(entry).filter((m): m is StoreModule => m !== null);
+    this.#list = parsed.modules.slice(0, LISTED_MAX).map((m) => entry(m, this.signed)).filter((
+      m,
+    ): m is StoreModule => m !== null);
     this.#general = advice(parsed.advise);
     this.#readAt = Date.now();
     return this.#list;
@@ -268,11 +291,14 @@ export class Store {
     if (!module) throw new Error("The store no longer lists that.");
     let bytes: Uint8Array;
     try {
-      // The path was checked to stay beside the list, so this cannot be pointed anywhere else.
-      const res = await fetch(new URL(module.package.path, this.#url), {
-        signal: AbortSignal.timeout(30000),
-        redirect: "error",
-      });
+      // A path was checked to stay beside the list, so it cannot be pointed anywhere else. An address is
+      // only ever taken from a list the store signed, and may pass the request on to where the file is kept.
+      const res = module.package.url
+        ? await fetch(module.package.url, { signal: AbortSignal.timeout(60000), redirect: "follow" })
+        : await fetch(new URL(module.package.path!, this.#url), {
+          signal: AbortSignal.timeout(30000),
+          redirect: "error",
+        });
       if (!res.ok) throw new Error(`it answered ${res.status}`);
       bytes = await limited(res, PACKAGE_MAX);
     } catch {

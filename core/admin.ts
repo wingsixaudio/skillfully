@@ -16,6 +16,8 @@ import type { Store, StoreModule } from "./store.ts";
 
 const UPLOAD_MAX = 64 * 1024 * 1024;
 const UPLOAD_KEPT_MS = 10 * 60 * 1000;
+/** How many things the store's shelf shows at once. The rest are found by typing. */
+const SHELF_PAGE = 30;
 const NO_PLACE = "This hub was started without a place to keep added devices.";
 
 /** How far something from the store has been proven, in words. */
@@ -52,6 +54,7 @@ export function adminApi(deps: AdminDeps) {
     source: m.source.repo,
     proven: PROVEN[m.tested],
     notes: m.notes,
+    makes: m.makes,
     signed: store.signed,
     advance: advance(m).map((g) => grantWords(g)),
     // What its reviewers say about things it may ask for later. Advice only: the superuser decides.
@@ -73,7 +76,12 @@ export function adminApi(deps: AdminDeps) {
   const newerFor = (id: string) => {
     const origin = devices.record(id)?.origin;
     const listed = origin?.store ? store.listed(origin.store.id) : undefined;
-    return listed && origin && listed.package.sha256 !== origin.sha256 ? { listed, origin } : undefined;
+    if (!listed || !origin?.store) return undefined;
+    // Which package something is: its source at one commit, built one way. Not its bytes, which differ
+    // from one build to the next, so a store that only built the same thing again offers nothing.
+    const other = listed.source.commit !== origin.store.commit;
+    const rebuilt = !other && listed.recipe > (origin.store.recipe ?? 0);
+    return other || rebuilt ? { listed, origin, rebuilt } : undefined;
   };
   /** Where a device from the store came from, as the hub's record keeps it. */
   const storeOrigin = (m: StoreModule, pkg: Package): Origin => ({
@@ -81,7 +89,14 @@ export function adminApi(deps: AdminDeps) {
     package: { id: pkg.about.id, name: pkg.about.name, version: pkg.about.version },
     sha256: pkg.sha256,
     added: new Date().toISOString(),
-    store: { id: m.id, repo: m.source.repo, commit: m.source.commit, license: m.license, tested: m.tested },
+    store: {
+      id: m.id,
+      repo: m.source.repo,
+      commit: m.source.commit,
+      license: m.license,
+      tested: m.tested,
+      recipe: m.recipe,
+    },
   });
 
   /** Everything the admin page shows. */
@@ -112,6 +127,8 @@ export function adminApi(deps: AdminDeps) {
             ? {
               version: other.listed.version,
               newer: later(other.origin.package?.version ?? "", other.listed.version),
+              // The same source, packaged again by the store: a fix to the packaging, not to the module.
+              rebuilt: other.rebuilt,
               proven: PROVEN[other.listed.tested] ?? "",
               source: other.listed.source.repo,
               // What a signed list allows in advance that this device does not hold yet.
@@ -160,15 +177,34 @@ export function adminApi(deps: AdminDeps) {
     };
   }
 
-  async function shelf(): Promise<Response> {
+  /** What the store lists, a page of it at a time: the whole list is never sent to the page. */
+  async function shelf(find: string): Promise<Response> {
     if (!store.on) return json({ ok: true, on: false, modules: [] });
     const signed = store.signed;
     try {
-      return json({ ok: true, on: true, signed, modules: (await store.list()).map(fromStore) }, 200, {
-        "cache-control": "no-store",
-      });
+      const all = await store.list();
+      // Every word typed has to be somewhere in what the thing is called, does, or is made by.
+      const words = find.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
+      const found = words.length
+        ? all.filter((m) => {
+          const text = `${m.name} ${m.description} ${m.makes} ${m.id}`.toLowerCase();
+          return words.every((w) => text.includes(w));
+        })
+        : all;
+      return json(
+        {
+          ok: true,
+          on: true,
+          signed,
+          total: all.length,
+          found: found.length,
+          modules: found.slice(0, SHELF_PAGE).map(fromStore),
+        },
+        200,
+        { "cache-control": "no-store" },
+      );
     } catch (err) {
-      return json({ ok: true, on: true, signed, modules: [], message: sentence(err) });
+      return json({ ok: true, on: true, signed, total: 0, found: 0, modules: [], message: sentence(err) });
     }
   }
 
@@ -444,7 +480,9 @@ export function adminApi(deps: AdminDeps) {
   /** Answer one request under /admin/api/. The caller has already made sure a superuser is asking. */
   return async function handle(req: Request, path: string, me: Person, origin: string): Promise<Response> {
     if (req.method === "GET") {
-      if (path === "store") return await shelf();
+      if (path === "store") {
+        return await shelf((new URL(req.url).searchParams.get("find") ?? "").slice(0, 80));
+      }
       if (path === "all") return json(overview(me), 200, { "cache-control": "no-store" });
       return refuse(404, "Not found.");
     }

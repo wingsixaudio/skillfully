@@ -136,6 +136,7 @@ Deno.test("a device added from the store holds what the store allows in advance,
       commit: "0".repeat(40),
       license: "MIT",
       tested: "pretend-device",
+      recipe: 0,
     });
     const logged = h.hub.log.read({ type: "skillfully.plugin.added", limit: 5 })[0];
     assert(
@@ -431,6 +432,11 @@ const laterLamp = (version: string, more: (theirs: Record<string, unknown>) => v
 const listed = (bytes: Uint8Array, version: string, more: Record<string, unknown> = {}) =>
   listing({
     version,
+    // A later version is its author's source at a later commit.
+    source: {
+      repo: "https://github.com/wingsixaudio/skillfully",
+      commit: createHash("sha256").update(version).digest("hex").slice(0, 40),
+    },
     package: {
       path: `packages/lamp-${version}.tgz`,
       sha256: createHash("sha256").update(bytes).digest("hex"),
@@ -462,6 +468,24 @@ Deno.test("a hub notices a newer version in the store, and updating keeps everyt
     assertEquals((await h.device(id)).update, null, "it is what the store lists");
     assert(!(await update(OWNER_PIN)).body.ok, "there is nothing to update to");
 
+    // The store publishes again and the package comes out with different bytes, as builds do. It is the
+    // same source built the same way, so it is the same package, and nothing is offered.
+    const again = await repacked(PACKAGE, (files) => (files["pkg/built-at.txt"] = "another day"));
+    await store.publish({
+      modules: [listing({
+        package: {
+          path: "packages/again.tgz",
+          sha256: createHash("sha256").update(again).digest("hex"),
+          bytes: again.length,
+        },
+      })],
+      packages: { "packages/again.tgz": again },
+    });
+    h.hub.store.forget();
+    await (await h.get("/admin/api/store")).body;
+    assertEquals((await h.device(id)).update, null, "built again is not a newer version");
+    assert(!(await update(OWNER_PIN)).body.ok);
+
     // The store publishes a newer version, and now also allows it to open ports.
     const v2 = await laterLamp("1.1.0");
     await store.publish({
@@ -479,6 +503,7 @@ Deno.test("a hub notices a newer version in the store, and updating keeps everyt
       newer: true,
       proven: "It has been used with the real device.",
       source: "https://github.com/wingsixaudio/skillfully",
+      rebuilt: false,
       also: ["Open ports on this computer, so devices can answer it"],
     });
     // Seeing it changes nothing. Taking it asks for the superuser's own PIN.
@@ -537,6 +562,28 @@ Deno.test("a hub notices a newer version in the store, and updating keeps everyt
     assertEquals(host().status, "running");
     assertEquals(h.hub.devices.record(id), after);
 
+    // The store fixes how it packages things and builds the same source again. That is offered, and said
+    // for what it is.
+    const repackaged = await repacked(
+      v2,
+      (files) => (files["pkg/LICENSES-ALSO-BUNDLED.txt"] = "a notice that was missing"),
+    );
+    await store.publish({
+      modules: [listed(repackaged, "1.1.0", { network: ["{host}:{port}", "listen"], recipe: 2 })],
+      packages: { "packages/lamp-1.1.0.tgz": repackaged },
+    });
+    h.hub.store.forget();
+    await (await h.get("/admin/api/store")).body;
+    const fix = (await h.device(id)).update;
+    assertEquals([fix.version, fix.newer, fix.rebuilt], ["1.1.0", false, true]);
+    assert((await update(OWNER_PIN)).body.ok);
+    assertEquals(h.hub.devices.record(id).origin?.store?.recipe, 2);
+    assertEquals(
+      h.hub.devices.record(id).origin?.sha256,
+      createHash("sha256").update(repackaged).digest("hex"),
+    );
+    assertEquals((await h.device(id)).update, null);
+
     // Something added from a file has no store to ask.
     const seen = await h.send(PACKAGE);
     const byHand = await h.post("/admin/api/module/add", {
@@ -591,5 +638,112 @@ Deno.test("a hub refuses a signed list that is older than one it has read, even 
     assertEquals(kept, "2026-11-25T10:00:00.000Z");
   } finally {
     await store.close();
+  }
+});
+
+Deno.test("the shelf is found by typing, a page at a time, however much the store lists", async () => {
+  const makers = ["Allen & Heath", "Behringer", "Blackmagic Design", "Yamaha"];
+  const modules = Array.from({ length: 120 }, (_, i) =>
+    listing({
+      id: `module-${i}`,
+      name: `${makers[i % 4]} thing ${i}`,
+      description: i === 77 ? "Controls the WING soundboard over the network." : "Controls a thing.",
+      makes: i % 4 === 1 ? "Behringer X32, WING" : makers[i % 4],
+    }));
+  const store = await pretendStore({ modules });
+  const h = await hubTrusting(store.url);
+  const shelf = async (find = "") => (await h.get(`/admin/api/store?find=${encodeURIComponent(find)}`)).body;
+  try {
+    const first = await shelf();
+    assertEquals(
+      [first.total, first.found, first.modules.length],
+      [120, 120, 30],
+      "the page is never sent it all",
+    );
+    // Every word typed has to be there: in its name, what it does, or who makes it. Capitals do not matter.
+    const wing = await shelf("wing SOUNDBOARD");
+    assertEquals(wing.modules.map((m: { id: string }) => m.id), ["module-77"]);
+    const behringer = await shelf("x32");
+    assertEquals([behringer.found, behringer.modules.length], [30, 30], "found by what it is made for");
+    assertEquals((await shelf("yamaha thing 3")).modules.map((m: { id: string }) => m.id), [
+      "module-3",
+      "module-23",
+      "module-31",
+      "module-35",
+      "module-39",
+      "module-43",
+      "module-63",
+      "module-83",
+      "module-103",
+    ]);
+    assertEquals((await shelf("no such maker")).modules, []);
+    assertEquals((await shelf("no such maker")).total, 120);
+    // What is typed is only ever compared, never anything more.
+    assertEquals((await shelf('"><script>alert(1)</script> .* \\')).found, 0);
+  } finally {
+    await h.close();
+    await store.close();
+  }
+});
+
+Deno.test("only a list the store signed can say where else its packages are kept", async () => {
+  const elsewhere = "https://packages.example/releases/download/pkg-lamp/abc-r1.tgz";
+  const sha = SHA, bytes = PACKAGE.length;
+  const modules = [
+    listing({ id: "kept-elsewhere", package: { url: elsewhere, sha256: sha, bytes } }),
+    listing({ id: "not-https", package: { url: "http://packages.example/x.tgz", sha256: sha, bytes } }),
+    listing({
+      id: "with-a-password",
+      package: { url: "https://me:secret@packages.example/x.tgz", sha256: sha, bytes },
+    }),
+    listing({
+      id: "on-this-network",
+      package: { url: "https://192.168.1.1/x.tgz?then=http://x", sha256: sha, bytes },
+    }),
+    listing({ id: "nowhere", package: { sha256: sha, bytes } }),
+  ];
+  const signed = await pretendStore({ modules });
+  const unsigned = await pretendStore({ modules, signedBy: null });
+  // The one address outside this computer is answered here, so the test reaches nothing real.
+  const real = globalThis.fetch;
+  const asked: { url: string; redirect?: string }[] = [];
+  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (!url.startsWith("https://packages.example/")) return real(input, init);
+    asked.push({ url, redirect: init?.redirect });
+    return Promise.resolve(new Response(PACKAGE as BodyInit));
+  }) as typeof fetch;
+  try {
+    const trusting = new Store(signed.url, [KEY.publicKey]);
+    assertEquals(
+      (await trusting.list()).map((m) => m.id),
+      ["kept-elsewhere"],
+      "and only at a plain https address",
+    );
+    const got = await trusting.download("kept-elsewhere");
+    assertEquals(createHash("sha256").update(got.bytes).digest("hex"), SHA);
+    assertEquals(asked, [{ url: elsewhere, redirect: "follow" }]);
+
+    // What arrives from there is held to the checksum like anything else.
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
+      String(input).startsWith("https://packages.example/")
+        ? Promise.resolve(new Response("something else"))
+        : real(input, init)) as typeof fetch;
+    const wrong = await new Store(signed.url, [KEY.publicKey]).download("kept-elsewhere").catch((e) =>
+      e.message
+    );
+    assert(String(wrong).includes("not what the store says it built"), String(wrong));
+
+    // A list nobody signed cannot send a hub anywhere but beside itself.
+    assertEquals(
+      (await new Store(unsigned.url).list()).map((m) =>
+        m.id
+      ),
+      [],
+    );
+  } finally {
+    globalThis.fetch = real;
+    await signed.close();
+    await unsigned.close();
   }
 });
