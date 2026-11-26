@@ -2,7 +2,7 @@ import { type Hub, type PluginConfig, startHub } from "../core/hub.ts";
 import type { DriverChoices } from "../core/devices.ts";
 import type { PluginHost } from "../core/host.ts";
 import type { LogEntry } from "../core/log.ts";
-import { readPackage, writePackage } from "../core/packages.ts";
+import { readPackage, readTar, writePackage } from "../core/packages.ts";
 import { here } from "../core/paths.ts";
 
 export const ROOT = here("..", import.meta.url).replace(/\/$/, "");
@@ -101,6 +101,51 @@ export async function unpacked(packagePath: string, dataDir: string, choices: Dr
   const pkg = await readPackage(await Deno.readFile(packagePath));
   const written = await writePackage(pkg, dataDir);
   return { ...written, pkg, config: { dir: written.dir, ...choices } as PluginConfig };
+}
+
+/** A .tar archive of these files. type "2" makes each a link instead of a file. */
+export function tar(files: Record<string, string>, type = "0"): Uint8Array {
+  const enc = new TextEncoder();
+  const blocks: Uint8Array[] = [];
+  for (const [name, text] of Object.entries(files)) {
+    const body = enc.encode(text);
+    const head = new Uint8Array(512);
+    head.set(enc.encode(name).subarray(0, 100), 0);
+    head.set(enc.encode("0000644\0"), 100);
+    head.set(enc.encode(body.length.toString(8).padStart(11, "0") + "\0"), 124);
+    head[156] = type.charCodeAt(0);
+    head.set(enc.encode("ustar\0"), 257);
+    const padded = new Uint8Array(Math.ceil(body.length / 512) * 512);
+    padded.set(body);
+    blocks.push(head, padded);
+  }
+  blocks.push(new Uint8Array(1024));
+  const out = new Uint8Array(blocks.reduce((n, b) => n + b.length, 0));
+  let at = 0;
+  for (const b of blocks) {
+    out.set(b, at);
+    at += b.length;
+  }
+  return out;
+}
+
+export async function gzipped(bytes: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/** A package like this one, with its files changed: a newer version of a module, or a broken one. */
+export async function repacked(
+  packed: Uint8Array,
+  change: (files: Record<string, string>) => void,
+): Promise<Uint8Array> {
+  const stream = new Blob([packed as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const files: Record<string, string> = {};
+  for (const f of readTar(new Uint8Array(await new Response(stream).arrayBuffer()))) {
+    files[f.path] = new TextDecoder().decode(f.data);
+  }
+  change(files);
+  return await gzipped(tar(files));
 }
 
 /** A stand-in for the lamp the test module drives: it keeps a power state and a level, and answers every line. */

@@ -416,6 +416,17 @@ function drawDrivers() {
           ".",
         ),
       );
+      if (d.update) {
+        item.append(
+          el("p", {
+            className: "help update",
+            style: "margin:0 0 6px",
+            textContent: d.update.newer
+              ? "The store has a newer version, " + d.update.version + "."
+              : "The store now lists version " + d.update.version + ", which is not the one running here.",
+          }),
+        );
+      }
     } else if (d.module) {
       item.append(
         el("p", {
@@ -466,6 +477,38 @@ function drawDrivers() {
     if (d.asks.length) {
       const b = btn("See what it asks for", () => openAccess(d.id));
       b.className = "small";
+    }
+    if (d.update) {
+      btn(d.update.newer ? "Update to " + d.update.version : "Change to " + d.update.version, () =>
+        ask(
+          (d.update.newer ? "Update " : "Change ") + d.name + " to version " + d.update.version,
+          (x) => {
+            const facts = el("ul", { className: "facts" });
+            facts.append(
+              el("li", {
+                textContent: "It keeps its name, its settings, and everything you allowed or refused.",
+              }),
+              el("li", { textContent: d.update.proven }),
+            );
+            if (d.update.also.length) {
+              facts.append(
+                el("li", {
+                  textContent: "The store now also lets it, without asking you: " + d.update.also.map((w) =>
+                    w.charAt(0).toLowerCase() + w.slice(1)
+                  ).join("; ") + ".",
+                }),
+              );
+            }
+            facts.append(
+              el("li", { textContent: "If the new version reaches for anything else, you are asked first." }),
+              el("li", { textContent: "It stops for a moment while it is replaced." }),
+            );
+            x.append(facts);
+            confirmField(x);
+          },
+          () => call("/admin/api/driver/update", { id: d.id, confirm: $("confirm").value }),
+          d.update.newer ? "Update" : "Change",
+        ));
     }
     if (d.added || d.form) btn("Settings", () => openSettings(d.id));
     if (!d.asks.length && d.grants.length) btn("Network access", () => openAccess(d.id));

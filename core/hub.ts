@@ -19,6 +19,7 @@ import { Capabilities, CAPABILITIES_DIR } from "./capabilities.ts";
 import { Devices, type DriverChoices } from "./devices.ts";
 import type { PluginHost } from "./host.ts";
 import { cookieOf, go, json, outcome, readJson, refuse, setCookie, TYPES } from "./http.ts";
+import { Kept } from "./kept.ts";
 import { Log } from "./log.ts";
 import { adminPage, authPage, notePage, pageFile, pagePolicy, shellPage } from "./pages.ts";
 import { realPath } from "./paths.ts";
@@ -49,6 +50,8 @@ export interface HubOptions {
    * the list is nobody's word: things can be added from it, and it answers nothing in advance.
    */
   storeKeys?: string[];
+  /** How often the store's list is read again, in seconds. Five minutes unless told otherwise. */
+  storeEverySeconds?: number;
 }
 
 export interface Hub {
@@ -60,6 +63,8 @@ export interface Hub {
   capabilities: Capabilities;
   /** The drivers, and what the hub holds for each. */
   devices: Devices;
+  /** The plugin store, as this hub reads it. */
+  store: Store;
   /** Drivers, by id. */
   hosts: Map<string, PluginHost>;
   screens: Map<string, Screen>;
@@ -127,14 +132,14 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   }
   await devices.startAll();
 
-  const admin = adminApi({
-    accounts,
-    approvals,
-    devices,
-    screens,
-    store: new Store(opts.storeUrl, opts.storeKeys),
-    taken,
-  });
+  // The newest signed list this hub has read from this store is remembered, so an older one is refused.
+  const kept = new Kept(db);
+  const newest = `store.newest ${opts.storeUrl ?? ""}`;
+  const store = new Store(opts.storeUrl, opts.storeKeys, {
+    get: () => kept.get(newest),
+    set: (made) => kept.set(newest, made),
+  }, opts.storeEverySeconds);
+  const admin = adminApi({ accounts, approvals, devices, screens, store, taken });
 
   const publicRule = (superuser: boolean) => {
     const p = accounts.policy();
@@ -356,6 +361,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     approvals,
     capabilities,
     devices,
+    store,
     hosts,
     screens: screens.all,
     skills,

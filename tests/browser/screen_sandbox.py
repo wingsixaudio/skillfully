@@ -9,7 +9,7 @@ By hand, against a hub that nobody has claimed yet:
     BROWSER=chromium python3 tests/browser/screen_sandbox.py http://127.0.0.1:8099 <code> [folder for screenshots]
 Set CHROME_PATH to use a Chrome that is already installed. Exits 0 when every check passes.
 """
-import asyncio, json, os, sys
+import asyncio, json, os, sys, urllib.request
 from playwright.async_api import async_playwright
 
 base, claim = sys.argv[1].rstrip("/"), sys.argv[2]
@@ -247,6 +247,23 @@ async def main():
         await lamp_item.get_by_role("button", name="Switch to Act").click()
         await owner.fill("#confirm", OWNER_PIN); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
         if shots: await lamp_item.scroll_into_view_if_needed(); await owner.screenshot(path=f"{shots}/7-device.png")
+
+        # --- The store publishes a newer version. The hub notices, and updating keeps what was decided ---
+        check("a device at the store's version is not offered an update", await lamp_item.get_by_role("button", name="Update to 1.1.0").count() == 0)
+        # Straight to this computer, whatever proxy the machine running the test is set up with.
+        urllib.request.build_opener(urllib.request.ProxyHandler({})).open(f"http://127.0.0.1:{os.environ.get('STORE_PORT', '7008')}/publish-newer").read()
+        await lamp_item.locator(".update").wait_for(timeout=20000)
+        check("the page says the store has a newer version", "The store has a newer version, 1.1.0" in await lamp_item.inner_text(), await lamp_item.inner_text())
+        await lamp_item.get_by_role("button", name="Update to 1.1.0").click()
+        told = await owner.locator("#dlgBody").inner_text()
+        check("updating says what stays and what happens", "keeps its name, its settings, and everything you allowed" in told and "used with the real device" in told and "stops for a moment" in told, told)
+        await owner.fill("#confirm", OWNER_PIN)
+        if shots: await owner.screenshot(path=f"{shots}/7b-update.png", full_page=True)
+        await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await lamp_item.locator(".update").wait_for(state="detached", timeout=20000)
+        await lamp_item.locator(".status.ok").wait_for(timeout=20000)
+        card = await lamp_item.inner_text()
+        check("after updating it is the new version, connected, still acting, still on its screen", "1.1.0" in card and "Connected to its device" in card and "Act" in card and "Used by: Controls" in card, card)
 
         # --- The same module from a file, which nobody has answered for: it has to ask ---
         await owner.click("#addDevice")
