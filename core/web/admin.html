@@ -55,6 +55,28 @@
         <section class="card"
           id="secDevices"><h2>Devices</h2><p class="dim">Each device starts out listening: the hub watches it and sends it nothing until you let it act.</p><p id="oneDevice" hidden><a href="/admin/devices" data-go="1">All devices</a></p><p class="msg bad" id="oneDeviceGone" hidden>There is no device at this address. These are the ones on this hub.</p><div id="drivers"></div><button class="small quiet" id="addDevice" style="margin-top:14px" hidden>Add a device</button><p class="msg" id="driversMsg" role="status"></p></section>
       </div>
+      <div class="place" data-place="devices/add" hidden>
+        <section class="card" id="catalog">
+          <p><a href="/admin/devices" data-go="1">All devices</a></p>
+          <h2>Add a device</h2>
+          <input id="catFind" type="search" placeholder="What do you have?"
+            aria-label="Find a device by its name, its maker or what kind of thing it is" autofocus>
+          <p class="dim" id="catNote" style="margin-top:12px"></p>
+          <div id="catNative" hidden>
+            <h3>Made for Skillfully</h3>
+            <div id="catNativeList"></div>
+          </div>
+          <div id="catCompanion" hidden>
+            <h3>Bitfocus Companion modules <span class="dim" id="catCount"></span></h3>
+            <p
+              class="dim">Connections for hundreds of products, written by the Companion community and published by <a href="https://bitfocus.io/companion" target="_blank" rel="noopener noreferrer">Bitfocus</a>. Skillfully runs them as they are, and asks you before one reaches anything.</p>
+            <div id="catKinds" class="row"></div>
+            <div id="catList"></div>
+          </div>
+          <p
+            style="margin-top:18px"><button type="button" class="small quiet" id="catFile">Add from a file</button></p>
+        </section>
+      </div>
       <div class="place" data-place="hub" hidden>
         <section class="card" id="secSignIn">
           <h2>Signing in</h2>

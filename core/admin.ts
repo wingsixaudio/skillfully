@@ -57,6 +57,12 @@ export function adminApi(deps: AdminDeps) {
     proven: PROVEN[m.tested],
     notes: m.notes,
     makes: m.makes,
+    section: m.section,
+    maker: m.maker,
+    products: m.products,
+    kinds: m.kinds,
+    // Whether a device on this hub already came from this entry.
+    here: [...devices.hosts.keys()].some((id) => devices.record(id).origin?.store?.id === m.id),
     signed: store.signed,
     advance: advance(m).map((g) => grantWords(g)),
     // What its reviewers say about things it may ask for later. Advice only: the superuser decides.
@@ -184,27 +190,51 @@ export function adminApi(deps: AdminDeps) {
   }
 
   /** What the store lists, a page of it at a time: the whole list is never sent to the page. */
-  async function shelf(find: string): Promise<Response> {
+  async function shelf(q: URLSearchParams): Promise<Response> {
     if (!store.on) return json({ ok: true, on: false, modules: [] });
     const signed = store.signed;
+    const asked = (name: string) => (q.get(name) ?? "").slice(0, 80);
+    const find = asked("find"), section = asked("section"), maker = asked("maker"), kind = asked("kind");
+    const after = Math.max(0, Math.min(Number.parseInt(asked("after")) || 0, 100000));
     try {
       const all = await store.list();
-      // Every word typed has to be somewhere in what the thing is called, does, or is made by.
+      // Every word typed has to be somewhere in what the thing is called, does, is made by, or is a kind of.
       const words = find.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
       const found = words.length
         ? all.filter((m) => {
-          const text = `${m.name} ${m.description} ${m.makes} ${m.id}`.toLowerCase();
+          const text = `${m.name} ${m.description} ${m.makes} ${m.maker} ${m.products.join(" ")} ${
+            m.kinds.join(" ")
+          } ${m.id}`.toLowerCase();
           return words.every((w) => text.includes(w));
         })
         : all;
+      const inSection = section ? found.filter((m) => m.section === section) : found;
+      // How many of what was found each maker and each kind has, so a catalog can be browsed by either.
+      const count = (names: (m: StoreModule) => string[]) => {
+        const n = new Map<string, number>();
+        for (const m of inSection) for (const name of names(m)) n.set(name, (n.get(name) ?? 0) + 1);
+        return [...n].map(([name, count]) => ({ name, count }));
+      };
+      const shown = inSection.filter((m) =>
+        (!maker || m.maker === maker) && (!kind || m.kinds.includes(kind))
+      );
       return json(
         {
           ok: true,
           on: true,
           signed,
           total: all.length,
-          found: found.length,
-          modules: found.slice(0, SHELF_PAGE).map(fromStore),
+          found: shown.length,
+          after,
+          sections: {
+            skillfully: found.filter((m) => m.section === "skillfully").length,
+            companion: found.filter((m) => m.section === "companion").length,
+          },
+          makers: count((m) => (m.maker ? [m.maker] : []))
+            .sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" })).slice(0, 2000),
+          kinds: count((m) => m.kinds).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+            .slice(0, 40),
+          modules: shown.slice(after, after + SHELF_PAGE).map(fromStore),
         },
         200,
         { "cache-control": "no-store" },
@@ -543,7 +573,7 @@ export function adminApi(deps: AdminDeps) {
   ): Promise<Response> {
     if (req.method === "GET") {
       if (path === "store") {
-        return await shelf((new URL(req.url).searchParams.get("find") ?? "").slice(0, 80));
+        return await shelf(new URL(req.url).searchParams);
       }
       if (path === "all") return json(await overview(me, session), 200, { "cache-control": "no-store" });
       // What the files in the config folder would change. Reading only: applying is a change, made below.

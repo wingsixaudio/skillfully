@@ -25,7 +25,18 @@ export interface PackedFile {
 /** What a runtime makes of a package of its kind. */
 export interface PackageContents {
   /** The package's own description of itself. Shown to people as text. */
-  about: { id: string; name: string; version: string; license: string; description: string; makes: string };
+  about: {
+    id: string;
+    name: string;
+    version: string;
+    license: string;
+    description: string;
+    makes: string;
+    /** Who makes the device, the products it covers and the words its author filed it under, when it says. */
+    maker?: string;
+    products?: string[];
+    keywords?: string[];
+  };
   /** What the plugin's id starts with. A second copy gets a number after it. */
   idStart: string;
   /** The manifest the hub will hold for it, less the id and the name, which are chosen when it is added. */

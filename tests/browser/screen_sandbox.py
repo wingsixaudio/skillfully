@@ -83,21 +83,21 @@ async def main():
         # --- The admin is five places, each at its own address ---
         async def place(name):
             await owner.locator("#places a", has_text=name).click()
-        async def shown():
+        async def places_shown():
             return await owner.evaluate("() => [...document.querySelectorAll('.place')].filter((p) => !p.hidden).map((p) => p.dataset.place)")
         # A change that hands out power is confirmed once, and that holds for a few minutes.
         async def confirm():
             if await owner.locator("#confirm").count(): await owner.fill("#confirm", OWNER_PIN)
         check("there are five places", await owner.locator("#places a").all_inner_texts() == ["Home", "Devices", "Screens", "People", "Hub"])
-        check("a new owner starts at Home, which says how the hub is", await shown() == [""] and "Everything is working" in await owner.locator("#homeStatus").inner_text(), await owner.locator("#home").inner_text())
+        check("a new owner starts at Home, which says how the hub is", await places_shown() == [""] and "Everything is working" in await owner.locator("#homeStatus").inner_text(), await owner.locator("#home").inner_text())
         check("Home lists each device and how it is", await owner.locator("#homeDeviceList a.line").count() == 2 and "Connected to its device" in await owner.locator("#homeDeviceList").inner_text(), await owner.locator("#homeDeviceList").inner_text())
         check("with nothing waiting, nothing claims to need you", not await owner.locator("#needs").is_visible())
         await place("Devices")
-        check("choosing a place changes the address and shows only that place", owner.url.endswith("/admin/devices") and await shown() == ["devices"] and await owner.title() == "Devices | Skillfully", owner.url)
+        check("choosing a place changes the address and shows only that place", owner.url.endswith("/admin/devices") and await places_shown() == ["devices"] and await owner.title() == "Devices | Skillfully", owner.url)
         await owner.locator("#drivers h3 a", has_text="Simulated switch").click()
         check("each device has an address of its own, showing only it", owner.url.endswith("/admin/devices/sim-switch") and await owner.locator("#drivers .item").count() == 1, owner.url)
         await owner.reload(); await owner.wait_for_selector("#drivers .item")
-        check("which survives loading the page again", await shown() == ["devices"] and await owner.locator("#drivers h3").all_inner_texts() == ["Simulated switch"])
+        check("which survives loading the page again", await places_shown() == ["devices"] and await owner.locator("#drivers h3").all_inner_texts() == ["Simulated switch"])
         await owner.go_back(); await owner.wait_for_function("() => document.querySelectorAll('#drivers .item').length === 2")
         check("and the back button goes back", owner.url.endswith("/admin/devices"), owner.url)
         await owner.goto(base + "/admin/devices/no-such-thing"); await owner.wait_for_selector("#drivers .item")
@@ -108,7 +108,7 @@ async def main():
         check("the Hub place says where each device's decisions are kept as text", "/config/devices" in told and "No secret is ever written there" in told, told)
         check("and that the files say what the hub says, when nobody has edited one", "The files say the same as the hub." in told, told)
         await owner.goto(base + "/admin/people"); await owner.wait_for_selector("#people .item")
-        check("an address can be opened directly", await shown() == ["people"])
+        check("an address can be opened directly", await places_shown() == ["people"])
         if shots: await owner.screenshot(path=f"{shots}/1c-people-place.png")
         # On a phone the places are along the bottom, under a thumb. On a wide screen they are down the side.
         size = owner.viewport_size
@@ -277,13 +277,21 @@ async def main():
         lamp_port = os.environ.get("LAMP_PORT", "7007")
         await owner.goto(base + "/admin/devices"); await owner.wait_for_selector("#addDevice:not([hidden])")
         await owner.click("#addDevice")
-        check("nothing can be added before something is chosen", await owner.locator("#dlgOk").is_disabled())
-        await owner.wait_for_selector("#shelf .shelfItem")
-        shelf = await owner.locator("#shelf").inner_text()
-        check("the store's shelf says what each thing is and how far it has been proven", "Test lamp" in shelf and "stand-in" in shelf, shelf)
-        check("the hub knows who signed the store's list, so the page does not warn about it", await owner.locator("#unsigned").count() == 0, shelf)
-        check("a store with only a few things does not need a search box", not await owner.locator("#shelfFind").is_visible())
-        await owner.locator("#shelf .shelfItem", has_text="Test lamp").get_by_role("button", name="Choose").click()
+        check("Add a device opens the catalog, at an address of its own", owner.url.endswith("/admin/devices/add") and await places_shown() == ["devices/add"], owner.url)
+        await owner.wait_for_selector("#catCompanion:not([hidden]) #catList .maker")
+        told = await owner.locator("#catalog").inner_text()
+        check("Bitfocus Companion modules are a section of their own, with credit and what running one means", "Bitfocus Companion modules" in told and "published by Bitfocus" in told and "asks you before one reaches anything" in told, told)
+        check("the hub knows who signed the store's list, so the page does not warn about it", await owner.locator("#catNote").get_attribute("data-unsigned") == "" and "cannot check who published" not in told, told)
+        check("with nothing typed, the section lists makers and how many modules each has", "1 module" in await owner.locator("#catList .maker").first.inner_text(), await owner.locator("#catList").inner_text())
+        await owner.locator("#catList .maker").first.click(); await owner.wait_for_selector("#catList .catItem")
+        shelf = await owner.locator("#catList").inner_text()
+        check("a maker opens to its modules, each saying what it is and how far it has been proven", "Test lamp" in shelf and "Tested against a stand-in" in shelf and "All makers" in shelf, shelf)
+        await owner.fill("#catFind", "no such thing anywhere"); await owner.wait_for_function("() => document.querySelector('#catNote').textContent.includes('Nothing in the store matches')")
+        check("typing something the store does not have says so, and that a file still works", "can still be added from a file" in await owner.locator("#catNote").inner_text())
+        await owner.fill("#catFind", "pretend LAMP"); await owner.wait_for_selector("#catList .catItem")
+        check("typing finds a module by what it does, whatever the capitals", "Test lamp" in await owner.locator("#catList").inner_text())
+        if shots: await owner.screenshot(path=f"{shots}/5a-catalog.png", full_page=True)
+        await owner.locator("#catList .catItem", has_text="Test lamp").get_by_role("button", name="Choose").click()
         await owner.wait_for_selector("#pkgRest:not([hidden])")
         told = await owner.locator("#pkgRest").inner_text()
         check("choosing shows what it is, its license, and where it was built from", "skillfully-test-lamp 1.0.0" in told and "MIT license" in told and "its author's source" in told, told)
@@ -295,6 +303,7 @@ async def main():
         await owner.click("#dlgOk")
         # Its settings open by themselves, drawn from what the module says it takes.
         await owner.wait_for_selector("#set_host", timeout=15000)
+        check("adding ends at the new device's own address", "/admin/devices/companion-skillfully-test-lamp" in owner.url, owner.url)
         check("its own settings form opens next, with the module's own labels", "Lamp address" in await owner.locator("#dlgBody").inner_text())
         check("and its own defaults", await owner.input_value("#set_port") == "7000")
         await owner.fill("#set_host", "127.0.0.1"); await owner.fill("#set_port", lamp_port)
@@ -329,7 +338,8 @@ async def main():
         check("after updating it is the new version, connected, still acting, still on its screen", "1.1.0" in card and "Connected to its device" in card and "Act" in card and "Used by: Controls" in card, card)
 
         # --- The same module from a file, which nobody has answered for: it has to ask ---
-        await owner.click("#addDevice")
+        await owner.click("#addDevice"); await owner.click("#catFile")
+        check("nothing can be added before a file is chosen", await owner.locator("#dlgOk").is_disabled())
         await owner.set_input_files("#pkg", os.path.join(os.path.dirname(__file__), "..", "fixtures", "companion", "skillfully-test-lamp-1.0.0.tgz"))
         await owner.wait_for_selector("#pkgRest:not([hidden])")
         facts = await owner.locator("#pkgRest .facts").inner_text()

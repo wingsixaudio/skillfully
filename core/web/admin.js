@@ -49,21 +49,24 @@ const PLACES = { "": "Home", devices: "Devices", screens: "Screens", people: "Pe
 function here() {
   const [first = "", second = ""] = location.pathname.replace(/^\/admin\/?/, "").split("/");
   const place = Object.hasOwn(PLACES, first) ? first : "";
+  // The catalog is the page behind "Add a device": part of Devices, with an address of its own.
+  if (place === "devices" && second === "add") return { place, device: "", page: "devices/add" };
   let device = "";
   try {
     device = place === "devices" ? decodeURIComponent(second) : "";
   } catch { /* an address that is not text names no device */ }
-  return { place, device };
+  return { place, device, page: place };
 }
 function showPlace() {
-  const { place } = here();
-  for (const part of document.querySelectorAll(".place")) part.hidden = part.dataset.place !== place;
+  const { place, page } = here();
+  for (const part of document.querySelectorAll(".place")) part.hidden = part.dataset.place !== page;
   for (const a of document.querySelectorAll("#places a")) {
     if (a.dataset.place === place) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   }
   document.title = PLACES[place] + " | Skillfully";
   if (place === "hub") drawConfig();
+  if (page === "devices/add") drawCatalog();
 }
 // Moving between places changes the address and nothing else: no page is fetched again.
 function go(to) {
@@ -605,6 +608,151 @@ function drawHome() {
     );
     rows.append(a);
   }
+}
+
+// --- The catalog ---
+// What can be added, found by typing or by browsing. Two sections: what was written for this hub, and
+// Bitfocus Companion modules, which are many, so they are browsed by maker and by kind.
+const cat = { find: "", maker: "", kind: "", asked: 0 };
+const SHORT = {
+  "It starts and describes itself. Nobody has reported using it with a device.": "Runs here",
+  "It has been proven against a stand-in for the device, not the real thing.": "Tested against a stand-in",
+  "It has been used with the real device.": "Used with the real device",
+};
+function catItem(m) {
+  const b = el("button", { type: "button", className: "small quiet", textContent: "Choose" });
+  b.onclick = () => openAdd(m.id);
+  return el(
+    "div",
+    { className: "item catItem" },
+    el("h3", { textContent: m.name }),
+    el(
+      "p",
+      { className: "help", style: "margin:0 0 6px" },
+      [m.maker, SHORT[m.proven] || m.proven, m.here ? "On this hub" : ""].filter(Boolean).join(". ") + ".",
+    ),
+    el("p", { className: "dim", style: "margin:0 0 8px", textContent: m.description }),
+    b,
+  );
+}
+async function drawCatalog(more) {
+  const mine = ++cat.asked;
+  const at = (params) => "/admin/api/store?" + new URLSearchParams(params);
+  const narrowed = cat.find || cat.maker || cat.kind;
+  const [native, companion] = await Promise.all([
+    call(at({ find: cat.find, section: "skillfully" })),
+    call(at({ find: cat.find, section: "companion", maker: cat.maker, kind: cat.kind, after: more || 0 })),
+  ]);
+  if (mine !== cat.asked) return; // something newer was typed or chosen while this was on its way
+  const note = $("catNote");
+  note.textContent = !companion.on
+    ? "This hub is not set up to use a store. A package file can still be added."
+    : companion.message
+    ? companion.message
+    : !companion.signed
+    ? "This hub cannot check who published this list. You can add from it, and each thing will ask you before it reaches anything."
+    : !companion.total
+    ? "The store has nothing listed yet."
+    : cat.find && !companion.sections.skillfully && !companion.sections.companion
+    ? "Nothing in the store matches that. A module that is not here can still be added from a file."
+    : "";
+  note.id = "catNote";
+  note.dataset.unsigned = companion.on && !companion.message && !companion.signed ? "1" : "";
+
+  $("catNative").hidden = !(native.modules && native.modules.length);
+  const nat = $("catNativeList");
+  nat.innerHTML = "";
+  for (const m of native.modules || []) nat.append(catItem(m));
+
+  $("catCompanion").hidden = !(companion.on && companion.sections && companion.sections.companion);
+  if ($("catCompanion").hidden) return;
+  $("catCount").textContent = companion.sections.companion === 1
+    ? "1 module"
+    : companion.sections.companion + " modules";
+  const kinds = $("catKinds");
+  kinds.innerHTML = "";
+  for (const k of companion.kinds || []) {
+    const b = el("button", {
+      type: "button",
+      className: "chip" + (cat.kind === k.name ? " on" : ""),
+      textContent: k.name + " " + k.count,
+    });
+    b.onclick = () => {
+      cat.kind = cat.kind === k.name ? "" : k.name;
+      drawCatalog();
+    };
+    kinds.append(b);
+  }
+  const box = $("catList");
+  if (!more) box.innerHTML = "";
+  document.getElementById("catMore")?.remove();
+  if (!narrowed) {
+    // Nothing typed or chosen: every maker, in order, with how many each has. A maker opens to its modules.
+    let letter = "";
+    for (const mk of companion.makers) {
+      const first = mk.name[0].toUpperCase();
+      if (first !== letter) box.append(el("p", { className: "letter", textContent: letter = first }));
+      const b = el(
+        "button",
+        { type: "button", className: "line maker" },
+        el("b", { textContent: mk.name }),
+        el("span", { className: "dim", textContent: mk.count === 1 ? "1 module" : mk.count + " modules" }),
+      );
+      b.onclick = () => {
+        cat.maker = mk.name;
+        drawCatalog();
+      };
+      box.append(b);
+    }
+    return;
+  }
+  if (!more && (cat.maker || cat.kind)) {
+    const back = el("button", {
+      type: "button",
+      className: "small quiet",
+      id: "catBack",
+      textContent: "All makers",
+      style: "margin-bottom:8px",
+    });
+    back.onclick = () => {
+      cat.maker = cat.kind = "";
+      drawCatalog();
+    };
+    box.append(
+      el(
+        "div",
+        { className: "row" },
+        back,
+        el("b", { textContent: [cat.maker, cat.kind].filter(Boolean).join(", ") }),
+      ),
+    );
+  }
+  for (const m of companion.modules) box.append(catItem(m));
+  const shown = companion.after + companion.modules.length;
+  if (companion.found > shown) {
+    const b = el("button", {
+      type: "button",
+      className: "small quiet",
+      id: "catMore",
+      textContent: "Show more (" + shown + " of " + companion.found + ")",
+      style: "margin-top:10px",
+    });
+    b.onclick = () => drawCatalog(shown);
+    box.append(b);
+  }
+}
+{
+  let typing;
+  $("catFind").oninput = () => {
+    clearTimeout(typing);
+    typing = setTimeout(() => {
+      // Typing looks through everything, not only inside the maker or kind that was open.
+      cat.find = $("catFind").value.trim();
+      cat.maker = cat.kind = "";
+      drawCatalog();
+    }, 250);
+  };
+  $("catFile").onclick = () => openAdd();
 }
 
 // --- Config as text ---
@@ -1162,7 +1310,10 @@ function openSettings(id, waited = 0) {
 }
 
 // Adding a device: choose the package, see what it is and what it could do, then decide.
-$("addDevice").onclick = () => {
+$("addDevice").onclick = () => go("/admin/devices/add");
+// Adding: what was chosen in the catalog is fetched and checked, or a package file is chosen here. Either way
+// the same few things are asked before anything is added.
+function openAdd(storeId) {
   let seen = null;
   ask("Add a device", (x) => {
     $("dlgOk").disabled = true;
@@ -1270,6 +1421,8 @@ $("addDevice").onclick = () => {
         style: "margin-top:12px",
       });
       back.onclick = () => {
+        // Chosen in the catalog: the something else is back there.
+        if (storeId) return $("dlg").close();
         seen = null;
         rest.hidden = true;
         pick.hidden = false;
@@ -1281,98 +1434,15 @@ $("addDevice").onclick = () => {
       $("dlgOk").disabled = false;
     };
 
-    // From the store.
-    pick.append(el("h3", { textContent: "From the store", style: "font-size:15px;margin:0 0 6px" }));
-    const shelf = el(
-      "div",
-      { id: "shelf" },
-      el("p", { className: "dim", textContent: "Looking at the store" }),
-    );
-    pick.append(shelf);
-    // The store may list hundreds of things. The shelf shows a few, and typing finds the rest.
-    const find = el("input", {
-      id: "shelfFind",
-      type: "search",
-      placeholder: "Find a device by its name or its maker",
-      hidden: true,
-    });
-    find.setAttribute("aria-label", "Find a device in the store");
-    const list = el(
-      "div",
-      { id: "shelfList" },
-      el("p", { className: "dim", textContent: "Looking at the store" }),
-    );
-    shelf.innerHTML = "";
-    shelf.append(find, list);
-    let asked = 0;
-    const look = async () => {
-      const mine = ++asked;
-      const r = await call("/admin/api/store?find=" + encodeURIComponent(find.value.trim()));
-      if (mine !== asked) return; // something newer was typed while this was on its way
-      list.innerHTML = "";
-      if (!r.on) {
-        return list.append(
-          el("p", { className: "dim", textContent: "This hub is not set up to use a store." }),
-        );
-      }
-      find.hidden = !(r.total > 5);
-      if (r.message) list.append(el("p", { className: "dim", textContent: r.message }));
-      else if (!r.signed) {
-        list.append(
-          el("p", {
-            className: "dim",
-            id: "unsigned",
-            textContent:
-              "This hub cannot check who published this list. You can add from it, and each thing will ask you before it reaches anything.",
-          }),
-        );
-      } else if (!r.total) {
-        list.append(el("p", { className: "dim", textContent: "The store has nothing listed yet." }));
-      } else if (!r.modules.length) {
-        list.append(
-          el("p", {
-            className: "dim",
-            textContent:
-              "Nothing in the store matches that. A module that is not here can still be added from a file.",
-          }),
-        );
-      }
-      for (const m of r.modules || []) {
-        const b = el("button", { type: "button", className: "small quiet", textContent: "Choose" });
-        b.onclick = async () => {
-          say("dlgMsg", "Getting it from the store and checking it");
-          const got = await call("/admin/api/store/fetch", { id: m.id });
-          if (!got.ok) return say("dlgMsg", got.message, "bad");
-          chosen(got);
-        };
-        list.append(
-          el(
-            "div",
-            { className: "item shelfItem" },
-            el("h3", { textContent: m.name }),
-            el("p", { className: "dim", style: "margin:0 0 6px", textContent: m.description }),
-            el("p", { className: "help", style: "margin:0 0 8px", textContent: m.proven }),
-            b,
-          ),
-        );
-      }
-      if (r.found > r.modules.length) {
-        list.append(
-          el("p", {
-            className: "help",
-            id: "shelfMore",
-            textContent: "Showing " + r.modules.length + " of " + r.found + ". Type to narrow it down.",
-          }),
-        );
-      }
-    };
-    let typing;
-    find.oninput = () => {
-      clearTimeout(typing);
-      typing = setTimeout(look, 250);
-    };
-    look();
-
+    if (storeId) {
+      // Chosen in the catalog: get it from the store, check it, and show what it is.
+      pick.append(el("p", { className: "dim", textContent: "Getting it from the store and checking it" }));
+      call("/admin/api/store/fetch", { id: storeId }).then((got) => {
+        if (!got.ok) return say("dlgMsg", got.message, "bad");
+        chosen(got);
+      });
+      return;
+    }
     // From a file.
     pick.append(el("h3", { textContent: "From a file", style: "font-size:15px;margin:18px 0 0" }));
     pick.append(
@@ -1411,6 +1481,9 @@ $("addDevice").onclick = () => {
     });
     if (r.ok) {
       say("driversMsg", r.name + " was added. Fill in its settings next.", "ok");
+      // Adding ends on the new device's own address, where everything else about it is.
+      history.replaceState(null, "", deviceAt(r.id));
+      showPlace();
       setTimeout(async () => {
         await load();
         openSettings(r.id);
@@ -1418,7 +1491,7 @@ $("addDevice").onclick = () => {
     }
     return r;
   }, "Add device");
-};
+}
 // Devices connect and drop on their own time, so this page keeps itself current while nothing is being edited.
 setInterval(() => {
   if (!$("dlg").open && document.visibilityState === "visible") load();

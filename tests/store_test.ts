@@ -7,7 +7,7 @@ import { addingHub, FIXTURES, OWNER_PIN, pretendLamp, repacked, until } from "./
 import { resolveNetwork } from "../core/process.ts";
 import { grantWords } from "../core/asks.ts";
 import { newKey, sign, verify } from "../core/signing.ts";
-import { Store, STORE_KEYS } from "../core/store.ts";
+import { makerFrom, Store, STORE_KEYS } from "../core/store.ts";
 
 const PACKAGE = await Deno.readFile(`${FIXTURES}/companion/skillfully-test-lamp-1.0.0.tgz`);
 const SHA = createHash("sha256").update(PACKAGE).digest("hex");
@@ -680,6 +680,103 @@ Deno.test("the shelf is found by typing, a page at a time, however much the stor
     assertEquals((await shelf("no such maker")).total, 120);
     // What is typed is only ever compared, never anything more.
     assertEquals((await shelf('"><script>alert(1)</script> .* \\')).found, 0);
+  } finally {
+    await h.close();
+    await store.close();
+  }
+});
+
+Deno.test("the catalog is browsed by section, by maker and by kind, a page at a time", async () => {
+  // A maker's name is taken from the list when it gives one, and worked out from the other fields when not.
+  assertEquals(makerFrom("allenheath-cq", "Allen & Heath CQ"), "Allen & Heath");
+  assertEquals(makerFrom("aja-kumo", "AJA KUMO, KUMO CP"), "AJA");
+  assertEquals(makerFrom("tplink-kasasmartplug", "TP-Link Kasa"), "TP-Link");
+  assertEquals(makerFrom("generic-http", "Something else entirely"), "Generic");
+  assertEquals(makerFrom("", ""), "");
+
+  const modules = [
+    listing({ id: "allenheath-cq", name: "Allen & Heath CQ", makes: "Allen & Heath CQ" }),
+    listing({ id: "allenheath-sq", name: "Allen & Heath SQ", makes: "Allen & Heath SQ", kinds: ["Audio"] }),
+    listing({ id: "aja-kumo", name: "AJA KUMO", makes: "AJA KUMO", kinds: ["Video", "Audio"] }),
+    listing({
+      id: "bmd-atem",
+      name: "ATEM",
+      maker: "Blackmagic Design",
+      products: ["ATEM Mini"],
+      kinds: ["Video"],
+    }),
+    listing({
+      id: "wing",
+      name: "WING ear mixes",
+      section: "skillfully",
+      maker: "Behringer",
+      kinds: ["Audio"],
+    }),
+    ...Array.from({ length: 40 }, (_, i) => listing({ id: `zed-${i}`, name: `Zed ${i}`, makes: "Zed" })),
+  ];
+  const store = await pretendStore({ modules });
+  const h = await hubTrusting(store.url);
+  const shelf = async (q: Record<string, string> = {}) =>
+    (await h.get(`/admin/api/store?${new URLSearchParams(q)}`)).body;
+  const ids = (r: { modules: { id: string }[] }) => r.modules.map((m) => m.id);
+  try {
+    const all = await shelf();
+    assertEquals(
+      all.sections,
+      { skillfully: 1, companion: 44 },
+      "an entry is a Companion module unless it says otherwise",
+    );
+    assertEquals(ids(await shelf({ section: "skillfully" })), ["wing"]);
+
+    // The Companion section says who makes what, in order, however a name is capitalized.
+    const companion = await shelf({ section: "companion" });
+    assertEquals(companion.makers, [
+      { name: "AJA", count: 1 },
+      { name: "Allen & Heath", count: 2 },
+      { name: "Blackmagic Design", count: 1 },
+      { name: "Zed", count: 40 },
+    ]);
+    assertEquals(companion.kinds, [{ name: "Audio", count: 2 }, { name: "Video", count: 2 }]);
+    assertEquals(ids(await shelf({ section: "companion", maker: "Allen & Heath" })), [
+      "allenheath-cq",
+      "allenheath-sq",
+    ]);
+    assertEquals(ids(await shelf({ section: "companion", kind: "Video" })), ["aja-kumo", "bmd-atem"]);
+    assertEquals(ids(await shelf({ section: "companion", kind: "Video", maker: "AJA" })), ["aja-kumo"]);
+    assertEquals((await shelf({ maker: "Nobody" })).modules, []);
+
+    // Typing narrows the makers and the counts as well as the list, and finds by product and by kind.
+    assertEquals(ids(await shelf({ find: "atem mini" })), ["bmd-atem"]);
+    const audio = await shelf({ find: "audio", section: "companion" });
+    assertEquals([ids(audio), audio.makers.map((m: { name: string }) => m.name)], [[
+      "allenheath-sq",
+      "aja-kumo",
+    ], ["AJA", "Allen & Heath"]]);
+
+    // A maker with more than a page is read a page at a time.
+    const zed = await shelf({ section: "companion", maker: "Zed" });
+    assertEquals([zed.found, zed.modules.length, zed.after], [40, 30, 0]);
+    const rest = await shelf({ section: "companion", maker: "Zed", after: "30" });
+    assertEquals([rest.modules.length, rest.after, ids(rest)[0]], [10, 30, "zed-30"]);
+    assertEquals((await shelf({ after: "-5" })).after, 0);
+    assertEquals((await shelf({ after: "nonsense" })).after, 0);
+
+    // What a list says about itself is data: cut to length, and never more than a few of anything.
+    const odd = await pretendStore({
+      modules: [
+        listing({
+          id: "odd-one",
+          maker: "M".repeat(500),
+          kinds: Array(50).fill("K".repeat(90)),
+          products: [1, null, {}],
+        }),
+      ],
+    });
+    const o = await hubTrusting(odd.url);
+    const m = (await o.get("/admin/api/store")).body.modules[0];
+    assertEquals([m.maker.length, m.kinds.length, m.kinds[0].length], [60, 4, 30]);
+    await o.close();
+    await odd.close();
   } finally {
     await h.close();
     await store.close();
