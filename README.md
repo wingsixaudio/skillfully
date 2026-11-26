@@ -60,7 +60,7 @@ tests/browser/run.sh chromium              # the real-browser test (needs Python
 tests/compat/kasa.sh                       # a real Companion module against a pretend plug (needs Node)
 ```
 
-To add a device, open the admin page and choose **Add a device**. There are two ways in:
+To add a device, open **Devices** in the admin and choose **Add a device**. There are two ways in:
 
 - **From the store.** The hub reads the list published by
   [skillfully-plugins](https://github.com/wingsixaudio/skillfully-plugins), downloads what you pick, and

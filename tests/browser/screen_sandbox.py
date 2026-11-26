@@ -80,6 +80,41 @@ async def main():
         check("a new owner is shown what is left to do, in order", [t.split("\n")[0] for t in todo] == ["Give a screen a device", "Add your people"], str(todo))
         if shots: await owner.screenshot(path=f"{shots}/1b-first-look.png")
 
+        # --- The admin is five places, each at its own address ---
+        async def place(name):
+            await owner.locator("#places a", has_text=name).click()
+        async def shown():
+            return await owner.evaluate("() => [...document.querySelectorAll('.place')].filter((p) => !p.hidden).map((p) => p.dataset.place)")
+        # A change that hands out power is confirmed once, and that holds for a few minutes.
+        async def confirm():
+            if await owner.locator("#confirm").count(): await owner.fill("#confirm", OWNER_PIN)
+        check("there are five places", await owner.locator("#places a").all_inner_texts() == ["Home", "Devices", "Screens", "People", "Hub"])
+        check("a new owner starts at Home, which says how the hub is", await shown() == [""] and "Everything is working" in await owner.locator("#homeStatus").inner_text(), await owner.locator("#home").inner_text())
+        check("Home lists each device and how it is", await owner.locator("#homeDeviceList a.line").count() == 2 and "Connected to its device" in await owner.locator("#homeDeviceList").inner_text(), await owner.locator("#homeDeviceList").inner_text())
+        check("with nothing waiting, nothing claims to need you", not await owner.locator("#needs").is_visible())
+        await place("Devices")
+        check("choosing a place changes the address and shows only that place", owner.url.endswith("/admin/devices") and await shown() == ["devices"] and await owner.title() == "Devices | Skillfully", owner.url)
+        await owner.locator("#drivers h3 a", has_text="Simulated switch").click()
+        check("each device has an address of its own, showing only it", owner.url.endswith("/admin/devices/sim-switch") and await owner.locator("#drivers .item").count() == 1, owner.url)
+        await owner.reload(); await owner.wait_for_selector("#drivers .item")
+        check("which survives loading the page again", await shown() == ["devices"] and await owner.locator("#drivers h3").all_inner_texts() == ["Simulated switch"])
+        await owner.go_back(); await owner.wait_for_function("() => document.querySelectorAll('#drivers .item').length === 2")
+        check("and the back button goes back", owner.url.endswith("/admin/devices"), owner.url)
+        await owner.goto(base + "/admin/devices/no-such-thing"); await owner.wait_for_selector("#drivers .item")
+        check("an address for a device that is not there says so and shows the ones that are", await owner.locator("#oneDeviceGone").is_visible() and await owner.locator("#drivers .item").count() == 2)
+        await owner.goto(base + "/admin/people"); await owner.wait_for_selector("#people .item")
+        check("an address can be opened directly", await shown() == ["people"])
+        if shots: await owner.screenshot(path=f"{shots}/1c-people-place.png")
+        # On a phone the places are along the bottom, under a thumb. On a wide screen they are down the side.
+        size = owner.viewport_size
+        bar = await owner.locator("#places").bounding_box()
+        check("on a phone the places run along the bottom", bar["width"] > bar["height"] and bar["y"] + bar["height"] >= size["height"] - 1, str(bar))
+        await owner.set_viewport_size({"width": 1280, "height": 800})
+        bar = await owner.locator("#places").bounding_box(); card = await owner.locator("#secPeople").bounding_box()
+        check("on a wide screen they run down the side, clear of the page", bar["height"] > bar["width"] and bar["x"] == 0 and card["x"] >= bar["width"], f"{bar} {card}")
+        if shots: await owner.screenshot(path=f"{shots}/1d-wide.png")
+        await owner.set_viewport_size(size)
+
         async def admin(path, body):
             r = await owner_ctx.request.post(base + path, data=json.dumps(body), headers={"content-type": "application/json"})
             return await r.json()
@@ -87,14 +122,14 @@ async def main():
             return await (await owner_ctx.request.get(f"{base}/api/state?plugin={plugin}")).json()
 
         # --- The owner adds Sam, through the People page ---
-        await owner.goto(base + "/admin")
+        await owner.goto(base + "/admin/screens")
         # --- A screen reaches nothing until the owner gives it a connection ---
         async def give(screen, *devices):
             item = owner.locator("#screens .item", has=owner.locator("h3", has_text=screen))
             await item.get_by_role("button", name="Choose connections").click()
             for d in devices:
                 await owner.locator("#dlgBody label.check", has_text=d).locator("input").check()
-            await owner.fill("#confirm", OWNER_PIN); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+            await confirm(); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
             return item
         await owner.wait_for_selector("#screens .item")
         fader_item = owner.locator("#screens .item", has=owner.locator("h3", has_text="One fader"))
@@ -102,7 +137,9 @@ async def main():
         await give("One fader", "Simulated board")
         await owner.wait_for_selector("#screens .chip.on:has-text('Simulated board')")
         check("the owner gives One fader the soundboard, with their own PIN", True)
+        check("having confirmed once, the page says for how long that holds", await owner.locator("#lockbar").is_visible() and "Unlocked for 5 minutes" in await owner.locator("#lockbar").inner_text(), await owner.locator("#lockbar").inner_text())
 
+        await place("People")
         await owner.fill("#newName", "Sam"); await owner.click("#add button")
         await owner.get_by_text("Add the suggested role Musician").click()
         await owner.wait_for_selector("#roles h3:has-text('Musician')")
@@ -110,7 +147,8 @@ async def main():
         sam = owner.locator(".item", has=owner.locator("h3", has_text="Sam"))
         await sam.get_by_role("button", name="Roles").click()
         await owner.locator("#dlgBody label.check", has_text="Musician").locator("input").check()
-        await owner.fill("#confirm", OWNER_PIN); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        check("and the next change is not asked to be confirmed again", await owner.locator("#confirm").count() == 0)
+        await confirm(); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
         await sam.get_by_role("button", name="Assign").click()
         check("the People page asks for what the screen's abilities need per person", await owner.locator("#slot_ears").count() == 1)
         await owner.fill("#slot_ears", "1"); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
@@ -217,7 +255,7 @@ async def main():
         # WebKit reports a refused attempt to leave the sandbox as a page error. That is the sandbox working.
         unexpected = [e for e in errors if "allow-top-navigation" not in e]
         # --- A screen nobody wrote for a device: Controls, given only the switch ---
-        await owner.goto(base + "/admin"); await owner.wait_for_selector("#screens .item")
+        await owner.goto(base + "/admin/screens"); await owner.wait_for_selector("#screens .item")
         await give("Controls", "Simulated switch")
         await owner.goto(base + "/s/controls"); await owner.wait_for_timeout(1200)
         cf = next((f for f in owner.frames if "/screens/controls/" in f.url), None)
@@ -232,7 +270,7 @@ async def main():
 
         # --- Adding a device nobody wrote a driver for, from the store, without leaving the admin page ---
         lamp_port = os.environ.get("LAMP_PORT", "7007")
-        await owner.goto(base + "/admin"); await owner.wait_for_selector("#addDevice:not([hidden])")
+        await owner.goto(base + "/admin/devices"); await owner.wait_for_selector("#addDevice:not([hidden])")
         await owner.click("#addDevice")
         check("nothing can be added before something is chosen", await owner.locator("#dlgOk").is_disabled())
         await owner.wait_for_selector("#shelf .shelfItem")
@@ -247,7 +285,7 @@ async def main():
         check("and what the store lets it do without asking", "The store lets it, without asking you" in told and "you are asked first" in told)
         await owner.fill("#devName", "Stage lamp")
         await owner.locator("#pkgRest label.check", has_text="Controls").locator("input").check()
-        await owner.fill("#confirm", OWNER_PIN)
+        await confirm()
         if shots: await owner.screenshot(path=f"{shots}/5-add-device.png", full_page=True)
         await owner.click("#dlgOk")
         # Its settings open by themselves, drawn from what the module says it takes.
@@ -265,7 +303,7 @@ async def main():
         check("and where it came from, under what license", "From the store" in card and "MIT license" in card and "Its author's source" in card, card)
         check("it arrives listening, and the page says what that means", "Listen" in card and "nothing is sent to it" in card)
         await lamp_item.get_by_role("button", name="Switch to Act").click()
-        await owner.fill("#confirm", OWNER_PIN); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await confirm(); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
         if shots: await lamp_item.scroll_into_view_if_needed(); await owner.screenshot(path=f"{shots}/7-device.png")
 
         # --- The store publishes a newer version. The hub notices, and updating keeps what was decided ---
@@ -277,7 +315,7 @@ async def main():
         await lamp_item.get_by_role("button", name="Update to 1.1.0").click()
         told = await owner.locator("#dlgBody").inner_text()
         check("updating says what stays and what happens", "keeps its name, its settings, and everything you allowed" in told and "used with the real device" in told and "stops for a moment" in told, told)
-        await owner.fill("#confirm", OWNER_PIN)
+        await confirm()
         if shots: await owner.screenshot(path=f"{shots}/7b-update.png", full_page=True)
         await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
         await lamp_item.locator(".update").wait_for(state="detached", timeout=20000)
@@ -291,7 +329,7 @@ async def main():
         await owner.wait_for_selector("#pkgRest:not([hidden])")
         facts = await owner.locator("#pkgRest .facts").inner_text()
         check("from a file, it starts with no access to the network", "no access to your network" in facts and "Nobody has reviewed" in facts, facts)
-        await owner.fill("#devName", "Spare lamp"); await owner.fill("#confirm", OWNER_PIN); await owner.click("#dlgOk")
+        await owner.fill("#devName", "Spare lamp"); await confirm(); await owner.click("#dlgOk")
         await owner.wait_for_selector("#set_host", timeout=15000)
         await owner.fill("#set_host", "127.0.0.1"); await owner.fill("#set_port", lamp_port)
         await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
@@ -299,6 +337,16 @@ async def main():
         await spare.locator(".status.wait").wait_for(timeout=15000)
         check("a device that needs something says it is waiting for you", "waiting for you" in await spare.inner_text(), await spare.inner_text())
         check("and has no access until you answer", "no access to your network" in await spare.inner_text())
+        # Home is where something waiting on the superuser is seen first.
+        await place("Home"); await owner.wait_for_selector("#needs:not([hidden]) .need")
+        home = await owner.locator("#home").inner_text() + await owner.locator("#needs").inner_text()
+        check("Home says something needs you, and what", "One thing needs you" in home and f"Spare lamp asks to reach another program on this computer, port {lamp_port}" in home, home)
+        check("with the store's advice beside it", "The store's reviewers advise against this" in home, home)
+        check("something the store advises against cannot be allowed with one tap", await owner.locator("#needs").get_by_role("button", name="Allow").count() == 0 and await owner.locator("#needs").get_by_role("button", name="See what it asks for").count() == 1)
+        if shots: await owner.screenshot(path=f"{shots}/6a-home-needs-you.png", full_page=True)
+        await owner.locator("#needs a.open").click()
+        check("and it leads to the device itself", "/admin/devices/" in owner.url and await owner.locator("#drivers .item").count() == 1, owner.url)
+        spare = owner.locator("#drivers .item", has=owner.locator("h3", has_text="Spare lamp"))
         await spare.get_by_role("button", name="See what it asks for").click()
         asked = await owner.locator("#dlgBody").inner_text()
         check("the question says what it wants in plain words", f"Reach another program on this computer, port {lamp_port}" in asked, asked)
@@ -306,13 +354,17 @@ async def main():
         check("and shows what the store's reviewers advise", "The store's reviewers advise against this" in asked and "run on the hub's own computer yourself" in asked, asked)
         box = owner.locator("#dlgBody .askBox")
         check("nothing unusual is ticked for you", not await box.is_checked())
-        await box.check(); await owner.fill("#confirm", OWNER_PIN)
+        await box.check(); await confirm()
         if shots: await owner.screenshot(path=f"{shots}/6b-asks.png", full_page=True)
         await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
         await spare.locator(".status.ok").wait_for(timeout=15000)
         check("once allowed, it connects", "Connected to its device" in await spare.inner_text())
+        # Locking ends the few minutes at once: the next change asks again.
+        await owner.click("#lockNow"); await owner.wait_for_selector("#lockbar", state="hidden")
+        check("locking hides the unlocked notice", not await owner.locator("#lockbar").is_visible())
         await spare.get_by_role("button", name="Remove").click()
-        await owner.fill("#confirm", OWNER_PIN); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        check("and after locking, a change asks for the PIN again", await owner.locator("#confirm").count() == 1)
+        await confirm(); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
         await owner.wait_for_function("() => ![...document.querySelectorAll('#drivers h3')].some((h) => h.textContent === 'Spare lamp')")
         check("a device can be removed from the page", True)
 

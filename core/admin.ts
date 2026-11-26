@@ -100,10 +100,12 @@ export function adminApi(deps: AdminDeps) {
   });
 
   /** Everything the admin page shows. */
-  function overview(me: Person) {
+  function overview(me: Person, session: string) {
     return {
       ok: true,
       me: me.id,
+      // The seconds this session may still make changes without saying who it is again.
+      unlocked: accounts.unlocked(session),
       people: accounts.people().map((p) => ({ ...p, devices: accounts.sessions(p.id).length })),
       roles: accounts.roles(),
       policy: accounts.policy(),
@@ -229,14 +231,38 @@ export function adminApi(deps: AdminDeps) {
     }
   }
 
-  async function change(path: string, b: Record<string, unknown>, me: Person): Promise<Response> {
+  async function change(
+    path: string,
+    b: Record<string, unknown>,
+    me: Person,
+    session: string,
+  ): Promise<Response> {
     const id = String(b.id ?? "");
     const who = { actor: me.id, via: "admin" };
-    const sure = async () =>
-      (await accounts.confirm(me.id, b.confirm))
+    // A change that hands out power is made by someone who has just said who they are: with this request,
+    // or within the last few minutes on this same session. A secret that is sent is always checked, so a
+    // wrong one is refused even while the session is unlocked.
+    const sure = async () => {
+      if (b.confirm === undefined) {
+        return accounts.unlocked(session) ? null : json(
+          { ok: false, locked: true, message: "Confirm with your own PIN or password first." },
+          400,
+        );
+      }
+      return (await accounts.confirm(me.id, b.confirm))
         ? null
         : refuse(400, "Your own PIN or password is not right.");
+    };
     switch (path) {
+      case "unlock": {
+        const seconds = await accounts.unlock(me.id, session, b.confirm);
+        return seconds
+          ? json({ ok: true, unlocked: seconds })
+          : refuse(400, "Your own PIN or password is not right.");
+      }
+      case "lock":
+        accounts.lock(me.id, session);
+        return json({ ok: true, unlocked: 0 });
       case "person":
         return outcome(accounts.addPerson(me.id, b.name));
       case "person/invite":
@@ -478,12 +504,18 @@ export function adminApi(deps: AdminDeps) {
   }
 
   /** Answer one request under /admin/api/. The caller has already made sure a superuser is asking. */
-  return async function handle(req: Request, path: string, me: Person, origin: string): Promise<Response> {
+  return async function handle(
+    req: Request,
+    path: string,
+    me: Person,
+    origin: string,
+    session: string,
+  ): Promise<Response> {
     if (req.method === "GET") {
       if (path === "store") {
         return await shelf((new URL(req.url).searchParams.get("find") ?? "").slice(0, 80));
       }
-      if (path === "all") return json(overview(me), 200, { "cache-control": "no-store" });
+      if (path === "all") return json(overview(me, session), 200, { "cache-control": "no-store" });
       return refuse(404, "Not found.");
     }
     if (req.method !== "POST") return refuse(404, "Not found.");
@@ -492,6 +524,6 @@ export function adminApi(deps: AdminDeps) {
       return notOurPage(req, origin) ?? await inspect(req, me);
     }
     const b = await readJson(req, origin);
-    return b instanceof Response ? b : await change(path, b, me);
+    return b instanceof Response ? b : await change(path, b, me, session);
   };
 }
