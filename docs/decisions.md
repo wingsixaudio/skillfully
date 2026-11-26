@@ -66,6 +66,44 @@ checks its shape and puts it in the catalog.
 **The conformance test is generic.** It is written against capability definitions, so a driver for a kind of
 device nobody has thought of yet can be proven without new test code.
 
+**The hub owns people and sign-in.** One list of people, read by every plugin and kept by none. Signing in
+belongs to the hub's own pages; a plugin never sees a PIN, a password or a session. PINs and passwords are
+stored through scrypt, sessions and invitations as hashes, so nothing in the database can be read back or
+replayed.
+
+**A new hub is claimed with a code shown only where it runs.** Whoever enters it becomes the first superuser.
+The code is not in the log and stops working once used.
+
+**The team chooses PIN or password.** A superuser sets the kind and the shortest length, and may hold
+superusers to a stricter rule. Easy PINs (one digit repeated, a run) are refused. Five wrong tries start a
+wait that doubles up to 15 minutes. A wrong PIN and an unknown name get the same answer.
+
+**People join by invitation.** A superuser adds a name and hands over a one-time code. The person chooses
+their own PIN or password, and that device is remembered until someone revokes it. A superuser can reset a
+sign-in to a temporary one that must be changed at next use; the log records who reset whom and never the
+secret.
+
+**Superuser is the only built-in role, and a hub always has one.** Any person can be made a superuser by
+another. The last one cannot be demoted, turned off or removed. Handing out roles, changing the sign-in rule,
+resetting someone's sign-in and taking a device out of Listen each ask for the superuser's own PIN again.
+
+**Every other role is data.** Plugins declare abilities; a role is a name and a set of them. An ability lists
+the capabilities and values it covers, so the hub enforces it without knowing what the screen is for.
+
+**Abilities can be limited to a person's own values.** A key such as `input/*/bus/{ears}/level` is filled from
+the person's slots, set by a superuser. The hub filters what a screen is told and refuses what it may not set.
+A screen is never trusted to hide or disable anything.
+
+**A superuser gets everything a screen uses, and nothing beyond it.** Even a superuser cannot make a screen do
+what its manifest did not declare.
+
+**Access changes at once.** Changing a person's roles or slots, signing them out, or turning them off closes
+their open connections.
+
+**The hub's own API is for its own pages.** Requests must be JSON from the hub's own origin, the session
+cookie is hidden from scripts and never sent from other sites, and screens, which have no origin, cannot call
+it at all.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins
@@ -80,8 +118,23 @@ device nobody has thought of yet can be proven without new test code.
 - **The hub itself.** Nothing restarts the hub if it stops. That belongs to how it is installed (a system
   service).
 - **Log retention.** The log grows forever. No rule yet for how long to keep what.
-- **Sign-in and roles.** None yet. Everyone is a guest on the default home screen, and the read-only API pages
-  are open to the network.
+- **HTTPS.** Sign-in crosses the network unprotected, and phones hold back their best features (a proper
+  install, keeping the screen awake) from pages that are not served securely. The domain `skillfully.live` is
+  registered, which makes one option possible: each hub gets a name under it with a real certificate.
+- **The storage interface.** The log and the people list share one SQLite file on the hub's own disk. Pointing
+  a hub at a database on the network, or copying between two hubs, needs storage behind one interface first.
+- **A place for plugins to keep data.** The team roster and saved mixes need it. Nothing a screen does today
+  outlives the page.
+- **A ceiling on what others can do to your ears.** A superuser can raise a send into anyone's bus without
+  limit. Hearing safety needs a cap and a ramp that apply to everyone but the bus's owner, and a limiter at
+  the board itself.
+- **The People page is part of the hub, not a plugin.** That keeps PINs and the power to grant roles away from
+  plugin code. Whether a plugin should ever be able to ask for people to be added or granted, with a superuser
+  approving, is undecided.
+- **Slots are flat.** A person has one `ears`. A team with two boards, or a person with two mixes, needs slots
+  that say which device they belong to.
+- **Sign-in tries are counted per person and per network address.** Behind a shared address, one person's
+  mistakes could make others wait.
 - **Capabilities from outside this repository.** Definitions live in `capabilities/`. There is no rule yet for
   a plugin that brings its own, or for naming them so two authors do not collide.
 - **Browser coverage.** The screen sandbox was proven in Chrome only. Safari on a phone matters most and has
@@ -89,7 +142,6 @@ device nobody has thought of yet can be proven without new test code.
 - **Record and replay.** The spec calls for recording plugin traffic and replaying it as tests. Not built.
 - **Install, update, rollback, uninstall.** Plugins are listed in `core/main.ts` for now.
 - **License.** Not chosen.
-- **Whether the name `skillfully.live` is registered.** The page shows it as a wordmark only.
 
 ## Not tested
 

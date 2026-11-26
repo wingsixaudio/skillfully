@@ -64,7 +64,6 @@
       color: var(--accent);
     }
     header .link {
-      margin-left: auto;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -235,16 +234,6 @@
   <body>
     <main>
       <header>
-        <svg viewBox="0 0 48 48" aria-hidden="true">
-          <rect class="core" x="16" y="16" width="16" height="16" rx="4.5" fill="none" stroke-width="3.6" />
-          <g class="mod">
-            <rect x="19" y="3.5" width="10" height="7" rx="2.5" />
-            <rect x="19" y="37.5" width="10" height="7" rx="2.5" />
-            <rect x="3.5" y="19" width="7" height="10" rx="2.5" />
-            <rect x="37.5" y="19" width="7" height="10" rx="2.5" />
-          </g>
-        </svg>
-        <b>skillfully<span>.live</span></b>
         <div class="link"
           aria-live="polite"><i class="led" id="led"></i><span id="linkText">Connecting</span></div>
       </header>
@@ -289,7 +278,9 @@
     // around it, and everything it wants goes out the same way. What it may ask
     // for is fixed by "uses" in its plugin.json.
     (() => {
-      const KEY = "console/input/1/bus/1/level", NAME = "console/input/1/name";
+      // Which bus is this person's ears comes from the hub, set by whoever runs the team.
+      const NAME = "console/input/1/name";
+      let KEY = null, me = null, bus = "";
       const MIN = -90, KNEE = -60, MAX = 10, KNEE_AT = 0.1; // the first tenth of travel covers off to -60 dB
       const $ = (id) => document.getElementById(id);
       const fader = $("fader"), thumb = $("thumb"), fill = $("fill"), note = $("note");
@@ -353,8 +344,15 @@
       }
       function push(db) {
         lastSent = performance.now();
-        if (linked && board) toHub({ type: "set", plugin: board, key: KEY, value: db, ref: ++ref });
-        else say(board ? "Not connected to the hub, so this was not sent." : "No soundboard is connected.", true);
+        if (linked && board && KEY) toHub({ type: "set", plugin: board, key: KEY, value: db, ref: ++ref });
+        else {say(
+            !KEY
+              ? "Nobody has set which ear mix is yours yet."
+              : board
+              ? "Not connected to the hub, so this was not sent."
+              : "No soundboard is connected.",
+            true,
+          );}
       }
 
       const fromPointer = (e) => {
@@ -410,7 +408,7 @@
       }
 
       const line = (e) => {
-        const d = e.data, who = e.actor ? e.actor.replace("person:", "Person ") : "";
+        const d = e.data, who = e.actor ? (me && e.actor === me.id ? "You" : "Someone else") : "";
         switch (e.type) {
           case "skillfully.command.confirmed":
             return `${who} set the level to ${words(d.value)} dB. It was ${words(d.before)}.` +
@@ -423,7 +421,7 @@
           case "skillfully.command.rejected":
             return `${who} asked for ${d.requested}. Refused: ${d.message}.`;
           case "skillfully.state.changed": {
-            const c = d.changes && d.changes[KEY];
+            const c = d.changes && KEY && d.changes[KEY];
             return c ? `Changed at the board itself: now ${words(c.value)} dB, was ${words(c.before)}.` : null;
           }
           case "skillfully.plugin.crashed":
@@ -445,7 +443,7 @@
         for (const e of entries.slice().reverse()) {
           const about = e.subject || "";
           if (board && about !== board && !about.startsWith(board + ":")) continue;
-          if (about.includes(":") && !about.endsWith(KEY)) continue;
+          if (about.includes(":") && !(KEY && about.endsWith(KEY))) continue;
           const text = line(e);
           if (text) items.push([e.time, text]);
           if (items.length === 6) break;
@@ -474,13 +472,23 @@
           $("linkText").textContent = m.up ? "Connected" : "Reconnecting";
           if (m.up) say("");
         }
+        if (m.type === "hello") {
+          me = m.me;
+          const ears = me && me.slots ? me.slots.ears : undefined;
+          KEY = ears === undefined ? null : "console/input/1/bus/" + ears + "/level";
+          $("t").textContent = KEY ? "Input 1 in your ears" : "No ear mix yet";
+          bus = ears;
+          if (!KEY) say("Nobody has set which ear mix is yours yet. Ask whoever runs this hub.", true);
+        }
         if (m.type === "hello" || m.type === "plugins") {
           showPlugins(m.plugins);
           askLogSoon();
         }
         if (m.type === "state" && m.plugin === board) {
-          if (typeof m.values[NAME] === "string") $("inputName").textContent = m.values[NAME] + " on the board";
-          if (typeof m.values[KEY] === "number") {
+          if (typeof m.values[NAME] === "string") {
+            $("inputName").textContent = m.values[NAME] + " on the board, into bus " + bus;
+          }
+          if (KEY && typeof m.values[KEY] === "number") {
             held = m.values[KEY];
             // While a thumb is on the fader, the thumb is in charge. Otherwise the board is.
             if (!dragging && performance.now() > quietUntil) {

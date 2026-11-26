@@ -45,12 +45,27 @@ export interface DriverManifest extends ManifestBase {
   limits?: { writesPerSecond?: number; memoryMb?: number; cpuPercent?: number; messagesPerSecond?: number };
 }
 
+/** What an ability allows on one capability: all of it, or only the values named. */
+export type Allows = Access | { access: Access; keys: string[] };
+
+export interface Ability {
+  id: string;
+  title: string;
+  description?: string;
+  caution?: string;
+  /** Capability name (or "log") to what is allowed there. */
+  allows: Record<string, Allows>;
+}
+
 export interface ScreenManifest extends ManifestBase {
   kind: "screen";
   entry: string;
-  /** Capability name (or "log") to how much of it the screen may use. */
+  /** Capability name (or "log") to the most the screen may ever use. */
   uses: Record<string, Access>;
-  home?: string[];
+  /** What the screen offers that a role can switch on. */
+  abilities: Ability[];
+  /** Starter roles the screen suggests. */
+  roles?: { name: string; abilities: string[]; home?: boolean }[];
 }
 
 export interface SkillManifest extends ManifestBase {

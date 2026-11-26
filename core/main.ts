@@ -15,8 +15,6 @@ const CHOICES: Record<string, Omit<PluginConfig, "dir">> = {
   "sim-console": { mode: "act" },
   "sim-switch": { mode: "act" },
 };
-// Which screen each role lands on.
-const HOME = { default: "one-fader" };
 
 const plugins: PluginConfig[] = [];
 for await (const entry of Deno.readDir(`${root}/plugins`)) {
@@ -30,7 +28,6 @@ const hub = await startHub({
   hostname: lan ? "0.0.0.0" : "127.0.0.1",
   port: portArg ? Number(portArg.slice(7)) : 8080,
   plugins,
-  home: HOME,
 });
 
 await Promise.all([...hub.hosts.values()].map((h) => h.whenReady().catch(() => {})));
@@ -40,6 +37,12 @@ console.log(
 for (const h of hub.hosts.values()) console.log(`  driver ${h.id}: ${h.status}, mode ${h.mode}`);
 for (const id of hub.screens.keys()) console.log(`  screen ${id}`);
 for (const id of hub.skills.keys()) console.log(`  skill  ${id}`);
+if (hub.accounts.claimCode) {
+  console.log(
+    `\nThis hub has no owner yet. Open it in a browser and enter this code to become its first superuser:`,
+  );
+  console.log(`\n    ${hub.accounts.claimCode}\n`);
+}
 
 const stop = async () => {
   await hub.stop();

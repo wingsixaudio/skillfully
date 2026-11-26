@@ -147,13 +147,24 @@ From the hub:
   "contract": "1",
   "entry": "index.html",
   "uses": { "console": "write", "log": "read" },
-  "home": ["musician"]
+  "abilities": [
+    {
+      "id": "adjust",
+      "title": "Adjust my own ear mix",
+      "allows": { "console": { "access": "write", "keys": ["input/*/bus/{ears}/level"] } }
+    },
+    { "id": "history", "title": "See recent changes to my ear mix", "allows": { "log": "read" } }
+  ],
+  "roles": [{ "name": "Musician", "abilities": ["adjust", "history"], "home": true }]
 }
 ```
 
-- **uses**: capability names, each `read` or `write`. `log` is the hub's log. The hub tells the screen about
-  these and nothing else, and refuses anything beyond them.
-- **home**: roles this screen suggests itself as the first screen for. The hub's settings decide.
+- **uses**: capability names, each `read` or `write`. `log` is the hub's log. This is the most the screen may
+  ever do, for anyone.
+- **abilities**: what the screen offers that a role can switch on. Each says what it `allows`: a whole
+  capability (`"read"` or `"write"`), or only certain `keys`. In a key, a star stands for any one part, and a
+  part in braces is filled from the person. An ability may not allow anything outside `uses`.
+- **roles**: starter roles the screen suggests. A superuser decides whether to use them.
 
 ## Screen messages
 
@@ -161,32 +172,37 @@ A screen runs in a sandbox and talks to the hub by `postMessage` to the page aro
 
 From the screen:
 
-| Message                                    | Meaning                                                            |
-| ------------------------------------------ | ------------------------------------------------------------------ |
-| `{ type: "ready" }`                        | The screen has loaded. The hub answers with `hello` and the state. |
-| `{ type: "set", plugin, key, value, ref }` | Ask for a value to be set. Needs `write` on that capability.       |
-| `{ type: "log", limit, ref }`              | Ask for recent log entries. Needs `log`.                           |
+| Message                                    | Meaning                                                                                                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `{ type: "ready" }`                        | The screen has loaded. The hub answers with `hello` and the state.                                                             |
+| `{ type: "set", plugin, key, value, ref }` | Ask for a value to be set. The person needs an ability that allows writing that key.                                           |
+| `{ type: "log", limit, ref }`              | Ask for recent log entries. The person needs an ability that allows `log`, and gets entries about values they can already see. |
 
 To the screen:
 
-| Message                                                                               | Meaning                                                                 |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `{ type: "link", up }`                                                                | Whether the hub can be reached                                          |
-| `{ type: "hello", screen, uses, plugins }`                                            | The drivers this screen may use, with only the capabilities it declared |
-| `{ type: "plugins", plugins }`                                                        | The same list, when a driver's status or mode changes                   |
-| `{ type: "state", plugin, full, values }`                                             | Values, limited to the capabilities the screen declared                 |
-| `{ type: "ack", ref, ok, value, requested, adjusted }` or `{ ..., ok: false, error }` | The answer to a `set`                                                   |
-| `{ type: "log", ref, entries }`                                                       | The answer to a `log`                                                   |
+| Message                                                                               | Meaning                                                                                                 |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `{ type: "link", up }`                                                                | Whether the hub can be reached                                                                          |
+| `{ type: "hello", screen, me, abilities, plugins }`                                   | Who is signed in (`id`, `name`, `slots`), the abilities they were granted, and the drivers they may see |
+| `{ type: "plugins", plugins }`                                                        | The same list, when a driver's status or mode changes                                                   |
+| `{ type: "state", plugin, full, values }`                                             | Values, limited to what this person may see                                                             |
+| `{ type: "ack", ref, ok, value, requested, adjusted }` or `{ ..., ok: false, error }` | The answer to a `set`                                                                                   |
+| `{ type: "log", ref, entries }`                                                       | The answer to a `log`                                                                                   |
 
-A screen does not say who the person is. The hub's own page does.
+A screen does not say who the person is. The hub knows from their sign-in.
 
 ## What the hub does with a screen
 
 - Serves its files with a policy that gives it no origin, no network, no forms and no code from elsewhere.
-- Shows it inside the hub's own page, which carries its messages and forwards only `set` and `log`.
-- Refuses a connection from any browser page that is not the hub's own.
-- Refuses a `set` the screen did not declare, and writes the attempt to the log with the screen's name and the
+- Shows it inside the hub's own page, to a signed-in person who has at least one of its abilities, and to
+  nobody else.
+- Works out what that person may see and set from the screen's `uses`, the abilities their roles switch on,
+  and their own slots. A superuser gets everything in `uses`.
+- Tells the screen only about values the person may see.
+- Refuses a `set` the person was not granted, and writes the attempt to the log with the screen's name and the
   person's ID.
+- Refuses a connection from any browser page that is not the hub's own, and from anyone not signed in.
+- Disconnects the screen at once when the person's roles or slots change, or they are signed out.
 
 ## Skill manifest
 

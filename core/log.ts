@@ -44,8 +44,9 @@ export class Log {
   #insert;
   #listeners = new Set<(e: LogEntry) => void>();
 
-  constructor(path: string) {
-    this.#db = new DatabaseSync(path);
+  /** Give a file path, or a database another part of the hub already opened. */
+  constructor(where: string | DatabaseSync) {
+    this.#db = typeof where === "string" ? new DatabaseSync(where) : where;
     this.#db.exec(`
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS log (

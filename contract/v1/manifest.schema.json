@@ -180,7 +180,8 @@
         "version",
         "contract",
         "entry",
-        "uses"
+        "uses",
+        "abilities"
       ],
       "properties": {
         "kind": {
@@ -212,14 +213,37 @@
         "uses": {
           "$ref": "#/$defs/uses"
         },
-        "home": {
-          "description": "Roles this screen suggests itself as the first screen for. The hub's own settings decide.",
+        "abilities": {
+          "$ref": "#/$defs/abilities"
+        },
+        "roles": {
+          "description": "Starter roles this screen suggests, so a new team is not starting from a blank page. A superuser decides whether to use them.",
           "type": "array",
-          "maxItems": 16,
-          "uniqueItems": true,
+          "maxItems": 8,
           "items": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9-]{1,30}$"
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "abilities"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "abilities": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "home": {
+                "type": "boolean"
+              }
+            }
           }
         }
       }
@@ -263,6 +287,87 @@
         },
         "uses": {
           "$ref": "#/$defs/uses"
+        }
+      }
+    },
+    "abilities": {
+      "description": "What this plugin offers that a role can switch on. Each ability spells out exactly what it lets a person do, so the hub can enforce it. Nothing here may go beyond what the plugin lists under uses.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "allows"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,30}$"
+          },
+          "title": {
+            "description": "What a superuser sees when building a role.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "caution": {
+            "description": "A plain warning shown before this ability is handed out, for example: others will hear this.",
+            "type": "string",
+            "maxLength": 200
+          },
+          "allows": {
+            "description": "Capability name (or 'log') to what the ability allows there: read, write, or one of those limited to certain values.",
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {
+              "pattern": "^[a-z][a-z0-9-]{1,30}$"
+            },
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "read",
+                    "write"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "access",
+                    "keys"
+                  ],
+                  "properties": {
+                    "access": {
+                      "enum": [
+                        "read",
+                        "write"
+                      ]
+                    },
+                    "keys": {
+                      "description": "Value names this ability covers, without the capability. A star stands for any one part. A part in braces is filled from the person, for example input/*/bus/{ears}/level covers only the sends into that person's own bus.",
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 120,
+                        "pattern": "^(\\*|\\{[a-z][a-z0-9]*\\}|[a-z0-9][a-z0-9-]*)(/(\\*|\\{[a-z][a-z0-9]*\\}|[a-z0-9][a-z0-9-]*)){0,9}$"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
         }
       }
     }

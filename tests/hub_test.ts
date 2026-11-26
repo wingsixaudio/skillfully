@@ -6,8 +6,8 @@ import { board, FIXTURES, hubWith, LEVEL, ofType, Phone, SIM, sleep, until } fro
 
 Deno.test("a phone moves one fader, the board reads it back, and another phone sees it", async () => {
   const hub = await hubWith([{ dir: SIM, mode: "act" }]);
-  const evan = await Phone.connect(hub, "person:p1");
-  const other = await Phone.connect(hub, "person:p2");
+  const evan = await Phone.connect(hub, "p1");
+  const other = await Phone.connect(hub, "p2");
   await until("both phones have the full state", () => LEVEL in evan.state && LEVEL in other.state);
   assertEquals(evan.state[LEVEL], -90);
 
@@ -25,13 +25,18 @@ Deno.test("a phone moves one fader, the board reads it back, and another phone s
 
 Deno.test("the log tells the whole story of one move", async () => {
   const hub = await hubWith([{ dir: SIM, mode: "act" }]);
-  const phone = await Phone.connect(hub, "person:p1");
+  const phone = await Phone.connect(hub, "p1");
   const ack = await phone.set(LEVEL, -12);
 
   const story = hub.log.read({ traceid: ack.traceid });
   assertEquals(story.map((e) => e.type), ["skillfully.command.sent", "skillfully.command.confirmed"]);
   const [sent, confirmed] = story;
-  assertEquals(sent.actor, "person:p1", "who: an ID, never a name");
+  assertEquals(
+    sent.actor,
+    phone.id,
+    "who: the signed-in person's ID, never a name and never the screen's word for it",
+  );
+  assert(/^p_[a-z0-9]{8}$/.test(phone.id));
   assertEquals(sent.via, "screen/one-fader", "through what");
   assertEquals(sent.subject, `sim-console:${LEVEL}`, "about what");
   assertEquals(sent.data.before, -90, "what it was before");
@@ -47,7 +52,7 @@ Deno.test("the log tells the whole story of one move", async () => {
 
 Deno.test("during a drag the newest value wins and nothing is lost from the record", async () => {
   const hub = await hubWith([{ dir: SIM, mode: "act", settings: { answerDelayMs: 25 } }]);
-  const phone = await Phone.connect(hub, "person:p1");
+  const phone = await Phone.connect(hub, "p1");
 
   // 200 moves over about half a second, the way a thumb drags, while the board takes 25 ms to answer each command.
   const moves = 200;
@@ -73,7 +78,7 @@ Deno.test("during a drag the newest value wins and nothing is lost from the reco
 
 Deno.test("in Listen mode nothing reaches the plugin, and the log says what did not happen", async () => {
   const hub = await hubWith([{ dir: SIM, mode: "listen" }]);
-  const phone = await Phone.connect(hub, "person:p1");
+  const phone = await Phone.connect(hub, "p1");
 
   const ack = await phone.set(LEVEL, -8);
   assertEquals(ack.ok, false);
@@ -83,11 +88,11 @@ Deno.test("in Listen mode nothing reaches the plugin, and the log says what did 
   assertEquals(ofType(hub, "skillfully.command.sent").length, 0);
   const blocked = ofType(hub, "skillfully.command.blocked");
   assertEquals(blocked.length, 1);
-  assertEquals(blocked[0].actor, "person:p1");
+  assertEquals(blocked[0].actor, phone.id);
   assertEquals(blocked[0].data.requested, -8);
 
   // Switching to Act lets the same request through.
-  board(hub).setMode("act", { actor: "person:p9", via: "test" });
+  board(hub).setMode("act", { actor: "p_test", via: "test" });
   assert((await phone.set(LEVEL, -8)).ok);
   assertEquals(ofType(hub, "skillfully.plugin.mode")[0].data, { before: "listen", mode: "act" });
 
@@ -101,7 +106,7 @@ Deno.test("a change made at the board is logged as the board's and phones are to
     mode: "listen",
     settings: { boardChanges: [{ afterMs: 150, key: LEVEL, value: -3 }] },
   }]);
-  const phone = await Phone.connect(hub, "person:p1");
+  const phone = await Phone.connect(hub, "p1");
   await until("the phone sees the board's change", () => phone.state[LEVEL] === -3);
   const [change] = ofType(hub, "skillfully.state.changed");
   assertEquals(change.via, "board");
@@ -114,7 +119,8 @@ Deno.test("a change made at the board is logged as the board's and phones are to
 
 Deno.test("requests the console cannot honor are refused and recorded", async () => {
   const hub = await hubWith([{ dir: SIM, mode: "act" }]);
-  const phone = await Phone.connect(hub, "person:p1");
+  // A superuser, so that the hub lets every request through and the device's own answers are what is tested.
+  const phone = await Phone.connect(hub, hub.owner);
   assertEquals((await phone.set("console/input/49/bus/1/level", 0)).error.code, "unknown_key");
   assertEquals((await phone.set("console/input/1/name", "Evan")).error.code, "read_only");
   assertEquals((await phone.set(LEVEL, "loud")).error.code, "invalid");
@@ -127,7 +133,7 @@ Deno.test("requests the console cannot honor are refused and recorded", async ()
 
 Deno.test("a crash is logged, the plugin comes back, and the fader works again", async () => {
   const hub = await hubWith([{ dir: SIM, mode: "act" }]);
-  const phone = await Phone.connect(hub, "person:p1");
+  const phone = await Phone.connect(hub, "p1");
   assert((await phone.set(LEVEL, -8)).ok);
 
   board(hub).crash();
@@ -160,7 +166,7 @@ Deno.test("misbehaving neighbors cannot disturb the console", async () => {
     { dir: `${FIXTURES}/broken-manifest` },
     { dir: `${FIXTURES}/no-such-plugin` },
   ]);
-  const phone = await Phone.connect(hub, "person:p1");
+  const phone = await Phone.connect(hub, "p1");
 
   // Keep the fader moving while the neighbor crashes and restarts.
   for (let i = 0; i < 20; i++) {
@@ -232,20 +238,31 @@ Deno.test("a plugin whose script heap outgrows its cap is stopped and logged", a
   await hub.stop();
 });
 
-Deno.test("the hub serves the state, the log and a catalog of everything installed", async () => {
+Deno.test("the hub serves the state, the log and a catalog, to people who are signed in", async () => {
   const hub = await hubWith([{ dir: SIM, mode: "act" }]);
-  const base = `http://127.0.0.1:${hub.port}`;
-  await board(hub).set(LEVEL, -8, { via: "test", actor: "person:p1" });
-  assertEquals((await (await fetch(base + "/api/state?plugin=sim-console")).json())[LEVEL], -8);
-  const log = await (await fetch(base + "/api/log?type=skillfully.command.confirmed")).json();
+  await board(hub).set(LEVEL, -8, { via: "test", actor: "p_test" });
+  assertEquals((await (await hub.get("/api/state?plugin=sim-console")).json())[LEVEL], -8);
+  const log = await (await hub.get("/api/log?type=skillfully.command.confirmed")).json();
   assertEquals(log.length, 1);
   assertEquals(log[0].specversion, "1.0");
-  const catalog = await (await fetch(base + "/api/catalog")).json();
+  const catalog = await (await hub.get("/api/catalog")).json();
   assertEquals(catalog.plugins.map((p: { kind: string; id: string }) => `${p.kind} ${p.id}`), [
     "driver sim-console",
     "screen one-fader",
   ]);
   assert(catalog.capabilities.some((c: { capability: string }) => c.capability === "console"));
-  await (await fetch(base + "/plugin")).body?.cancel();
+
+  // Nobody gets these without signing in, and the log and state are for superusers.
+  const musician = await hub.member("Sam");
+  for (const path of ["/api/log", "/api/state?plugin=sim-console", "/api/catalog"]) {
+    const res = await hub.get(path, null);
+    await res.body?.cancel();
+    assertEquals(res.status, 401, `${path} without signing in`);
+  }
+  for (const path of ["/api/log", "/api/state?plugin=sim-console"]) {
+    const res = await hub.get(path, musician);
+    await res.body?.cancel();
+    assertEquals(res.status, 403, `${path} as a musician`);
+  }
   await hub.stop();
 });

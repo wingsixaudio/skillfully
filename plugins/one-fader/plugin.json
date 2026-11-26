@@ -2,10 +2,59 @@
   "kind": "screen",
   "id": "one-fader",
   "name": "One fader",
-  "description": "A single ear-mix fader: input 1 into bus 1 on the first soundboard, with the last few log entries about it. The smallest screen that proves the path from a thumb to a board and back.",
+  "description": "One ear-mix fader: input 1 into the person's own bus on the first soundboard, with the last few log entries about it. The smallest screen that proves the path from a thumb to a board and back.",
   "version": "0.1.0",
   "contract": "1",
   "entry": "index.html",
-  "uses": { "console": "write", "log": "read" },
-  "home": ["musician"]
+  "uses": {
+    "console": "write",
+    "log": "read"
+  },
+  "abilities": [
+    {
+      "id": "watch",
+      "title": "See my own ear mix",
+      "description": "See the sends into the person's own bus, and the names of the inputs.",
+      "allows": {
+        "console": {
+          "access": "read",
+          "keys": [
+            "input/*/bus/{ears}/level",
+            "input/*/name"
+          ]
+        }
+      }
+    },
+    {
+      "id": "adjust",
+      "title": "Adjust my own ear mix",
+      "description": "Change the sends into the person's own bus. Nobody else's.",
+      "allows": {
+        "console": {
+          "access": "write",
+          "keys": [
+            "input/*/bus/{ears}/level"
+          ]
+        }
+      }
+    },
+    {
+      "id": "history",
+      "title": "See recent changes to my ear mix",
+      "allows": {
+        "log": "read"
+      }
+    }
+  ],
+  "roles": [
+    {
+      "name": "Musician",
+      "abilities": [
+        "watch",
+        "adjust",
+        "history"
+      ],
+      "home": true
+    }
+  ]
 }

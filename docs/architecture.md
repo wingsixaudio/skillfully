@@ -4,7 +4,7 @@ Skillfully is a small hub with everything else plugged into it. The hub knows ab
 values, commands, people and the log. It does not know what a soundboard, a fader, a light or an ear mix is.
 Those arrive as plugins.
 
-The first use is ear mixes for a worship team. Nothing in the hub is written for that use.
+The first use is ear mixes for a band or production team. Nothing in the hub is written for that use.
 
 ## The pieces
 
@@ -65,13 +65,32 @@ by an agent.
 **One log.** Every request, confirmation, refusal, crash and device-side change is one append-only record,
 with people as IDs. Undo, audit, habits, reports and anything an agent does later all read from it.
 
-## Roles and home screens
+## People, roles and abilities
 
-The hub keeps a table of which screen each role lands on. A musician opens the hub and sees ear mixes; someone
-running lights would see a lighting screen. A screen can suggest roles in its manifest (`home`), and the hub's
-own settings decide.
+The hub owns one list of people. Every plugin that needs to know who someone is reads that list; none keeps
+its own. Signing in belongs to the hub's own pages, so a plugin never sees a PIN or a password.
 
-Sign-in is not built yet, so today everyone is the default role.
+What a person can do is worked out from four things and is never more than any of them:
+
+|                             | Who sets it                          | Example                                                  |
+| --------------------------- | ------------------------------------ | -------------------------------------------------------- |
+| What a screen **uses**      | The screen's author, in its manifest | "soundboard: write, log: read"                           |
+| The **abilities** it offers | The screen's author                  | "Adjust my own ear mix"                                  |
+| The **roles** a person has  | A superuser                          | Musician = see, adjust and history on the ear-mix screen |
+| The person's own **slots**  | A superuser                          | Evan's ears are bus 7                                    |
+
+An ability spells out exactly which values it covers, so the hub can enforce it. `input/*/bus/{ears}/level`
+means "the sends into this person's own bus": the part in braces is filled from the person. The screen is not
+trusted to hold itself to any of this. It is told only about values the person may see, and a request for
+anything else is refused and logged with the person's ID.
+
+**Superuser** is the only role the hub is born with. A superuser has every ability of every screen, without
+the per-person limit, and manages people, roles and devices. Any person can be made a superuser by another
+superuser, and a hub can never be left without one. Every other role is data: a name and a set of abilities,
+made on the People page. A screen can suggest starter roles so a new team is not starting from a blank page.
+
+Changes take effect at once. When a person's roles or slots change, or they are signed out or turned off,
+their open screens are disconnected and come back under the new rules or not at all.
 
 ## What is deliberately not here
 
@@ -90,7 +109,9 @@ Sign-in is not built yet, so today everyone is the default role.
 | **Screens described as data**            | A screen given as a description and drawn from trusted components, so an agent can author one without writing code. It would be one more screen, running in the same sandbox |
 | **Agent access**                         | A thin MCP server over the catalog and the log, so an agent sees what a screen can see and is held to a `uses` list like a screen is                                         |
 | **Install, update, rollback, uninstall** | Today plugins are folders the hub scans at start                                                                                                                             |
-| **Sign-in and roles**                    | Today the shell says who the person is                                                                                                                                       |
+| **A place for plugins to keep data**     | The team roster and saved mixes need somewhere to live. Screens cannot store anything yet                                                                                    |
+| **Abilities for skills**                 | A skill would declare abilities the same way a screen does, and an agent would get them through a role                                                                       |
+| **HTTPS**                                | Sign-in is unprotected on the network today                                                                                                                                  |
 
 See `docs/decisions.md` for what was decided, tested and left open, and `CONTRIBUTING.md` for how to write
 each kind of plugin.

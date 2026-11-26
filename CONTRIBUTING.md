@@ -9,10 +9,13 @@ There are four things you can add. None needs a change to the hub.
 | Give people something to tap | [Screen](#a-screen)         | HTML, and whatever else you like to build pages with |
 | Teach an agent a job         | [Skill](#a-skill)           | How to write the job down clearly                    |
 
-Every plugin is a folder in `plugins/` with a `plugin.json`. Run `deno task hub` and the hub picks it up. If
-the hub refuses it, the reason is in the log: `http://127.0.0.1:8080/api/log?type=skillfully.plugin.refused`.
+Every plugin is a folder in `plugins/` with a `plugin.json`. Check it with
+`deno task check-plugin plugins/<your-plugin>`, which tells you exactly what the hub would say. Then run
+`deno task hub` and the hub picks it up. If the hub refuses it, the reason is in the log:
+`http://127.0.0.1:8080/api/log?type=skillfully.plugin.refused`.
 
-Before you open a pull request, run `deno task test`.
+Before you open a pull request, run `deno task test`. Every pull request is also checked automatically:
+formatting, lint, every plugin, every test, and every driver against the contract.
 
 ## A capability
 
@@ -60,9 +63,28 @@ A screen is a web page. Build it with anything; the hub serves the files in your
 
 1. Copy `plugins/one-fader`.
 2. In `plugin.json`, list what the screen needs under `uses`, and no more:
-   `{ "console": "write", "log": "read" }`. The hub gives the screen exactly this list, and logs any attempt
-   to go beyond it.
-3. Talk to the hub with messages. There is no library to load.
+   `{ "console": "write", "log": "read" }`.
+3. List the **abilities** the screen offers. An ability is one thing a team might want to hand out or hold
+   back, written so the hub can enforce it:
+
+```json
+"abilities": [
+  { "id": "watch", "title": "See my own ear mix",
+    "allows": { "console": { "access": "read", "keys": ["input/*/bus/{ears}/level", "input/*/name"] } } },
+  { "id": "adjust", "title": "Adjust my own ear mix",
+    "allows": { "console": { "access": "write", "keys": ["input/*/bus/{ears}/level"] } } }
+]
+```
+
+- `keys` limits an ability to certain values. A star stands for any one part. A part in braces, like `{ears}`,
+  is filled from the person, so one ability means "my own" for everyone. A superuser sets each person's values
+  on the People page.
+- Leave `keys` out (`"console": "read"`) to cover the whole capability.
+- Add a `caution` to any ability others would notice, such as one that changes what everyone hears.
+- An ability can never reach past `uses`. The hub refuses a screen that tries.
+
+4. Optionally suggest starter `roles`, so a new team can add "Musician" in one tap.
+5. Talk to the hub with messages. There is no library to load.
 
 ```js
 // Tell the hub's shell you are ready. It answers with "hello" and the current state.
@@ -71,8 +93,11 @@ parent.postMessage({ type: "ready" }, "*");
 addEventListener("message", (e) => {
   if (e.source !== parent) return;
   const m = e.data;
-  if (m.type === "hello") { /* m.plugins: the drivers you may use, with their capabilities */ }
-  if (m.type === "state") { /* m.plugin, m.values, m.full */ }
+  if (m.type === "hello") {
+    /* m.me: who is signed in and their slots. m.abilities: what they were granted.
+                                m.plugins: the drivers they may see */
+  }
+  if (m.type === "state") { /* m.plugin, m.values, m.full. Only values this person may see */ }
   if (m.type === "ack") { /* the answer to a set: m.ok, m.value or m.error */ }
   if (m.type === "link") { /* m.up: whether the hub is reachable */ }
 });
@@ -87,8 +112,13 @@ parent.postMessage({
 }, "*");
 ```
 
+Design the screen around `m.abilities`: show a fader only to someone who can move it. But do not rely on that
+for safety. The hub decides, and refuses and logs anything the person was not granted, whatever your page
+sends.
+
 What a screen cannot do, by design: reach the network, load code from elsewhere, read the hub's pages or
-storage, or change anything it did not declare. Put your scripts, styles, images and fonts in your folder.
+storage, see a PIN or session, say who the person is, or change anything the person was not granted. Put your
+scripts, styles, images and fonts in your folder.
 
 When you show a value after setting it, show the `value` from the `ack`. That is what the device holds, which
 may differ from what was asked.
