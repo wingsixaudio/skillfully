@@ -5,9 +5,14 @@
   "description": "config/devices/<id>.json. What a superuser decided about one device. A key that is left out means: leave that as it is. No secret is ever in this file.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["kind", "id"],
+  "required": [
+    "kind",
+    "id"
+  ],
   "properties": {
-    "kind": { "const": "device" },
+    "kind": {
+      "const": "device"
+    },
     "id": {
       "description": "The device's id on this hub. It is also the file's name.",
       "type": "string",
@@ -27,16 +32,31 @@
       "description": "Its own settings, by the names it gives them. Secrets are never here: they stay in the hub.",
       "type": "object",
       "maxProperties": 64,
-      "propertyNames": { "type": "string", "minLength": 1, "maxLength": 64 },
-      "additionalProperties": { "type": ["string", "number", "boolean"], "maxLength": 2000 }
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ],
+        "maxLength": 2000
+      }
     },
     "reach": {
       "description": "What it may reach on the network. Each list, when given, is the whole list.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "allowed": { "$ref": "#/$defs/grants" },
-        "refused": { "$ref": "#/$defs/grants" }
+        "allowed": {
+          "$ref": "#/$defs/allowed"
+        },
+        "refused": {
+          "$ref": "#/$defs/grants"
+        }
       }
     },
     "from": {
@@ -44,10 +64,25 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "source": { "enum": ["hub", "file", "store"] },
-        "store": { "type": "string", "maxLength": 80 },
-        "version": { "type": "string", "maxLength": 40 },
-        "commit": { "type": "string", "maxLength": 64 }
+        "source": {
+          "enum": [
+            "hub",
+            "file",
+            "store"
+          ]
+        },
+        "store": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "commit": {
+          "type": "string",
+          "maxLength": 64
+        }
       }
     },
     "note": {
@@ -61,7 +96,22 @@
       "type": "array",
       "maxItems": 64,
       "uniqueItems": true,
-      "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      }
+    },
+    "allowed": {
+      "description": "host:port pairs, the same shape a driver's manifest asks in: a part in braces is filled from its settings. lan is any address on the local network. listen opens ports on the hub's computer.",
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "maxLength": 200,
+        "pattern": "^(lan|listen|(\\{[A-Za-z][A-Za-z0-9]*\\}|\\[[0-9A-Fa-f:]+\\]|[A-Za-z0-9.-]+):(\\{[A-Za-z][A-Za-z0-9]*\\}|[0-9]{1,5}))$"
+      }
     }
   }
 }

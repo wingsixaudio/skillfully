@@ -5,6 +5,7 @@
 //   /admin/people     People   who is on the team and what each can do
 //   /admin/hub        Hub      the hub's own settings
 let people = [], roles = [], offered = [], drivers = [], meId = "";
+let proposed = { changes: 0, power: 0, problems: 0 };
 const SUPER = "superuser";
 
 // --- One confirmation that holds for a few minutes ---
@@ -124,6 +125,7 @@ async function load() {
   const r = await call("/admin/api/all");
   if (!r.ok) return location.replace("/");
   ({ people, roles, offered, drivers } = r);
+  proposed = r.config || proposed;
   meId = r.me;
   unlockedUntil = r.unlocked ? Date.now() + r.unlocked * 1000 : 0;
   drawLock();
@@ -518,6 +520,24 @@ function needs() {
       list.push({ d, text: d.name + " has a newer version, " + d.update.version + ", in the store." });
     }
   }
+  // What the files in the config folder propose is answered in the Hub place, where all of it is shown.
+  if (proposed.problems) {
+    list.push({
+      text: proposed.problems === 1
+        ? "A file in the config folder could not be read."
+        : proposed.problems + " files in the config folder could not be read.",
+      open: ["/admin/hub", "Open Hub"],
+    });
+  } else if (proposed.changes) {
+    list.push({
+      text: "Files in the config folder propose " +
+        (proposed.changes === 1 ? "1 change" : proposed.changes + " changes") +
+        (proposed.power
+          ? ". " + proposed.power + (proposed.power === 1 ? " needs" : " need") + " your yes."
+          : "."),
+      open: ["/admin/hub", "Open Hub"],
+    });
+  }
   return list;
 }
 const lower = (words) => words ? words[0].toLowerCase() + words.slice(1).replace(/\.$/, "") : "";
@@ -557,7 +577,11 @@ function drawHome() {
       b.onclick = n.look[1];
       row.append(b);
     }
-    row.append(link(deviceAt(n.d.id), "Open " + n.d.name, { className: "open" }));
+    row.append(
+      n.open
+        ? link(n.open[0], n.open[1], { className: "open" })
+        : link(deviceAt(n.d.id), "Open " + n.d.name, { className: "open" }),
+    );
     box.append(
       el(
         "div",
@@ -587,6 +611,37 @@ function drawHome() {
 // What is decided about each device is also a file in the hub's data folder. This shows what the files
 // say that the hub does not: what an edit would change, and anything wrong with a file. It reads only.
 let configDrawn = 0;
+const TRUST = {
+  strict: "Strict. A change that hands out power waits for your yes.",
+  hour: "Trusting. Applying does everything the files say.",
+  always: "Always trusting. Applying does everything the files say.",
+};
+// Do what the files say, after showing exactly what that is. approve: the keys said yes to, or "all".
+function applyConfig(title, list, approve, okText) {
+  ask(title, (x) => {
+    for (const c of list) {
+      x.append(
+        el(
+          "p",
+          { style: "margin:0 0 10px" },
+          c.words,
+          c.caution ? el("span", { className: "caution", textContent: " " + c.caution }) : "",
+        ),
+      );
+    }
+    x.append(
+      el("p", {
+        className: "help",
+        textContent: "A device restarts when its settings or what it may reach change.",
+      }),
+    );
+    confirmField(x);
+  }, async () => {
+    const r = await sureCall("/admin/api/config/apply", { approve });
+    configDrawn = 0;
+    return r;
+  }, okText);
+}
 async function drawConfig() {
   configDrawn = Date.now();
   const r = await call("/admin/api/config");
@@ -595,31 +650,118 @@ async function drawConfig() {
   $("configWhere").textContent = "Everything decided about each device is also a file, one per device, in " +
     r.where + "/devices. A person or an agent can read them, and propose a change by editing one. " +
     "No secret is ever written there.";
+  const trusting = r.trust.mode !== "strict";
   const box = $("configList");
   box.innerHTML = "";
+
+  // How much a file may do without being asked about. Kept by the hub, never in a file.
+  const change = el("button", { className: "small quiet", textContent: "Change" });
+  change.onclick = () =>
+    ask("How much may the files do?", (x) => {
+      for (
+        const [mode, words] of [
+          ["strict", "Strict: a change that hands out power waits for your yes"],
+          ["hour", "Trusting for an hour, then strict again by itself"],
+          ["always", "Always trusting: applying does everything the files say"],
+        ]
+      ) {
+        x.append(
+          el(
+            "label",
+            { className: "check" },
+            el("input", { type: "radio", name: "trust", value: mode, checked: mode === r.trust.mode }),
+            el("span", { textContent: words }),
+          ),
+        );
+      }
+      x.append(
+        el("p", {
+          className: "help",
+          textContent:
+            "Whoever can write to the config folder can then let a device reach things and let people control it, without you seeing each change first.",
+        }),
+      );
+      confirmField(x);
+    }, async () => {
+      const picked = document.querySelector("input[name=trust]:checked");
+      const done = await sureCall("/admin/api/config/trust", { mode: picked ? picked.value : "strict" });
+      configDrawn = 0;
+      return done;
+    });
+  box.append(
+    el(
+      "div",
+      { className: "row", id: "configTrust", style: "margin-bottom:12px" },
+      el("span", {
+        className: "status" + (trusting ? " wait" : ""),
+        style: "margin:0;flex:1",
+        textContent: TRUST[r.trust.mode] +
+          (r.trust.minutes ? " Strict again in " + r.trust.minutes + " minutes." : ""),
+      }),
+      change,
+    ),
+  );
+
   for (const p of r.problems) {
     box.append(el("p", { className: "status bad", textContent: p.file + " was not read: " + p.message }));
   }
+  const waits = (c) => c.power && !trusting;
   for (const c of r.changes) {
+    const row = el(
+      "div",
+      { className: "row" },
+      el("span", {
+        className: "chip" + (waits(c) ? " on" : ""),
+        textContent: waits(c) ? "Waits for your yes" : "Done when you apply",
+      }),
+    );
+    if (waits(c) && !r.problems.length) {
+      const yes = el("button", { className: "small", textContent: "Say yes" });
+      yes.onclick = () => applyConfig("Say yes to this?", [c], [c.key], "Yes, do it");
+      row.append(yes);
+    }
     box.append(
       el(
         "div",
-        { className: "item" },
-        el("p", { style: "margin:0 0 6px", textContent: c.words }),
-        el("span", {
-          className: "chip" + (c.power ? " on" : ""),
-          textContent: c.power ? "Would wait for your yes" : "Would apply at once",
-        }),
+        { className: "item change" },
+        el(
+          "p",
+          { style: "margin:0 0 6px" },
+          c.words,
+          c.caution ? el("span", { className: "caution", textContent: " " + c.caution }) : "",
+        ),
+        row,
       ),
     );
   }
   for (const n of r.notes) box.append(el("p", { className: "help", textContent: n.words }));
-  const any = r.problems.length + r.changes.length + r.notes.length;
-  if (!any) {
+  if (!(r.problems.length + r.changes.length + r.notes.length)) {
     box.append(el("p", { className: "status ok", textContent: "The files say the same as the hub." }));
   }
-  $("configNext").textContent = r.changes.length
-    ? "Nothing above has been done. Applying what a file says is the next thing to be built."
+
+  const ready = r.changes.filter((c) => !waits(c)), waiting = r.changes.filter(waits);
+  const buttons = el("div", { className: "row", style: "margin-top:12px" });
+  if (ready.length && !r.problems.length) {
+    const b = el("button", {
+      className: "small",
+      id: "configApply",
+      textContent: ready.length === 1 ? "Apply 1 change" : "Apply " + ready.length + " changes",
+    });
+    b.onclick = () => applyConfig("Apply what the files say", ready, [], "Apply");
+    buttons.append(b);
+  }
+  if (waiting.length > 1 && !r.problems.length) {
+    const b = el("button", {
+      className: "small quiet",
+      id: "configYesAll",
+      textContent: "Say yes to all " + waiting.length,
+    });
+    b.onclick = () => applyConfig("Say yes to all of these?", r.changes, "all", "Yes, do all of it");
+    buttons.append(b);
+  }
+  box.append(buttons);
+  $("configNext").textContent = r.problems.length
+    ? "Nothing is applied while a file cannot be read. Fix or remove it first."
     : "";
 }
 

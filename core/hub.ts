@@ -113,15 +113,26 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     addedRoot: addedDir ? `${await realPath(addedDir)}/` : undefined,
   });
   // What is decided about each device is also kept as text, for people and agents to read and propose from.
+  const kept = new Kept(db);
   const config = new Config(dataDir, {
     ids: () => [...devices.hosts.keys()],
     record: (id) => registry.get(id),
     known: (id) => devices.known(id),
     failed: (id, message) =>
       log.append({ type: "skillfully.config.unwritten", source: "core", subject: id, data: { message } }),
+    make: {
+      control: (id, on, who) => {
+        devices.setMode(id, on ? "act" : "listen", who);
+        screens.tellPlugins();
+      },
+      settings: (id, settings, changed, who) => devices.setSettings(id, settings, changed, who),
+      reach: (id, now, said, who) => devices.answer(id, now, said, who),
+    },
+    kept: { get: () => kept.get("config.trust"), set: (value) => kept.set("config.trust", value) },
+    note: (type, who, data) => log.append({ type, source: "core", ...who, data }),
   });
   registry.onChange((id, before, after) => config.recordChanged(id, before, after));
-  const screens = new Screens({ accounts, approvals, capabilities, devices, log });
+  const screens: Screens = new Screens({ accounts, approvals, capabilities, devices, log });
   const hosts = devices.hosts;
   const taken = (id: string) => hosts.has(id) || screens.all.has(id) || skills.has(id);
 
@@ -146,7 +157,6 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   await config.start();
 
   // The newest signed list this hub has read from this store is remembered, so an older one is refused.
-  const kept = new Kept(db);
   const newest = `store.newest ${opts.storeUrl ?? ""}`;
   const store = new Store(opts.storeUrl, opts.storeKeys, {
     get: () => kept.get(newest),

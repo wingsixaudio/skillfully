@@ -102,8 +102,10 @@ export function adminApi(deps: AdminDeps) {
   });
 
   /** Everything the admin page shows. */
-  function overview(me: Person, session: string) {
+  async function overview(me: Person, session: string) {
     return {
+      // How much the files in the config folder propose. The Hub place shows what.
+      config: await config.counts(),
       ok: true,
       me: me.id,
       // The seconds this session may still make changes without saying who it is again.
@@ -265,6 +267,32 @@ export function adminApi(deps: AdminDeps) {
       case "lock":
         accounts.lock(me.id, session);
         return json({ ok: true, unlocked: 0 });
+
+      case "config/apply": {
+        // Do what the files say. Always a superuser who has just said who they are, however little it changes.
+        const approve = b.approve === "all"
+          ? "all" as const
+          : Array.isArray(b.approve)
+          ? b.approve.map(String).slice(0, 5000)
+          : [];
+        const no = await sure();
+        if (no) return no;
+        try {
+          const r = await config.apply(approve, { actor: me.id, via: "config" });
+          return json(r, r.ok ? 200 : 400);
+        } catch (err) {
+          return refuse(400, sentence(err));
+        }
+      }
+      case "config/trust": {
+        if (b.mode !== "strict" && b.mode !== "hour" && b.mode !== "always") {
+          return refuse(400, "Choose strict, trusting for an hour, or always trusting.");
+        }
+        const no = await sure();
+        if (no) return no;
+        config.setTrust(b.mode, { actor: me.id, via: "admin" });
+        return json({ ok: true, trust: config.trust() });
+      }
       case "person":
         return outcome(accounts.addPerson(me.id, b.name));
       case "person/invite":
@@ -517,10 +545,12 @@ export function adminApi(deps: AdminDeps) {
       if (path === "store") {
         return await shelf((new URL(req.url).searchParams.get("find") ?? "").slice(0, 80));
       }
-      if (path === "all") return json(overview(me, session), 200, { "cache-control": "no-store" });
-      // What the files in the config folder would change. Reading only: nothing here applies any of it.
+      if (path === "all") return json(await overview(me, session), 200, { "cache-control": "no-store" });
+      // What the files in the config folder would change. Reading only: applying is a change, made below.
       if (path === "config") {
-        return json({ ok: true, ...(await config.overview()) }, 200, { "cache-control": "no-store" });
+        return json({ ok: true, ...(await config.overview()), trust: config.trust() }, 200, {
+          "cache-control": "no-store",
+        });
       }
       return refuse(404, "Not found.");
     }

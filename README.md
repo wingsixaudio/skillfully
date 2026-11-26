@@ -99,8 +99,13 @@ What a superuser decides about each device is also written to `data/config/devic
 can control it, its settings, and what it may reach. The files are meant to be read, compared and edited, by a
 person or an agent. Their shape is `contract/v1/config.device.schema.json`. No secret is ever written to one.
 
-Editing a file changes nothing yet. Open **Hub** in the admin to see what your edit would change, and which of
-those changes would wait for a superuser's yes. Applying them from there is the next piece to be built.
+Editing a file is a proposal. Open **Hub** in the admin to see what your edit would change. **Apply** does the
+changes that hand out nothing. A change that hands out power, such as letting people control a device or
+letting it reach something, waits there for a superuser's yes, one by one. A hub can be made trusting, for an
+hour or always, and then Apply does everything the files say.
+
+Not from a file yet: adding a device, renaming one, changing its version, and anything about screens, roles or
+people.
 
 ## Layout
 

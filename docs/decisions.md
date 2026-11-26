@@ -302,10 +302,23 @@ database to readable files.
 as one that hands out power or one that does not. Letting people control a device and letting a device reach
 something are power. Taking either away is not, and neither is a setting, because a device pointed somewhere
 new still has to ask before it reaches it. When the hub itself changes a device, it rewrites only the part of
-the file it changed, so an edit somebody is in the middle of is not lost. This slice shows the plan and
-applies none of it. Applying, the list of changes waiting for a yes, and the switch between strict and
-trusting come next. JSON was chosen over a format with comments because the hub already checks JSON against
-schemas; every file takes a `note` instead.
+the file it changed, so an edit somebody is in the middle of is not lost. JSON was chosen over a format with
+comments because the hub already checks JSON against schemas; every file takes a `note` instead.
+
+**Applying is a superuser's act, and power needs a yes by name.** Nothing in a file takes effect until a
+superuser who has just confirmed who they are applies it, from the Hub place. Changes that hand out nothing
+are then made. A change that hands out power is made only when its exact key was said yes to: the key names
+the device, the kind of change and the thing given, so a yes cannot be spent on a file that changed after it
+was read. One file that cannot be read stops everything, so a hub never holds half of what somebody meant.
+Every change goes through the same door the admin page uses, so the same checks run and the same lines are
+logged, marked as coming from the config folder. What may be allowed from a file has the same shape a driver's
+manifest asks in: an address and a port, `lan` or `listen`, and nothing else.
+
+**Strict or trusting is a switch the files cannot reach.** A hub starts strict. A superuser can make it
+trusting, where applying does everything the files say, either for an hour, after which it is strict again by
+itself, or always. The choice is kept in the hub's database and each change to it is logged. It is not in any
+file, because a file that could turn it could approve itself. The hour exists because a hub left trusting by
+accident is the mistake most worth preventing.
 
 ## Open, and worth deciding before the next stage
 
