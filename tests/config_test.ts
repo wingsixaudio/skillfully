@@ -4,7 +4,7 @@ import { assert, assertEquals } from "./assert.ts";
 import { startHub } from "../core/hub.ts";
 import { type DeviceFile, type Known, plan, render, stable } from "../core/config.ts";
 import type { DeviceRecord } from "../core/registry.ts";
-import { OWNER_PIN, SIM } from "./helpers.ts";
+import { addingHub, FIXTURES, OWNER_PIN, pretendLamp, SIM, until } from "./helpers.ts";
 
 const record: DeviceRecord = {
   mode: "listen",
@@ -93,7 +93,7 @@ Deno.test("an edit that gives something needs a yes, and one that takes away or 
   assert(edited({ from: { source: "store", store: "x" } }).notes[0].words.includes("not built yet"));
 });
 
-Deno.test("the hub keeps a file for each device, shows what an edit would change, and applies none of it", async () => {
+Deno.test("the hub keeps a file for each device, and looking at what an edit would change changes nothing", async () => {
   const dataDir = await Deno.makeTempDir({ prefix: "skillfully-config-" });
   const hub = await startHub({ dbPath: ":memory:", plugins: [{ dir: SIM }], dataDir });
   const claimed = await hub.accounts.claim(hub.accounts.claimCode, "Owner", OWNER_PIN, "test");
@@ -184,4 +184,125 @@ Deno.test("a hub with no data folder keeps no config folder, and says so", async
   const hub = await startHub({ dbPath: ":memory:", plugins: [{ dir: SIM }] });
   assertEquals(await hub.config.overview(), { on: false });
   await hub.stop();
+});
+
+Deno.test("a device is set up from its file, and only a superuser's yes hands out power", async () => {
+  const lamp = pretendLamp();
+  const h = await addingHub();
+  try {
+    const seenPkg = await h.send(await Deno.readFile(`${FIXTURES}/companion/skillfully-test-lamp-1.0.0.tgz`));
+    const added = await h.post("/admin/api/module/add", {
+      upload: seenPkg.body.upload,
+      name: "Stage lamp",
+      screens: [],
+      confirm: OWNER_PIN,
+    });
+    assert(added.body.ok, JSON.stringify(added.body));
+    const id = added.body.id as string;
+    const host = () => h.hub.hosts.get(id)!;
+    const record = () => h.hub.devices.record(id);
+    await until("the device describes its settings", () => !!host().settingsForm);
+    const path = `${h.dataDir}/config/devices/${id}.json`;
+    const config = async () => (await h.get("/admin/api/config")).body;
+    const apply = async (approve: string[] | "all", confirm: string | null = OWNER_PIN) =>
+      await h.post("/admin/api/config/apply", { approve, ...(confirm ? { confirm } : {}) });
+    const whats = (list: { what: string }[]) => list.map((c) => c.what).sort();
+
+    // Once the device has said what it takes, its settings are in its file.
+    assertEquals((await config()).changes, []);
+    const file = JSON.parse(await Deno.readTextFile(path));
+    assert("settings" in file);
+
+    // Someone who can only write files sets the whole thing up: address, what it may reach, and control.
+    const wanted = `127.0.0.1:${lamp.port}`;
+    file.settings = { ...file.settings, host: "127.0.0.1", port: lamp.port };
+    file.reach = { ...file.reach, allowed: [wanted] };
+    file.control = true;
+    file.note = "set up from a file";
+    await Deno.writeTextFile(path, JSON.stringify(file));
+    const proposed = (await config()).changes as {
+      what: string;
+      power: boolean;
+      key: string;
+      caution?: string;
+    }[];
+    assertEquals(proposed.filter((c) => c.power).map((c) => c.what).sort(), ["allow", "control"]);
+    assertEquals(proposed.filter((c) => !c.power).map((c) => c.what), ["setting", "setting"]);
+    assert(proposed.find((c) => c.what === "allow")!.caution, "what deserves a second thought says so");
+    assertEquals((await h.all()).config, { changes: 4, power: 2, problems: 0 });
+
+    // Applying is a change, so it needs someone who has just said who they are.
+    const locked = await apply([], null);
+    assertEquals([locked.status, locked.body.locked], [400, true]);
+    assertEquals(record().settings.host, undefined);
+
+    // Strict is how a hub starts. What hands out nothing is done. What hands out power waits.
+    const safe = await apply([]);
+    assert(safe.body.ok, JSON.stringify(safe.body));
+    assertEquals([whats(safe.body.applied), whats(safe.body.waiting)], [["setting", "setting"], [
+      "allow",
+      "control",
+    ]]);
+    assertEquals([record().settings.host, record().settings.port], ["127.0.0.1", lamp.port]);
+    assertEquals([record().mode, record().granted], ["listen", []]);
+    const set = h.hub.log.read({ type: "skillfully.plugin.settings", limit: 1 })[0];
+    assertEquals([set.actor, set.via, set.data.changed], [h.owner.id, "config", ["host", "port"]]);
+
+    // A yes names one exact proposal. Given to anything else, it is spent on nothing.
+    const stray = await apply([`${id} allow 10.9.9.9:22`, `${id} control`]);
+    assertEquals([stray.body.applied, whats(stray.body.waiting)], [[], ["allow", "control"]]);
+    const yes = await apply([proposed.find((c) => c.what === "allow")!.key]);
+    assertEquals([whats(yes.body.applied), whats(yes.body.waiting)], [["allow"], ["control"]]);
+    assertEquals(record().granted, [wanted]);
+    await until("the lamp connects", () => host().health.status === "ok", 15000);
+    const done = h.hub.log.read({ type: "skillfully.config.applied", limit: 1, newest: true })[0];
+    assertEquals([done.actor, done.via, done.data.approved], [h.owner.id, "config", [
+      `${id} allow ${wanted}`,
+    ]]);
+
+    // Trusting for an hour: applying does everything the files say, and the hub says for how long.
+    assertEquals((await h.post("/admin/api/config/trust", { mode: "hour" })).body.locked, true);
+    assertEquals(
+      (await h.post("/admin/api/config/trust", { mode: "forever", confirm: OWNER_PIN })).status,
+      400,
+    );
+    const hour = await h.post("/admin/api/config/trust", { mode: "hour", confirm: OWNER_PIN });
+    assertEquals(hour.body.trust, { mode: "hour", minutes: 60 });
+    assertEquals(
+      h.hub.log.read({ type: "skillfully.config.trust", limit: 1, newest: true })[0].actor,
+      h.owner.id,
+    );
+    const all = await apply([]);
+    assertEquals([whats(all.body.applied), all.body.waiting], [["control"], []]);
+    assertEquals(record().mode, "act");
+    // Now the file and the hub say the same thing, and what the hub does not read is still there.
+    assertEquals((await config()).changes, []);
+    assertEquals(JSON.parse(await Deno.readTextFile(path)).note, "set up from a file");
+
+    // It ends by itself, and a hub whose time has run out is strict again without anyone doing anything.
+    h.hub.config.setTrust("hour", { actor: h.owner.id, via: "test" }, 20);
+    await new Promise((r) => setTimeout(r, 40));
+    assertEquals((await config()).trust, { mode: "strict" });
+
+    // One file that cannot be read stops everything, so a hub never holds half of what somebody meant.
+    await Deno.writeTextFile(path, JSON.stringify({ ...file, control: false }));
+    await Deno.writeTextFile(`${h.dataDir}/config/devices/broken.json`, "{");
+    const stopped = await apply("all");
+    assertEquals([stopped.status, stopped.body.problems.length], [400, 1]);
+    assertEquals(record().mode, "act");
+    await Deno.remove(`${h.dataDir}/config/devices/broken.json`);
+
+    // Something that is not an address and a port cannot be allowed from a file at all.
+    await Deno.writeTextFile(
+      path,
+      JSON.stringify({ ...file, reach: { allowed: ["0.0.0.0/0", "--allow-all"] } }),
+    );
+    const bad = await config();
+    assertEquals([bad.changes, bad.problems.length], [[], 1]);
+    assertEquals((await apply("all")).status, 400);
+    assertEquals(record().granted, [wanted]);
+  } finally {
+    await h.close();
+    lamp.close();
+  }
 });

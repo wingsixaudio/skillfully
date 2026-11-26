@@ -384,6 +384,47 @@ async def main():
         check("the device added a minute ago can be used from Controls", (await reading.inner_text()).strip() == "on", await reading.inner_text())
         if shots: await owner.screenshot(path=f"{shots}/8-controls-lamp.png", full_page=True)
 
+        # --- Someone who can only write files proposes a change. The hub does what is safe, and asks about the rest ---
+        import re
+        await owner.goto(base + "/admin/hub"); await owner.wait_for_selector("#secConfig:not([hidden]) #configTrust")
+        folder = re.search(r"in (.+)/devices\.", await owner.locator("#configWhere").inner_text()).group(1)
+        check("a hub starts out strict about what files may do", "Strict." in await owner.locator("#configTrust").inner_text())
+        path = os.path.join(folder, "devices", "sim-switch.json")
+        with open(path) as f: device = json.load(f)
+        check("the file says what the hub holds, and no more", device["control"] is True and device["name"] == "Simulated switch", str(device))
+        device["control"] = False
+        device["reach"]["allowed"] = device["reach"]["allowed"] + ["10.0.0.7:9000"]
+        with open(path, "w") as f: json.dump(device, f)
+        await owner.goto(base + "/admin")
+        await owner.locator("#needs .need", has_text="Files in the config folder propose 2 changes. 1 needs your yes.").wait_for(timeout=20000)
+        check("Home says the files propose something, and how much of it needs a yes", True)
+        await owner.locator("#needs .need", has_text="config folder").locator("a.open").click()
+        await owner.wait_for_selector("#configList .change")
+        told = await owner.locator("#configList").inner_text()
+        check("the Hub place says each change in words, and which one waits", "Stop people controlling Simulated switch" in told and "Let Simulated switch: Reach the device at 10.0.0.7, port 9000" in told and told.count("Waits for your yes") == 1 and told.count("Done when you apply") == 1, told)
+        if shots: await owner.screenshot(path=f"{shots}/9-config-proposed.png", full_page=True)
+        await owner.click("#configApply")
+        asked = await owner.locator("#dlgBody").inner_text()
+        check("applying shows what will be done, and it is only the change that hands out nothing", "Stop people controlling Simulated switch" in asked and "10.0.0.7" not in asked, asked)
+        await confirm(); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.wait_for_function("() => document.querySelectorAll('#configList .change').length === 1")
+        drivers = (await (await owner_ctx.request.get(base + "/admin/api/all")).json())["drivers"]
+        switch = next(d for d in drivers if d["id"] == "sim-switch")
+        check("what was safe is done, and what hands out power is not", switch["mode"] == "listen" and not any("10.0.0.7" in g["words"] for g in switch["grants"]), str(switch["grants"]))
+        await owner.locator("#configList .change").get_by_role("button", name="Say yes").click()
+        check("saying yes shows exactly what is being said yes to", "Reach the device at 10.0.0.7, port 9000" in await owner.locator("#dlgBody").inner_text())
+        await confirm(); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.locator("#configList .status.ok", has_text="The files say the same as the hub.").wait_for(timeout=15000)
+        drivers = (await (await owner_ctx.request.get(base + "/admin/api/all")).json())["drivers"]
+        switch = next(d for d in drivers if d["id"] == "sim-switch")
+        check("after the yes, the device holds it", any("10.0.0.7" in g["words"] for g in switch["grants"]), str(switch["grants"]))
+        await owner.locator("#configTrust").get_by_role("button", name="Change").click()
+        await owner.locator("#dlgBody label.check", has_text="Trusting for an hour").locator("input").check()
+        await confirm(); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.locator("#configTrust", has_text="Strict again in 60 minutes").wait_for(timeout=10000)
+        check("trusting can be turned on for an hour, and the page says when it ends", "Trusting." in await owner.locator("#configTrust").inner_text())
+        if shots: await owner.screenshot(path=f"{shots}/9b-config-trusting.png", full_page=True)
+
         check("no page errors", not unexpected, "; ".join(unexpected))
         await b.close()
 

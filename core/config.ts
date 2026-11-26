@@ -13,7 +13,7 @@
 
 import schema from "../contract/v1/config.device.schema.json" with { type: "json" };
 import { ajv, explain } from "../contract/mod.ts";
-import { grantWords } from "./asks.ts";
+import { declared, grantWords } from "./asks.ts";
 import type { DeviceRecord } from "./registry.ts";
 
 type Setting = string | number | boolean;
@@ -39,11 +39,19 @@ export interface Known {
 
 /** One thing an edited file would change. power: it hands something out, so a superuser has to say yes. */
 export interface Change {
+  /** Names exactly this proposal. A yes given to one key cannot be spent on a file that has since changed. */
+  key: string;
   device: string;
   name: string;
   what: "control" | "setting" | "allow" | "revoke" | "refuse" | "ask-again";
   words: string;
+  /** Said beside it when saying yes deserves a second thought. */
+  caution?: string;
   power: boolean;
+  /** What to do, for the hub: the setting and its new value, the grant, or control on or off. */
+  setting?: { name: string; value: Setting };
+  grant?: string;
+  on?: boolean;
 }
 /** Something a file says that the hub cannot do from a file, said plainly instead of silently ignored. */
 export interface Note {
@@ -119,29 +127,39 @@ export function plan(
 ): { changes: Change[]; notes: Note[] } {
   const changes: Change[] = [], notes: Note[] = [];
   const now = render(id, record, known);
-  const add = (what: Change["what"], words: string, power: boolean) =>
-    changes.push({ device: id, name: known.name, what, words, power });
+  const add = (what: Change["what"], words: string, power: boolean, more: Partial<Change> = {}) => {
+    const about = more.setting
+      ? `${more.setting.name}=${JSON.stringify(more.setting.value)}`
+      : more.grant ?? "";
+    changes.push({
+      key: [id, what, about].join(" "),
+      device: id,
+      name: known.name,
+      what,
+      words,
+      power,
+      ...more,
+    });
+  };
   const note = (words: string) => notes.push({ device: id, words });
+  const who = known.name;
 
   if (file.control !== undefined && file.control !== now.control) {
     file.control
-      ? add("control", `Let people control ${known.name}. Today the hub only watches it.`, true)
-      : add("control", `Stop people controlling ${known.name}. The hub would only watch it.`, false);
+      ? add("control", `Let people control ${who}. Today the hub only watches it.`, true, { on: true })
+      : add("control", `Stop people controlling ${who}. The hub would only watch it.`, false, { on: false });
   }
   if (file.settings) {
     for (const [key, value] of Object.entries(file.settings).sort(([a], [b]) => a.localeCompare(b))) {
       if (known.secrets === null) {
-        note(`${known.name} has not yet said what settings it takes, so "${key}" cannot be set from a file.`);
+        note(`${who} has not yet said what settings it takes, so "${key}" cannot be set from a file.`);
       } else if (known.secrets.has(key)) {
-        note(`"${key}" is a secret of ${known.name}. Secrets are set in the admin, never in a file.`);
+        note(`"${key}" is a secret of ${who}. Secrets are set in the admin, never in a file.`);
       } else if (record.settings[key] !== value) {
-        add(
-          "setting",
-          `Change ${known.name}'s setting "${key}" from ${shown(record.settings[key] ?? null)} to ${
-            shown(value)
-          }.`,
-          false,
-        );
+        const from = shown(record.settings[key] ?? null);
+        add("setting", `Change ${who}'s setting "${key}" from ${from} to ${shown(value)}.`, false, {
+          setting: { name: key, value },
+        });
       }
     }
   }
@@ -149,28 +167,35 @@ export function plan(
   if (file.reach?.allowed) {
     const want = new Set(file.reach.allowed);
     for (const g of [...want].sort()) {
-      if (!had.has(g)) add("allow", `Let ${known.name}: ${grantWords(g)}.`, true);
+      if (had.has(g)) continue;
+      const asked = declared(g);
+      add("allow", `Let ${who}: ${asked.words}.`, true, {
+        grant: g,
+        ...(asked.caution ? { caution: asked.caution } : {}),
+      });
     }
     for (const g of [...had].sort()) {
-      if (!want.has(g)) add("revoke", `Take away from ${known.name}: ${grantWords(g)}.`, false);
+      if (!want.has(g)) add("revoke", `Take away from ${who}: ${grantWords(g)}.`, false, { grant: g });
     }
   }
   if (file.reach?.refused) {
     const want = new Set(file.reach.refused);
     for (const g of [...want].sort()) {
-      if (!refusedNow.has(g)) add("refuse", `Refuse ${known.name} this for good: ${g.slice(0, 120)}.`, false);
+      if (!refusedNow.has(g)) {
+        add("refuse", `Refuse ${who} this for good: ${g.slice(0, 120)}.`, false, { grant: g });
+      }
     }
     for (const g of [...refusedNow].sort()) {
-      if (!want.has(g)) add("ask-again", `Let ${known.name} ask again for: ${g.slice(0, 120)}.`, false);
+      if (!want.has(g)) {
+        add("ask-again", `Let ${who} ask again for: ${g.slice(0, 120)}.`, false, { grant: g });
+      }
     }
   }
   if (file.name !== undefined && file.name !== now.name) {
-    note(`Renaming ${known.name} to "${file.name.slice(0, 80)}" from a file is not built yet.`);
+    note(`Renaming ${who} to "${file.name.slice(0, 80)}" from a file is not built yet.`);
   }
   if (file.from && stable(file.from) !== stable(now.from)) {
-    note(
-      `Where ${known.name} came from is written by the hub. Changing its version from a file is not built yet.`,
-    );
+    note(`Where ${who} came from is written by the hub. Changing its version from a file is not built yet.`);
   }
   return { changes, notes };
 }
@@ -293,7 +318,36 @@ export interface ConfigDeps {
   known: (id: string) => Known | undefined;
   /** Somewhere to say that a file could not be written. Never what was in it. */
   failed: (id: string, message: string) => void;
+  /** How a change is really made: the same doors the admin page uses, so the same things happen and are logged. */
+  make?: {
+    control: (id: string, on: boolean, who: Who) => void;
+    settings: (id: string, settings: Record<string, unknown>, changed: string[], who: Who) => Promise<void>;
+    reach: (
+      id: string,
+      now: { granted: string[]; denied: string[] },
+      said: { allowed: string[]; denied: string[]; revoked: string[] },
+      who: Who,
+    ) => Promise<void>;
+  };
+  /** Where the strict or trusting choice is kept: in the hub's database, never in a file. */
+  kept?: { get: () => string | undefined; set: (value: string) => void };
+  /** Write to the hub's log. */
+  note?: (type: string, who: Who, data: Record<string, unknown>) => void;
 }
+
+/** Who did something, and by what door. */
+export interface Who {
+  actor: string;
+  via: string;
+}
+
+/**
+ * How much a file may do without being asked about. strict: a change that hands out power waits for a
+ * superuser's yes, one by one. always: applying the files applies all of it. hour is the same, and ends by
+ * itself, because a hub left trusting by accident is the mistake most worth preventing.
+ */
+export type Trust = "strict" | "hour" | "always";
+const HOUR = 60 * 60 * 1000;
 
 /**
  * Keeps the config folder in step with what the hub decides, and says what the files in it would change.
@@ -346,6 +400,108 @@ export class Config {
   /** Everything asked for so far has been written. */
   async settled(): Promise<void> {
     await this.#work;
+  }
+
+  /** The choice in force now, and for how many more minutes when it ends by itself. */
+  trust(): { mode: Trust; minutes?: number } {
+    try {
+      const kept = JSON.parse(this.#deps.kept?.get() ?? "{}");
+      if (kept.mode === "always") return { mode: "always" };
+      if (kept.mode === "hour" && kept.until > Date.now()) {
+        return { mode: "hour", minutes: Math.ceil((kept.until - Date.now()) / 60000) };
+      }
+    } catch { /* nothing kept that can be read: strict */ }
+    return { mode: "strict" };
+  }
+
+  setTrust(mode: Trust, who: Who, lasting = HOUR): void {
+    this.#deps.kept?.set(JSON.stringify(mode === "hour" ? { mode, until: Date.now() + lasting } : { mode }));
+    this.#deps.note?.("skillfully.config.trust", who, { mode });
+  }
+
+  #counted: { at: number; value: { changes: number; power: number; problems: number } } | undefined;
+
+  /** How much the files propose, for a page that asks often. Read from disk at most every few seconds. */
+  async counts(): Promise<{ changes: number; power: number; problems: number }> {
+    if (this.#counted && Date.now() - this.#counted.at < 8000) return this.#counted.value;
+    const o = await this.overview();
+    const value = o.on
+      ? {
+        changes: o.changes.length,
+        power: o.changes.filter((c) => c.power).length,
+        problems: o.problems.length,
+      }
+      : { changes: 0, power: 0, problems: 0 };
+    this.#counted = { at: Date.now(), value };
+    return value;
+  }
+
+  /**
+   * Do what the files say. A change that hands out power is made only if the hub is trusting or its exact
+   * key was approved; every other change is made. One file that cannot be read stops all of it, so a hub is
+   * never left holding half of what somebody meant. Each change goes through the same door the admin page
+   * uses, with the same checks and the same lines in the log.
+   */
+  async apply(
+    approve: string[] | "all",
+    who: Who,
+  ): Promise<
+    | { ok: false; message: string; problems: Problem[] }
+    | { ok: true; applied: Change[]; waiting: Change[]; notes: Note[] }
+  > {
+    const o = await this.overview();
+    const make = this.#deps.make;
+    if (!o.on || !make) return { ok: false, message: "This hub keeps no config folder.", problems: [] };
+    if (o.problems.length) {
+      return {
+        ok: false,
+        message: o.problems.length === 1
+          ? "One file could not be read, so nothing was changed. Fix or remove it first."
+          : `${o.problems.length} files could not be read, so nothing was changed. Fix or remove them first.`,
+        problems: o.problems,
+      };
+    }
+    const trusting = this.trust().mode !== "strict";
+    const yes = new Set(approve === "all" ? [] : approve);
+    const go = (c: Change) => !c.power || trusting || approve === "all" || yes.has(c.key);
+    const applied: Change[] = [], waiting: Change[] = [];
+    const byDevice = new Map<string, Change[]>();
+    for (const c of o.changes) {
+      if (!go(c)) waiting.push(c);
+      else byDevice.set(c.device, [...(byDevice.get(c.device) ?? []), c]);
+    }
+    for (const [id, list] of byDevice) {
+      const record = this.#deps.record(id);
+      if (!record) continue;
+      const set = list.filter((c) => c.what === "setting" && c.setting);
+      if (set.length) {
+        const next = { ...record.settings };
+        for (const c of set) next[c.setting!.name] = c.setting!.value;
+        await make.settings(id, next, set.map((c) => c.setting!.name).sort(), who);
+      }
+      const grants = (what: Change["what"]) => list.filter((c) => c.what === what).map((c) => c.grant!);
+      const allowed = grants("allow"), revoked = grants("revoke");
+      const refused = grants("refuse"), again = grants("ask-again");
+      if (allowed.length + revoked.length + refused.length + again.length) {
+        const granted = [...new Set([...record.granted.filter((g) => !revoked.includes(g)), ...allowed])];
+        const denied = [...new Set([...record.denied.filter((g) => !again.includes(g)), ...refused])];
+        await make.reach(id, { granted, denied }, { allowed, denied: refused, revoked }, who);
+      }
+      // Last, so that a device people are about to control already holds what it was given.
+      const control = list.find((c) => c.what === "control");
+      if (control) make.control(id, control.on === true, who);
+      applied.push(...list);
+    }
+    this.#counted = undefined;
+    if (applied.length) {
+      this.#deps.note?.("skillfully.config.applied", who, {
+        applied: applied.map((c) => c.key),
+        approved: applied.filter((c) => c.power).map((c) => c.key),
+        trusting,
+      });
+    }
+    await this.settled();
+    return { ok: true, applied, waiting, notes: o.notes };
   }
 
   /** What the files say that the hub does not: the changes they would make, and what is wrong with them. */
