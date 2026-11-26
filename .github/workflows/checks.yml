@@ -43,7 +43,7 @@ jobs:
         with:
           deno-version: v2.x
       - name: Every plugin in the repository is one the hub would accept
-        run: deno task check-plugin plugins/*
+        run: deno task check-plugin --all plugins
       - name: Tests
         run: deno task test
       - name: Every driver in the repository keeps the contract
@@ -61,7 +61,7 @@ jobs:
         with:
           deno-version: v2.x
       - name: Every plugin in the repository is one the hub would accept
-        run: deno task check-plugin plugins/*
+        run: deno task check-plugin --all plugins
       - name: Tests
         run: deno task test
       - name: Every driver in the repository keeps the contract
