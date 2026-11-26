@@ -17,6 +17,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import type { CommandError, HealthStatus, SettingsField, Values } from "../../contract/types.ts";
 import { type CommandOutcome, type PluginLink, runPlugin } from "../../sdk/plugin.ts";
+import { asField, asText } from "./fields.ts";
 
 const arg = (name: string): string => {
   const hit = Deno.args.find((a) => a.startsWith(`--${name}=`));
@@ -108,11 +109,6 @@ const plainer = (text: string) =>
     /(NotCapable: )?Requires net access to "([^"]+)", run again with the --allow-net flag/g,
     "it is not allowed to reach $2",
   );
-
-const asText = (v: unknown): string => {
-  const text = v === undefined || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
-  return text.slice(0, TEXT_MAX);
-};
 
 function fullState(): Values {
   const out: Values = {};
@@ -303,38 +299,6 @@ function registered(m: Wire, data: any): void {
         : call("updateConfig", config);
     })
     .then(() => ready?.(), (e) => failed?.(e as Error));
-}
-
-/** One of the module's settings, as the hub's form understands it. Null for what the form cannot show. */
-function asField(f: any): SettingsField | null {
-  if (!f || typeof f.id !== "string" || !f.id) return null;
-  const type = String(f.type ?? "");
-  const label = asText(f.label).slice(0, 200) || f.id;
-  const help = asText(f.tooltip ?? f.description ?? "").slice(0, 1000);
-  const base = { id: f.id.slice(0, 64), label, ...(help ? { help } : {}) };
-  const plain = (v: unknown) => typeof v === "string" || typeof v === "number" || typeof v === "boolean";
-  const withDefault = plain(f.default) ? { default: f.default } : {};
-  if (type === "static-text") return { ...base, kind: "note", help: asText(f.value).slice(0, 1000) };
-  if (type === "checkbox") return { ...base, kind: "toggle", ...withDefault };
-  if (type === "number") {
-    return {
-      ...base,
-      kind: "number",
-      ...withDefault,
-      ...(typeof f.min === "number" ? { min: f.min } : {}),
-      ...(typeof f.max === "number" ? { max: f.max } : {}),
-    };
-  }
-  if (type === "dropdown" && Array.isArray(f.choices)) {
-    const choices = f.choices.filter((c: any) => c && plain(c.id)).slice(0, 300)
-      .map((c: any) => ({ id: c.id, label: asText(c.label).slice(0, 200) || String(c.id) }));
-    return { ...base, kind: "choice", choices, ...withDefault };
-  }
-  if (type.startsWith("secret")) return { ...base, kind: "secret" };
-  if (type === "textinput" || type === "bonjour-device" || type === "colorpicker") {
-    return { ...base, kind: "text", ...withDefault };
-  }
-  return { ...base, kind: "note", help: "This setting cannot be shown here yet." };
 }
 
 function installHost(): void {

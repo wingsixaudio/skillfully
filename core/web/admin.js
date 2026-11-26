@@ -1285,6 +1285,16 @@ function openSettings(id, waited = 0) {
         }
         if (number && f.min !== undefined) field.min = f.min;
         if (number && f.max !== undefined) field.max = f.max;
+        // Somewhere to type that also offers what the device found: an address it saw on the network, say.
+        if (!secret && !number && f.choices && f.choices.length) {
+          const offers = el(
+            "datalist",
+            { id: fid + "_offers" },
+            ...f.choices.map((c) => el("option", { value: String(c.id), label: c.label })),
+          );
+          field.setAttribute("list", offers.id);
+          x.append(offers);
+        }
         x.append(el("label", { htmlFor: fid, textContent: f.label }), field);
         read.push(() =>
           number ? (field.value === "" ? null : [f.id, Number(field.value)]) : [f.id, field.value]
