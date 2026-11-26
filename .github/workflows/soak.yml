@@ -1,0 +1,34 @@
+# Runs the whole suite five times on every system, each night. A test that
+# only fails sometimes shows up here before it blocks someone's pull request.
+name: Soak
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: Five runs on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Run the suite five times
+        shell: bash
+        run: |
+          for run in 1 2 3 4 5; do
+            echo "::group::run $run"
+            deno task test
+            echo "::endgroup::"
+          done

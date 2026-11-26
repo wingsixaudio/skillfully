@@ -2,6 +2,7 @@
 // reading a definition file, and holds every driver and screen to it. Nothing
 // in the hub's own code names a capability.
 
+import { here } from "./paths.ts";
 import {
   ajv,
   type CapabilityDef,
@@ -182,4 +183,4 @@ export class Capabilities {
   }
 }
 
-export const CAPABILITIES_DIR = new URL("../capabilities", import.meta.url).pathname;
+export const CAPABILITIES_DIR = here("../capabilities", import.meta.url);

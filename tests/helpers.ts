@@ -1,8 +1,9 @@
 import { type Hub, type PluginConfig, startHub } from "../core/hub.ts";
 import type { PluginHost } from "../core/host.ts";
 import type { LogEntry } from "../core/log.ts";
+import { here } from "../core/paths.ts";
 
-export const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+export const ROOT = here("..", import.meta.url).replace(/\/$/, "");
 export const SIM = `${ROOT}/plugins/sim-console`;
 export const SWITCH = `${ROOT}/plugins/sim-switch`;
 export const FADER = `${ROOT}/plugins/one-fader`;

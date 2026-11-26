@@ -5,10 +5,13 @@
 // Until install and settings screens exist, this file is where a hub is configured.
 
 import { type PluginConfig, startHub } from "./hub.ts";
+import { here } from "./paths.ts";
 
-const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const root = here("..", import.meta.url).replace(/\/$/, "");
 const lan = Deno.args.includes("--lan");
 const portArg = Deno.args.find((a) => a.startsWith("--port="));
+// --data=<folder> keeps this hub's log and people somewhere other than ./data.
+const dataDir = Deno.args.find((a) => a.startsWith("--data="))?.slice(7) ?? `${root}/data`;
 
 // Per-plugin choices. A driver not listed here starts in Listen mode.
 const CHOICES: Record<string, Omit<PluginConfig, "dir">> = {
@@ -22,9 +25,9 @@ for await (const entry of Deno.readDir(`${root}/plugins`)) {
 }
 plugins.sort((a, b) => a.dir.localeCompare(b.dir));
 
-await Deno.mkdir(`${root}/data`, { recursive: true });
+await Deno.mkdir(dataDir, { recursive: true });
 const hub = await startHub({
-  dbPath: `${root}/data/skillfully.db`,
+  dbPath: `${dataDir.replace(/[\\/]$/, "")}/skillfully.db`,
   hostname: lan ? "0.0.0.0" : "127.0.0.1",
   port: portArg ? Number(portArg.slice(7)) : 8080,
   plugins,
@@ -49,4 +52,4 @@ const stop = async () => {
   Deno.exit(0);
 };
 Deno.addSignalListener("SIGINT", stop);
-Deno.addSignalListener("SIGTERM", stop);
+if (Deno.build.os !== "windows") Deno.addSignalListener("SIGTERM", stop); // Windows has no such signal

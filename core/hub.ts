@@ -12,6 +12,7 @@ import { Capabilities, CAPABILITIES_DIR } from "./capabilities.ts";
 import { PluginHost, type Tuning } from "./host.ts";
 import { Log, type LogEntry, newId } from "./log.ts";
 import { adminPage, authPage, notePage, PAGE_POLICY, shellPage } from "./pages.ts";
+import { realPath } from "./paths.ts";
 import { inspectPlugin } from "./plugins.ts";
 import { PluginGateway } from "./process.ts";
 
@@ -471,7 +472,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         const ext = file[2].slice(file[2].lastIndexOf("."));
         if (found && TYPES[ext] && !file[2].includes("..")) {
           try {
-            const real = await Deno.realPath(`${found.dir}/${file[2]}`);
+            const real = await realPath(`${found.dir}/${file[2]}`);
             if (real.startsWith(found.dir + "/") && !real.endsWith("/plugin.json")) {
               const own = `${origin}/screens/${file[1]}/`;
               return new Response(await Deno.readFile(real), {

@@ -140,8 +140,15 @@ Nobody pushes to `main`, including the maintainers. Every change is a pull reque
 
 1. Make a branch and commit your change to it.
 2. Open a pull request against `main`.
-3. The checks run on it by themselves: formatting, lint, every plugin through the hub's own checker, every
-   test, and every driver against the contract.
+3. The checks run on it by themselves, on machines you do not control:
+   - formatting and lint
+   - every plugin through the hub's own checker
+   - every test, on Linux and macOS (Windows is run and reported, and does not yet block)
+   - every driver against the contract
+   - a real browser, Chrome and WebKit, that sets up a hub from nothing and then has a screen try every way
+     out of its sandbox
+   - a report, in plain words, of what each plugin you changed asks for and what it asks for that it did not
+     before
 4. When the checks pass, a maintainer merges it. A pull request whose checks fail cannot be merged.
 
 The checks run with read-only access and no secrets, so a pull request from someone the project has never met

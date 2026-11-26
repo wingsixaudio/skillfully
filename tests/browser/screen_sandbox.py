@@ -1,11 +1,15 @@
 """Real-browser check: set up a hub, add a person, and prove their screen is held to its sandbox and its grants.
 
-Not part of `deno task test`, because it needs Chrome and Playwright. Start a hub with a fresh data folder,
-note the code it prints, then:
-    python3 tests/browser/screen_sandbox.py http://127.0.0.1:8099 <code> [folder for screenshots]
-Exits 0 when every check passes.
+Needs Python and Playwright, so it is not part of `deno task test`. The easy way to run it:
+    tests/browser/run.sh chromium
+    tests/browser/run.sh webkit        # the engine Safari is built on
+That starts a fresh hub, reads the code it prints, and runs this file against it.
+
+By hand, against a hub that nobody has claimed yet:
+    BROWSER=chromium python3 tests/browser/screen_sandbox.py http://127.0.0.1:8099 <code> [folder for screenshots]
+Set CHROME_PATH to use a Chrome that is already installed. Exits 0 when every check passes.
 """
-import asyncio, json, sys
+import asyncio, json, os, sys
 from playwright.async_api import async_playwright
 
 base, claim = sys.argv[1].rstrip("/"), sys.argv[2]
@@ -52,7 +56,11 @@ ASK = """([plugin, key, value]) => new Promise((res) => {
 
 async def main():
     async with async_playwright() as p:
-        b = await p.chromium.launch(executable_path="/usr/bin/google-chrome", args=["--no-sandbox"])
+        engine = os.environ.get("BROWSER", "chromium")
+        opts = {"args": ["--no-sandbox"]} if engine == "chromium" else {}
+        if engine == "chromium" and os.environ.get("CHROME_PATH"): opts["executable_path"] = os.environ["CHROME_PATH"]
+        b = await getattr(p, engine).launch(**opts)
+        print(f"browser: {engine} {b.version}")
         phone = dict(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, device_scale_factor=2)
         errors = []
 
@@ -111,15 +119,14 @@ async def main():
         links = await pg.locator("#links a").all_text_contents()
         check("Sam's menu has the ear mix and the account, and no superuser tools", links == ["One fader", "Account"], str(links))
 
-        # Drag the fader with a finger.
-        cdp = await sam_ctx.new_cdp_session(pg)
-        el = await fr.query_selector("#fader"); box = await el.bounding_box()
+        # Drag the fader. Pointer moves from a mouse reach the page the same way a finger's do, in every engine.
+        box = await (await fr.query_selector("#fader")).bounding_box()
         y = box["y"] + box["height"] / 2
         xs = [box["x"] + box["width"] * (0.05 + 0.01 * k) for k in range(70)]
-        await cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": xs[0], "y": y}]})
+        await pg.mouse.move(xs[0], y); await pg.mouse.down()
         for x in xs[1:]:
-            await cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x, "y": y}]}); await pg.wait_for_timeout(12)
-        await cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []}); await pg.wait_for_timeout(900)
+            await pg.mouse.move(x, y); await pg.wait_for_timeout(12)
+        await pg.mouse.up(); await pg.wait_for_timeout(900)
         held = (await state("sim-console"))[LEVEL]
         shown = (await fr.inner_text("#db")).replace("\n", "").replace("dB", "")
         check("a drag reaches the board", held == -10, f"board holds {held}")
