@@ -38,6 +38,15 @@ const STYLE = `
   .caution { color:var(--accent); font-size:13px; display:block; }
   dialog { background:var(--panel); color:var(--text); border:1px solid var(--rail); border-radius:16px; padding:18px; width:min(520px,calc(100vw - 32px)); }
   dialog::backdrop { background:rgba(0,0,0,.7); }
+  .step { display:flex; gap:10px; align-items:flex-start; width:100%; text-align:left; background:none; color:var(--text); font-weight:500; padding:8px 0; min-height:0; border-radius:0; }
+  .step i { flex:none; width:22px; height:22px; border-radius:50%; border:2px solid var(--dim); font-style:normal; font-size:13px; line-height:18px; text-align:center; color:#000; }
+  .step.done i { background:var(--ok); border-color:var(--ok); } .step.done span { color:var(--dim); }
+  .step small { display:block; color:var(--dim); font-weight:400; font-size:13px; }
+  .status { font-size:14px; margin:6px 0 2px; } .status.ok { color:var(--ok); } .status.bad { color:var(--bad); }
+  .help { font-size:13px; color:var(--dim); margin:4px 0 0; }
+  .facts { margin:10px 0 0; padding-left:18px; font-size:14px; color:var(--dim); line-height:1.45; }
+  .about { background:var(--rail); border-radius:12px; padding:12px 14px; margin-top:14px; }
+  .about b { display:block; font-size:16px; } .about span { font-size:13px; color:var(--dim); }
   [hidden] { display:none !important; }
 `;
 
@@ -166,13 +175,14 @@ export function adminPage(): string {
   return page(
     "People",
     `<header class="brand">${BRAND}<nav><a href="/">Home</a><a href="/account">Account</a></nav></header>
-     <section class="card"><h2>People</h2><div id="people"></div>
+     <section class="card" id="setup" hidden><h2>Setting up</h2><div id="steps"></div><button class="small quiet" id="hideSetup" style="margin-top:12px">Hide this</button></section>
+     <section class="card" id="secPeople"><h2>People</h2><div id="people"></div>
        <form id="add" class="row" style="margin-top:14px"><input id="newName" placeholder="Name of a new person" aria-label="Name of a new person" style="flex:1;min-width:180px" required><button class="small" style="margin:0;width:auto">Add</button></form>
        <p class="msg" id="peopleMsg" role="status"></p></section>
-     <section class="card"><h2>Roles</h2><p class="dim">A role is a set of abilities that plugins offer. Superuser is built in and has all of them.</p><div id="roles"></div>
+     <section class="card" id="secRoles"><h2>Roles</h2><p class="dim">A role is a set of abilities that plugins offer. Superuser is built in and has all of them.</p><div id="roles"></div>
        <button class="small quiet" id="newRole" style="margin-top:14px">New role</button><p class="msg" id="rolesMsg" role="status"></p></section>
-     <section class="card"><h2>Screens</h2><p class="dim">A screen can use only the connections you give it. Until you give it one, it reaches nothing.</p><div id="screens"></div><p class="msg" id="screensMsg" role="status"></p></section>
-     <section class="card"><h2>Devices</h2><p class="dim">Listen means the hub watches a device and sends it nothing. Act means changes are sent.</p><div id="drivers"></div><p class="msg" id="driversMsg" role="status"></p></section>
+     <section class="card" id="secScreens"><h2>Screens</h2><p class="dim">A screen can use only the connections you give it. Until you give it one, it reaches nothing.</p><div id="screens"></div><p class="msg" id="screensMsg" role="status"></p></section>
+     <section class="card" id="secDevices"><h2>Devices</h2><p class="dim">Each device starts out listening: the hub watches it and sends it nothing until you let it act.</p><div id="drivers"></div><button class="small quiet" id="addDevice" style="margin-top:14px" hidden>Add a device</button><p class="msg" id="driversMsg" role="status"></p></section>
      <section class="card"><h2>Signing in</h2>
        <form id="policy">
          <label for="pk">Everyone signs in with</label><select id="pk"><option value="pin">A PIN</option><option value="password">A password</option></select>
@@ -194,7 +204,7 @@ export function adminPage(): string {
 
   // One dialog, reused. fill() builds the fields; done() returns a result with ok, or nothing to close.
   function ask(title, fill, done, okText = "Save") {
-    $("dlgTitle").textContent = title; $("dlgBody").innerHTML = ""; say("dlgMsg", ""); $("dlgOk").textContent = okText;
+    $("dlgTitle").textContent = title; $("dlgBody").innerHTML = ""; say("dlgMsg", ""); $("dlgOk").textContent = okText; $("dlgOk").disabled = false;
     fill($("dlgBody"));
     $("dlgForm").onsubmit = async (e) => {
       if (e.submitter && e.submitter.value === "cancel") return;
@@ -211,8 +221,8 @@ export function adminPage(): string {
   async function load() {
     const r = await call("/admin/api/all");
     if (!r.ok) return location.replace("/");
-    ({ people, roles, offered, drivers } = r); meId = r.me;
-    drawPeople(); drawRoles(); drawScreens(); drawDrivers(); drawPolicy(r.policy);
+    ({ people, roles, offered, drivers } = r); meId = r.me; $("addDevice").hidden = !r.canAdd;
+    drawSetup(); drawPeople(); drawRoles(); drawScreens(); drawDrivers(); drawPolicy(r.policy);
   }
 
   function drawPeople() {
@@ -342,22 +352,140 @@ export function adminPage(): string {
     }
   }
 
+  // What a new hub still needs, in the order it is needed. It goes away once all of it is done.
+  function drawSetup() {
+    const steps = [
+      [drivers.length > 0, "Add a device", "Something for the hub to talk to.", "secDevices"],
+      [offered.some((o) => o.connections.length > 0), "Give a screen a device", "A screen reaches nothing until you choose what it may use.", "secScreens"],
+      [people.length > 1, "Add your people", "Add a name, give them a role, and hand them their invitation.", "secPeople"],
+    ];
+    let hidden = false; try { hidden = localStorage.getItem("setupHidden") === "1"; } catch {}
+    $("setup").hidden = hidden || steps.every((st) => st[0]);
+    const box = $("steps"); box.innerHTML = "";
+    for (const [done, title, why, where] of steps) {
+      const b = el("button", { type: "button", className: "step" + (done ? " done" : "") }, el("i", { textContent: done ? "\u2713" : "" }), el("span", {}, title, el("small", { textContent: done ? "Done" : why })));
+      b.onclick = () => $(where).scrollIntoView({ behavior: "smooth", block: "start" });
+      box.append(b);
+    }
+  }
+  $("hideSetup").onclick = () => { try { localStorage.setItem("setupHidden", "1"); } catch {} $("setup").hidden = true; };
+
+  // --- Devices ---
+  const STATE = { running: "Running", starting: "Starting", quarantined: "Held by the hub", down: "Stopped", stopped: "Stopped" };
+  function statusOf(d) {
+    if (d.status === "quarantined") return ["The hub stopped it for misbehaving. Release it to try again.", "bad"];
+    if (d.status !== "running") return [d.status === "starting" ? "Starting" : "Not running", d.status === "starting" ? "" : "bad"];
+    if (d.health.status === "ok") return ["Connected to its device", "ok"];
+    return [d.health.reason || "Not ready", d.health.status === "degraded" ? "" : "bad"];
+  }
   function drawDrivers() {
     const box = $("drivers"); box.innerHTML = "";
     for (const d of drivers) {
       const item = el("div", { className: "item" }, el("h3", { textContent: d.name }));
-      const state = { running: "Running", starting: "Starting", quarantined: "Held by the hub", down: "Stopped", stopped: "Stopped" }[d.status] || d.status;
-      item.append(el("div", {}, el("span", { className: "chip", textContent: state }), el("span", { className: "chip" + (d.mode === "act" ? " on" : ""), textContent: d.mode === "act" ? "Act" : "Listen" }),
-        el("span", { className: "chip", textContent: "May reach: " + ((d.permissions.network || []).join(", ") || "only the hub") })));
-      const row = el("div", { className: "row", style: "margin-top:8px" });
-      const b = el("button", { className: "small quiet", type: "button", textContent: d.mode === "act" ? "Switch to Listen" : "Switch to Act" });
-      b.onclick = () => ask((d.mode === "act" ? "Stop sending changes to " : "Start sending changes to ") + d.name, (x) => confirmField(x),
-        () => call("/admin/api/driver/mode", { id: d.id, mode: d.mode === "act" ? "listen" : "act", confirm: $("confirm").value }), "Switch");
-      row.append(b);
-      if (d.status === "quarantined") { const r = el("button", { className: "small quiet", type: "button", textContent: "Release" }); r.onclick = async () => { await call("/admin/api/driver/release", { id: d.id }); load(); }; row.append(r); }
+      if (d.module) item.append(el("p", { className: "dim", style: "margin:0 0 4px", textContent: "Companion module " + d.module.name + " " + d.module.version + ". Nobody has reviewed it for this hub." }));
+      item.append(el("div", {}, el("span", { className: "chip", textContent: STATE[d.status] || d.status }), el("span", { className: "chip" + (d.mode === "act" ? " on" : ""), textContent: d.mode === "act" ? "Act" : "Listen" })));
+      const [words, kind] = statusOf(d);
+      item.append(el("p", { className: "status " + kind, textContent: words }));
+      item.append(el("p", { className: "help", textContent: d.reach[0] + (d.mode === "act" ? "" : " In Listen, nothing is sent to it.") }));
+      item.append(el("p", { className: "help", textContent: d.usedBy.length ? "Used by: " + d.usedBy.join(", ") + "." : "No screen can use it yet. Choose which under Screens." }));
+      const row = el("div", { className: "row", style: "margin-top:10px" });
+      const btn = (text, fn) => { const b = el("button", { className: "small quiet", type: "button", textContent: text }); b.onclick = fn; row.append(b); return b; };
+      if (d.added) btn("Settings", () => openSettings(d.id));
+      btn(d.mode === "act" ? "Switch to Listen" : "Switch to Act", () => ask((d.mode === "act" ? "Stop sending changes to " : "Start sending changes to ") + d.name, (x) => confirmField(x),
+        () => call("/admin/api/driver/mode", { id: d.id, mode: d.mode === "act" ? "listen" : "act", confirm: $("confirm").value }), "Switch"));
+      if (d.status === "quarantined") btn("Release", async () => { await call("/admin/api/driver/release", { id: d.id }); load(); });
+      if (d.added) btn("Remove", () => ask("Remove " + d.name, (x) => { x.append(el("p", { className: "dim", textContent: "It is stopped and taken off this hub, and every screen loses it. Its settings are deleted." })); confirmField(x); },
+        () => call("/admin/api/driver/remove", { id: d.id, confirm: $("confirm").value }), "Remove"));
       item.append(row); box.append(item);
     }
   }
+
+  // A device's own settings, drawn from what it says it takes.
+  function openSettings(id, waited = 0) {
+    const d = drivers.find((x) => x.id === id);
+    if (!d) return;
+    if (!d.form && waited < 8) { setTimeout(async () => { await load(); openSettings(id, waited + 1); }, 500); return; }
+    const read = [];
+    ask("Settings for " + d.name, (x) => {
+      const fields = d.form || [];
+      if (!d.form) x.append(el("p", { className: "dim", textContent: "It has not said what settings it takes. It may not be running. Check its status and try again." }));
+      else if (!fields.some((f) => f.kind !== "note")) x.append(el("p", { className: "dim", textContent: "This device has nothing to set." }));
+      for (const f of fields) {
+        const now = f.id in d.settings ? d.settings[f.id] : f.default;
+        const fid = "set_" + f.id;
+        if (f.kind === "note") { x.append(el("p", { className: "dim", style: "margin-top:12px" }, el("b", { textContent: f.label + (f.help ? ": " : "") }), f.help || "")); continue; }
+        let field;
+        if (f.kind === "toggle") {
+          field = el("input", { type: "checkbox", id: fid, checked: !!now });
+          x.append(el("label", { className: "check" }, field, el("span", { textContent: f.label })));
+          read.push(() => [f.id, field.checked]);
+        } else if (f.kind === "choice") {
+          field = el("select", { id: fid }, ...(f.choices || []).map((c) => el("option", { value: String(c.id), textContent: c.label, selected: String(c.id) === String(now) })));
+          x.append(el("label", { htmlFor: fid, textContent: f.label }), field);
+          read.push(() => { const c = (f.choices || []).find((c) => String(c.id) === field.value); return c ? [f.id, c.id] : null; });
+        } else {
+          const secret = f.kind === "secret", number = f.kind === "number";
+          field = el("input", { id: fid, type: secret ? "password" : number ? "number" : "text", value: secret ? "" : now ?? "", step: "any", autocomplete: "off" });
+          if (secret) field.placeholder = d.secretsSet.includes(f.id) ? "Set. Leave blank to keep it." : "Not set";
+          if (number && f.min !== undefined) field.min = f.min;
+          if (number && f.max !== undefined) field.max = f.max;
+          x.append(el("label", { htmlFor: fid, textContent: f.label }), field);
+          read.push(() => number ? (field.value === "" ? null : [f.id, Number(field.value)]) : [f.id, field.value]);
+        }
+        if (f.help) x.append(el("p", { className: "help", textContent: f.help }));
+      }
+      x.append(el("p", { className: "help", style: "margin-top:14px", textContent: "Saving restarts this device with the new settings." }));
+    }, async () => {
+      const r = await call("/admin/api/driver/settings", { id, settings: Object.fromEntries(read.map((r) => r()).filter(Boolean)) });
+      if (r.ok) say("driversMsg", "");
+      return r;
+    });
+  }
+
+  // Adding a device: choose the package, see what it is and what it could do, then decide.
+  $("addDevice").onclick = () => {
+    let seen = null;
+    ask("Add a device", (x) => {
+      $("dlgOk").disabled = true;
+      x.append(el("p", { className: "dim", textContent: "Many devices already have a Bitfocus Companion module. Download that module's package (a file ending in .tgz) and choose it here. Nothing is added until you say so." }));
+      const file = input(x, "pkg", "The module's package", { type: "file", accept: ".tgz,.tar.gz,application/gzip" });
+      const rest = el("div", { id: "pkgRest", hidden: true });
+      x.append(rest);
+      file.onchange = async () => {
+        rest.hidden = true; rest.innerHTML = ""; $("dlgOk").disabled = true; seen = null;
+        if (!file.files[0]) return;
+        say("dlgMsg", "Checking the package");
+        let r;
+        try { r = await (await fetch("/admin/api/module/inspect", { method: "POST", headers: { "content-type": "application/gzip" }, body: file.files[0] })).json(); }
+        catch { r = { ok: false, message: "The hub could not read that file." }; }
+        if (!r.ok) return say("dlgMsg", r.message, "bad");
+        say("dlgMsg", ""); seen = r;
+        const m = r.module;
+        rest.append(el("div", { className: "about" }, el("b", { textContent: m.makes || m.name }), el("span", { textContent: "Module " + m.name + " " + m.version + (m.license ? ", " + m.license + " license" : "") + (m.description ? ". " + m.description : "") })));
+        input(rest, "devName", "What do you call this device?", { value: m.makes || m.name, required: true, maxLength: 80 });
+        rest.append(el("label", { textContent: "What may it reach?" }));
+        const facts = el("ul", { className: "facts" });
+        const one = el("input", { id: "reachOne", placeholder: "192.168.1.50:9999", hidden: true, "aria-label": "The one address it may reach, with its port" });
+        const show = () => { const only = $("reachPick").value === "one"; one.hidden = !only; one.required = only; facts.innerHTML = ""; for (const n of (only ? r.notes.one : r.notes.lan)) facts.append(el("li", { textContent: n })); };
+        rest.append(el("select", { id: "reachPick", onchange: show }, el("option", { value: "lan", textContent: "Devices on your local network (the usual choice)" }), el("option", { value: "one", textContent: "Only one address" })), one, facts);
+        show();
+        rest.append(el("label", { textContent: "Which screens may use it?" }));
+        if (!r.screens.length) rest.append(el("p", { className: "dim", textContent: "No screen on this hub works with it yet." }));
+        for (const sc of r.screens) rest.append(el("label", { className: "check" }, el("input", { type: "checkbox", value: sc.id, className: "useScreen" }), el("span", { textContent: sc.name })));
+        rest.append(el("p", { className: "help", textContent: "You can change this later under Screens. It starts out listening." }));
+        confirmField(rest);
+        rest.hidden = false; $("dlgOk").disabled = false;
+      };
+    }, async () => {
+      if (!seen) return { ok: false, message: "Choose the package first." };
+      const r = await call("/admin/api/module/add", { upload: seen.upload, name: $("devName").value, reach: $("reachPick").value === "one" ? $("reachOne").value.trim() : "lan",
+        screens: [...document.querySelectorAll(".useScreen:checked")].map((i) => i.value), confirm: $("confirm").value });
+      if (r.ok) { say("driversMsg", r.name + " was added. Fill in its settings next.", "ok"); setTimeout(async () => { await load(); openSettings(r.id); }, 300); }
+      return r;
+    }, "Add device");
+  };
+  // Devices connect and drop on their own time, so this page keeps itself current while nothing is being edited.
+  setInterval(() => { if (!$("dlg").open && document.visibilityState === "visible") load(); }, 4000);
 
   function drawPolicy(p) {
     $("pk").value = p.kind; $("pl").value = p.minLength; $("pm").checked = p.mixed; $("ps").checked = !!p.superuser; $("sup").hidden = !p.superuser;

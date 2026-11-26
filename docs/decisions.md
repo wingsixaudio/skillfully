@@ -141,6 +141,26 @@ written for: a switch, a number with its range, an action with its options.
 **A new owner lands where the setting up is.** A superuser with no screen that has anything to show is sent to
 the admin page. Everyone else lands on their role's home screen.
 
+**Adding a device is two steps: look, then decide.** Choosing a package sends it to the hub, which checks it
+and answers with what it is and what each choice of reach would let it do. Nothing is written until the
+superuser confirms with their own PIN or password. A device added this way arrives listening, lives in the
+hub's data folder, and comes back after a restart with the mode and settings it was left in.
+
+**A driver can say what settings it takes.** The contract has a `settings` message for drivers that only know
+once they are running. The Companion bridge fills it from the module's own form. The words in it are shown as
+text and nothing else is done with them.
+
+**A secret setting goes one way.** It is kept and handed to the module. The admin page is told only that it is
+set, a blank field means "keep it", and the log records which settings changed, never their values.
+
+**Changing a device's settings restarts it.** What a driver may reach can depend on its settings, and its
+permissions are fixed when its process starts.
+
+**The store will be its own repository on GitHub.** Plugins arrive there by pull request and are checked by
+the same tools this repository uses. People who merge plugins should not be able to change the hub that
+confines them. Plugins written for this contract can live there as code. A Companion module, or anything with
+its own home, is an entry pointing at a pinned commit. Not built yet.
+
 **Every change arrives as a pull request.** `main` is protected: no direct pushes, no force pushes, no
 deleting it, and nothing merges until the `checks` job passes. This applies to maintainers too. The first six
 commits were pushed straight to `main` before the rule existed.
@@ -187,9 +207,15 @@ on each system, because a test that fails one time in twenty is found by repetit
 - **Browser coverage.** The screen sandbox was proven in Chrome only. Safari on a phone matters most and has
   not been run.
 - **Record and replay.** The spec calls for recording plugin traffic and replaying it as tests. Not built.
-- **Install, update, rollback, uninstall.** Plugins in the repository are listed in `core/main.ts`. A
-  Companion module is added from the command line into the hub's data folder and needs a restart. There is no
-  screen for it, no way to change its settings but adding it again, and no removal but deleting its folder.
+- **Updating a device's module.** A newer package can only be added as a new device. There is no update that
+  keeps the settings, and no way back to the version before.
+- **Secrets on disk.** A device's settings, secrets included, are kept as plain text in the hub's data folder.
+  They are out of the log and off the page, and they are not encrypted at rest.
+- **Parts of a module's settings form.** A setting that picks several things at once is not shown, and a
+  module's rule for when to show a setting is ignored: every setting is always shown.
+- **An agent that guides a contributor.** Checking a plugin, proving a driver, reporting what it asks for and
+  adding it are each one command. A skill that chains them, from an idea to a pull request on the store, is
+  the intended way in for someone who has never contributed.
 - **Roles cannot name a connection.** A person allowed to operate Controls can operate every connection
   Controls was given. An ability can be limited to certain values, but not to one device among several of the
   same kind.
@@ -206,8 +232,6 @@ on each system, because a test that fails one time in twenty is found by repetit
   hub hands settings over fresh at each start, so a module's upgrade scripts never run.
 - **Names under `lan`.** The grant is written as address ranges, so a module set to reach a device by name
   rather than by address is refused.
-- **One module, one device.** Adding the same module twice for two devices is not possible yet: the driver's
-  id comes from the module's.
 - **License.** Not chosen.
 
 ## Not tested

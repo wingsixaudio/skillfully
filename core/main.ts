@@ -43,6 +43,7 @@ const hub = await startHub({
   hostname: lan ? "0.0.0.0" : "127.0.0.1",
   port: portArg ? Number(portArg.slice(7)) : 8080,
   plugins,
+  dataDir,
 });
 
 await Promise.all([...hub.hosts.values()].map((h) => h.whenReady().catch(() => {})));

@@ -79,6 +79,10 @@ export interface InstallOptions {
   settings?: Record<string, unknown>;
   /** Listen unless told otherwise: the module connects and reports, and the hub sends it nothing. */
   mode?: Mode;
+  /** What people call this device. Unless told otherwise, the module's own name. */
+  name?: string;
+  /** Ids already in use, so that a second copy of a module gets its own. */
+  taken?: (id: string) => boolean;
 }
 
 export interface Installed {
@@ -89,13 +93,32 @@ export interface Installed {
   notes: string[];
 }
 
-/** Unpack a Companion module package into the hub's data folder as a driver. Replaces an older copy. */
-export async function installCompanionModule(
-  packagePath: string,
-  dataDir: string,
-  opts: InstallOptions = {},
-): Promise<Installed> {
-  const packed = await Deno.readFile(packagePath);
+/** A Companion module package, read and checked, with nothing written yet. */
+export interface ModulePackage {
+  sha256: string;
+  /** The module's own description of itself. Shown to people as text. */
+  module: { id: string; name: string; version: string; license: string; description: string; makes: string };
+  entry: string;
+  files: TarFile[];
+}
+
+/** What a network choice means, in words a person can weigh. */
+export function networkNotes(network: string[]): string[] {
+  const notes: string[] = [];
+  const named = network.filter((n) => n !== "lan" && n !== "listen");
+  if (network.includes("lan")) {
+    notes.push("It may reach any device on your local network, and nothing on the internet.");
+  } else if (named.length) {
+    notes.push(`It may reach ${named.join(" and ")}, and nothing else on the network.`);
+  } else notes.push("It may reach nothing on the network.");
+  if (network.includes("listen")) notes.push("It may open ports on this computer for devices to answer on.");
+  notes.push("It can read its own folder, and no other file on this computer.");
+  notes.push("Nobody has reviewed it for this hub.");
+  return notes;
+}
+
+/** Read and check a Companion module package held in memory. Nothing in it is run, and nothing is written. */
+export async function readModulePackage(packed: Uint8Array): Promise<ModulePackage> {
   if (packed.length > PACKAGE_MAX) throw new Error("the package is larger than this hub accepts");
   let files: TarFile[];
   try {
@@ -147,24 +170,55 @@ export async function installCompanionModule(
   if (!find(entry) || !/\.(js|cjs|mjs)$/.test(entry)) {
     throw new Error("the module's manifest points at a program that is not in the package");
   }
+  const id = String(theirs.id ?? "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!id) throw new Error("the module's manifest has no id");
+  const words = (v: unknown, max: number) =>
+    String(v ?? "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, max);
+  const products = Array.isArray(theirs.products) ? theirs.products.map((p: unknown) => words(p, 60)) : [];
+  return {
+    sha256: createHash("sha256").update(packed).digest("hex"),
+    module: {
+      id,
+      name: words(theirs.name, 80) || id,
+      version: /^\d+\.\d+\.\d+/.exec(String(theirs.version ?? ""))?.[0] ?? "0.0.0",
+      license: words(theirs.license, 40),
+      description: words(theirs.description, 300),
+      makes: [words(theirs.manufacturer, 60), products.slice(0, 3).join(", ")].filter(Boolean).join(" ")
+        .slice(0, 120),
+    },
+    entry,
+    files: inside,
+  };
+}
 
-  const their = String(theirs.id ?? "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
-  if (!their) throw new Error("the module's manifest has no id");
-  const id = `companion-${their}`.slice(0, 63);
-  const version = /^\d+\.\d+\.\d+/.exec(String(theirs.version ?? ""))?.[0] ?? "0.0.0";
+/** Write a checked package into the hub's data folder as a driver. A second copy gets its own id. */
+export async function writeModule(
+  pkg: ModulePackage,
+  dataDir: string,
+  opts: InstallOptions = {},
+): Promise<Installed> {
+  const root = `${dataDir.replace(/[\\/]$/, "")}/plugins`;
+  const exists = async (path: string) => !!(await Deno.stat(path).catch(() => null));
+  const base = `companion-${pkg.module.id}`.slice(0, 58);
+  let id = base;
+  if (opts.taken) {
+    for (let n = 2; opts.taken(id) || await exists(`${root}/${id}`); n++) id = `${base}-${n}`;
+  }
   const network = opts.network ?? ["lan", "listen"];
+  const name = (opts.name ?? "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 80) || pkg.module.name;
   const manifest = {
     kind: "driver",
     id,
-    name: String(theirs.name ?? their).slice(0, 80),
+    name,
     description: `${
-      String(theirs.description ?? "A Companion module").slice(0, 300)
-    } (a Companion module, run as it is)`,
-    version,
+      pkg.module.description || "A Companion module"
+    } (the Companion module ${pkg.module.name}, run as it is)`
+      .slice(0, 400),
+    version: pkg.module.version,
     contract: "1",
-    license: String(theirs.license ?? "").slice(0, 40) || undefined,
+    license: pkg.module.license || undefined,
     runtime: "companion",
-    entry: `module/${entry}`,
+    entry: `module/${pkg.entry}`,
     capabilities: { generic: {} },
     permissions: { network },
     settings: { type: "object" },
@@ -172,9 +226,9 @@ export async function installCompanionModule(
   const checked = checkManifest(JSON.parse(JSON.stringify(manifest)));
   if (!checked.ok) throw new Error(`the module cannot be described to this hub: ${checked.problem}`);
 
-  const dir = `${dataDir.replace(/[\\/]$/, "")}/plugins/${id}`;
+  const dir = `${root}/${id}`;
   await Deno.remove(dir, { recursive: true }).catch(() => {});
-  for (const f of inside) {
+  for (const f of pkg.files) {
     const path = `${dir}/module/${f.path}`;
     await Deno.mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true });
     await Deno.writeFile(path, f.data);
@@ -187,7 +241,8 @@ export async function installCompanionModule(
         mode: opts.mode ?? "listen",
         settings: opts.settings ?? {},
         from: "a Companion module package",
-        sha256: createHash("sha256").update(packed).digest("hex"),
+        module: { id: pkg.module.id, name: pkg.module.name, version: pkg.module.version },
+        sha256: pkg.sha256,
         installed: new Date().toISOString(),
         reviewed: false,
       },
@@ -195,24 +250,39 @@ export async function installCompanionModule(
       2,
     ) + "\n",
   );
+  return { id, dir, manifest: checked.value as DriverManifest, notes: networkNotes(network) };
+}
 
-  const notes: string[] = [];
-  if (network.includes("lan")) {
-    notes.push("it may reach any device on your local network, and nothing on the internet");
-  }
-  if (network.includes("listen")) notes.push("it may open ports on this computer for devices to answer on");
-  notes.push("it can read its own folder, and no other file on this computer");
-  notes.push("nobody has reviewed it for this hub");
-  return { id, dir, manifest: checked.value as DriverManifest, notes };
+/** Unpack a Companion module package file into the hub's data folder as a driver. */
+export async function installCompanionModule(
+  packagePath: string,
+  dataDir: string,
+  opts: InstallOptions = {},
+): Promise<Installed> {
+  return await writeModule(await readModulePackage(await Deno.readFile(packagePath)), dataDir, opts);
+}
+
+/** Change what was chosen for an added plugin: its mode, its settings, or both. */
+export async function updateInstall(
+  dir: string,
+  change: { mode?: Mode; settings?: Record<string, unknown> },
+): Promise<void> {
+  const raw = JSON.parse(await Deno.readTextFile(`${dir}/install.json`));
+  await Deno.writeTextFile(`${dir}/install.json`, JSON.stringify({ ...raw, ...change }, null, 2) + "\n");
 }
 
 /** What was chosen when a plugin was installed into the data folder. */
-export async function readInstall(dir: string): Promise<{ mode?: Mode; settings?: Record<string, unknown> }> {
+export async function readInstall(
+  dir: string,
+): Promise<
+  { mode?: Mode; settings?: Record<string, unknown>; module?: { id: string; name: string; version: string } }
+> {
   try {
     const raw = JSON.parse(await Deno.readTextFile(`${dir}/install.json`));
     return {
       mode: raw.mode === "act" ? "act" : "listen",
       settings: raw.settings && typeof raw.settings === "object" ? raw.settings : {},
+      ...(raw.module && typeof raw.module === "object" ? { module: raw.module } : {}),
     };
   } catch {
     return {};

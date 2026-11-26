@@ -135,7 +135,24 @@ export interface Health {
   status: HealthStatus;
   reason?: string;
 }
-export type FromPlugin = Hello | State | PluginEvent | Result | Health;
+/** One thing a superuser fills in for a driver. */
+export interface SettingsField {
+  id: string;
+  label: string;
+  /** secret is text that is never shown again. note is words to read, with nothing to fill in. */
+  kind: "text" | "number" | "toggle" | "choice" | "secret" | "note";
+  default?: Value;
+  choices?: { id: Value; label: string }[];
+  min?: number;
+  max?: number;
+  help?: string;
+}
+/** The settings a driver takes, said once it is running. */
+export interface SettingsForm {
+  type: "settings";
+  fields: SettingsField[];
+}
+export type FromPlugin = Hello | State | PluginEvent | Result | Health | SettingsForm;
 
 // --- Messages: hub to driver ---
 
@@ -162,5 +179,5 @@ export interface Shutdown {
 }
 export type ToPlugin = Welcome | Command | Resync | ModeNotice | Shutdown;
 
-export const FROM_PLUGIN = ["hello", "state", "event", "result", "health"] as const;
+export const FROM_PLUGIN = ["hello", "state", "event", "result", "health", "settings"] as const;
 export const TO_PLUGIN = ["welcome", "command", "resync", "mode", "shutdown"] as const;

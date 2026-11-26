@@ -9,6 +9,7 @@ import type {
   HealthStatus,
   Hello,
   Mode,
+  SettingsField,
   Value,
   Values,
 } from "../contract/mod.ts";
@@ -67,6 +68,8 @@ const MAX_EVENT_DATA_CHARS = 4000;
 export class PluginHost {
   readonly state = new Map<string, Value>();
   health: { status: HealthStatus; reason?: string } = { status: "down", reason: "not started" };
+  /** The settings this driver says it takes, if it has said. */
+  settingsForm: SettingsField[] | undefined;
   status: HostStatus = "down";
   restarts = 0;
 
@@ -242,6 +245,11 @@ export class PluginHost {
         return this.#onResult(m.id, m.values, m.errors);
       case "health":
         return this.#setHealth(m.status, m.reason);
+      case "settings":
+        // Kept for a superuser's form. Words from a plugin are shown as text and never acted on.
+        this.settingsForm = m.fields;
+        for (const l of this.#healthListeners) l();
+        return;
       case "event":
         // A plugin's own words. Stored as data under its name, never acted on.
         this.#plog({
