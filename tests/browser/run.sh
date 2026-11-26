@@ -9,7 +9,7 @@ browser=${1:-chromium}
 port=${PORT:-8099}
 data=$(mktemp -d)
 
-deno run --allow-net --allow-read --allow-env=HOME,DENO_DIR --allow-write="$data" --allow-run \
+deno run --allow-net --allow-read --allow-env=HOME,DENO_DIR,SYSTEMROOT,LOCALAPPDATA,USERPROFILE --allow-write="$data" --allow-run \
   core/main.ts --port="$port" --data="$data" >"$data/hub.log" 2>&1 &
 hub=$!
 trap 'kill "$hub" 2>/dev/null || true; rm -rf "$data"' EXIT

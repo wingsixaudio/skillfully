@@ -127,11 +127,17 @@ async def main():
         await pg.mouse.move(xs[0], y); await pg.mouse.down()
         for x in xs[1:]:
             await pg.mouse.move(x, y); await pg.wait_for_timeout(12)
-        await pg.mouse.up(); await pg.wait_for_timeout(900)
+        await pg.mouse.up()
+        # What the screen believes the finger chose, read before the hub has had time to answer.
+        chosen = float(await fr.get_attribute("#fader", "aria-valuenow"))
+        await pg.wait_for_timeout(900)
         held = (await state("sim-console"))[LEVEL]
         shown = (await fr.inner_text("#db")).replace("\n", "").replace("dB", "")
-        # Engines round the fader's width differently, so the last position may land one half-dB step either side.
-        check("a drag reaches the board", held != before and abs(held - -10) <= 0.5, f"board held {before}, now holds {held}")
+        # Engines deliver the last few pointer moves of a fast drag differently, so where the drag ends is
+        # allowed a little room. What must hold everywhere: the value the screen settled on is the one the
+        # board ends up holding. A lost last move, or an old value snapping back, fails here.
+        check("a drag moves the fader to about where the finger stopped", chosen != before and abs(chosen - -10) <= 1.5, f"started at {before}, the screen chose {chosen}")
+        check("the board ends up holding what the screen chose", held == chosen, f"the screen chose {chosen}, the board holds {held}")
         check("the screen shows what the board holds", float(shown) == held, shown)
         log_text = await fr.inner_text("#log")
         check("the screen's history is filled through the bridge, as Sam's own", "You set the level" in log_text, log_text[:80])

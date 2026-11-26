@@ -78,9 +78,16 @@ export function denoArgs(
   ];
 }
 
+// A plugin's process starts with an empty environment, plus the few names the runtime itself needs to
+// start. The plugin's own code cannot read any of them: it is never given permission to read the environment.
+// Windows will not open a network connection for a process that does not know where Windows is.
+const RUNTIME_NEEDS = Deno.build.os === "windows"
+  ? ["DENO_DIR", "SYSTEMROOT", "LOCALAPPDATA", "USERPROFILE"]
+  : ["HOME", "DENO_DIR"];
+
 function childEnv(): Record<string, string> {
   const env: Record<string, string> = { NO_COLOR: "1" };
-  for (const k of ["HOME", "DENO_DIR"]) {
+  for (const k of RUNTIME_NEEDS) {
     const v = Deno.env.get(k);
     if (v) env[k] = v;
   }
