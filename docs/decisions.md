@@ -155,10 +155,24 @@ set, a blank field means "keep it", and the log records which settings changed, 
 **Changing a device's settings restarts it.** What a driver may reach can depend on its settings, and its
 permissions are fixed when its process starts.
 
-**The store will be its own repository on GitHub.** Plugins arrive there by pull request and are checked by
-the same tools this repository uses. People who merge plugins should not be able to change the hub that
-confines them. Plugins written for this contract can live there as code. A Companion module, or anything with
-its own home, is an entry pointing at a pinned commit. Not built yet.
+**The store is its own repository on GitHub.** Plugins arrive at
+[skillfully-plugins](https://github.com/wingsixaudio/skillfully-plugins) by pull request and are checked there
+by this repository's own code. People who merge plugins cannot change the hub that confines them. A Companion
+module is an entry pointing at a pinned commit of its author's source; the store builds it, completes its
+license notices, and publishes the package with a checksum.
+
+**A hub trusts the store for one thing: answers given in advance.** It reads the published list, downloads the
+package a superuser picks, and throws it away unless it matches the list's checksum. What the entry allows in
+advance becomes the device's starting permission. Everything else is still asked. Being in the store does not
+take a device out of Listen, and does not skip the superuser's PIN.
+
+**A grant can wait on a setting.** `{host}:9999` means the address a superuser types in. A Companion module
+can only say what settings it takes once it is running, so it starts with such a grant giving nothing, and
+gets it when the setting is filled in.
+
+**Everything in the store's list is treated as data.** An entry whose package would be fetched from anywhere
+but beside the list, whose grants are not ones the contract knows, or whose source is not a pinned commit is
+left out, not repaired.
 
 **A device a superuser adds asks before it reaches anything.** It starts with no access to the network. The
 runtime keeps an exact note of everything a plugin uses or is refused, in a file the plugin cannot read. The
@@ -171,9 +185,8 @@ away. Nobody has to describe a module to the hub before it can be used safely.
 **What the hub never allows is noted, not asked.** Reading files outside its folder, writing, the environment,
 starting programs: these are counted and shown beside the device, and there is no way to say yes to them.
 
-**A reviewed list is advice on top, not a gate.** The store's entries become answers given in advance: always
-allow this, ask about that, do not allow the other. That needs signing so a hub can trust where the advice
-came from. Not built.
+**A reviewed list is advice on top, not a gate.** The store's entries are answers given in advance: allow this
+without asking. A module needs no entry to be used.
 
 **Every change arrives as a pull request.** `main` is protected: no direct pushes, no force pushes, no
 deleting it, and nothing merges until the `checks` job passes. This applies to maintainers too. The first six
@@ -221,6 +234,12 @@ on each system, because a test that fails one time in twenty is found by repetit
 - **Browser coverage.** The screen sandbox was proven in Chrome only. Safari on a phone matters most and has
   not been run.
 - **Record and replay.** The spec calls for recording plugin traffic and replaying it as tests. Not built.
+- **The store's list is not signed.** A hub trusts it because it arrives over HTTPS from the address the hub
+  was given, and trusts a package because it matches the list. Someone who could change what that address
+  serves could change both. Signing the list, and "ask" and "do not allow" as advice alongside "allow", come
+  next.
+- **A hub does not notice a newer version in the store.** There is no update, only adding again.
+- **The first real download has not happened.** The tests use a stand-in store on the same computer.
 - **A question an admin cannot judge.** "Send to every device on your network, port 9999" is worded plainly
   and carries a warning, but someone still has to decide. The reviewed list is what will answer it for them.
 - **Several rounds.** A device may ask, restart, get further, and ask again. Each round is a restart.

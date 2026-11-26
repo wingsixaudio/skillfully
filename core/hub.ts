@@ -27,9 +27,11 @@ import {
   networkNotes,
   readInstall,
   readModulePackage,
+  type StoreOrigin,
   updateInstall,
   writeModule,
 } from "./install.ts";
+import { Store, type StoreModule } from "./store.ts";
 import { adminPage, authPage, notePage, PAGE_POLICY, shellPage } from "./pages.ts";
 import { realPath } from "./paths.ts";
 import { inspectPlugin } from "./plugins.ts";
@@ -54,6 +56,8 @@ export interface HubOptions {
   capabilitiesDir?: string;
   /** Where this hub keeps the devices a superuser adds. Without it, none can be added while it runs. */
   dataDir?: string;
+  /** Where the plugin store's list is published. Without it, this hub does not use a store. */
+  storeUrl?: string;
 }
 
 export interface Hub {
@@ -134,9 +138,11 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     settings: Record<string, unknown>;
     added: boolean;
     module?: { id: string; name: string; version: string };
+    store?: StoreOrigin;
     tuning?: Tuning;
   }
   const chosen = new Map<string, Chosen>();
+  const store = new Store(opts.storeUrl);
   const addedRoot = opts.dataDir ? `${opts.dataDir.replace(/[\\/]$/, "")}/plugins` : undefined;
   if (addedRoot) await Deno.mkdir(addedRoot, { recursive: true });
   const addedReal = addedRoot ? `${await realPath(addedRoot)}/` : undefined;
@@ -165,6 +171,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         settings: cfg.settings ?? {},
         added,
         ...(install.module ? { module: install.module } : {}),
+        ...(install.store ? { store: install.store } : {}),
         tuning,
       });
       const host = new PluginHost(
@@ -309,7 +316,24 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   const UPLOAD_MAX = 64 * 1024 * 1024;
   const UPLOAD_KEPT_MS = 10 * 60 * 1000;
   /** The package each superuser is looking at, checked but not yet added. One each, for a few minutes. */
-  const uploads = new Map<string, { pkg: ModulePackage; at: number }>();
+  const uploads = new Map<string, { pkg: ModulePackage; at: number; from?: StoreModule }>();
+  /** What a hub allows a store module in advance, and how far it has been proven, in words. */
+  const PROVEN: Record<string, string> = {
+    starts: "It starts and describes itself. Nobody has reported using it with a device.",
+    "pretend-device": "It has been proven against a stand-in for the device, not the real thing.",
+    "real-device": "It has been used with the real device.",
+  };
+  const fromStore = (m: StoreModule) => ({
+    id: m.id,
+    name: m.name,
+    description: m.description,
+    version: m.version,
+    license: m.license,
+    source: m.source.repo,
+    proven: PROVEN[m.tested],
+    notes: m.notes,
+    advance: m.network.map((g) => grantWords(g)),
+  });
   /** The screens that could be given a device of these kinds. */
   const fits = (kinds: string[]) =>
     [...screens.values()].map((s) => s.manifest).filter((m) =>
@@ -555,6 +579,27 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         if (changed.added.length || changed.removed.length) dropScreen(screen.id);
         return json({ ok: true, ...changed });
       }
+      case "store/fetch": {
+        // Download one package from the store and check it against the list. Nothing is added by this.
+        if (!opts.dataDir) return refuse(400, "This hub was started without a place to keep added devices.");
+        try {
+          const got = await store.download(id);
+          const pkg = await readModulePackage(got.bytes);
+          if (pkg.module.id !== got.module.id) {
+            throw new Error("the package is not the module the store lists");
+          }
+          uploads.set(me.id, { pkg, at: Date.now(), from: got.module });
+          return json({
+            ok: true,
+            upload: pkg.sha256,
+            module: pkg.module,
+            store: fromStore(got.module),
+            screens: fits(["generic"]).map((m) => ({ id: m.id, name: m.name })),
+          });
+        } catch (err) {
+          return refuse(400, sentence(err));
+        }
+      }
       case "module/add": {
         const up = uploads.get(me.id);
         if (!up || up.pkg.sha256 !== b.upload || Date.now() - up.at > UPLOAD_KEPT_MS) {
@@ -574,14 +619,29 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         const no = await sure();
         if (no) return no;
         try {
+          // From the store, it holds what the store allows in advance and starts with the store's settings.
+          // From a file, it holds nothing unless a caller chose otherwise.
+          const settings = up.from?.settings ?? {};
           const installed = await writeModule(up.pkg, opts.dataDir!, {
             name: String(b.name ?? ""),
-            network: reach === "ask" ? [] : [reach, "listen"],
+            network: up.from ? up.from.network : reach === "ask" ? [] : [reach, "listen"],
+            settings,
             mode: "listen",
             taken: (taken) => hosts.has(taken) || screens.has(taken) || skills.has(taken),
           });
+          if (up.from) {
+            await updateInstall(installed.dir, {
+              store: {
+                id: up.from.id,
+                repo: up.from.source.repo,
+                commit: up.from.source.commit,
+                license: up.from.license,
+                tested: up.from.tested,
+              },
+            });
+          }
           uploads.delete(me.id);
-          const host = (await load({ dir: installed.dir, mode: "listen", settings: {} }))!;
+          const host = (await load({ dir: installed.dir, mode: "listen", settings }))!;
           attach(host);
           await host.start();
           log.append({
@@ -596,6 +656,9 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
               version: up.pkg.module.version,
               sha256: up.pkg.sha256,
               network: host.manifest.permissions?.network ?? [],
+              from: up.from
+                ? `the store, built from ${up.from.source.repo} at ${up.from.source.commit}`
+                : "a package file",
             },
           });
           for (const sc of wanted) {
@@ -888,6 +951,16 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       if (path.startsWith("/admin/api/")) {
         if (!me) return refuse(401, "Please sign in again.");
         if (!accounts.isSuperuser(me)) return refuse(403, "Only a superuser can do that.");
+        if (path === "/admin/api/store" && req.method === "GET") {
+          if (!store.on) return json({ ok: true, on: false, modules: [] });
+          try {
+            return json({ ok: true, on: true, modules: (await store.list()).map(fromStore) }, 200, {
+              "cache-control": "no-store",
+            });
+          } catch (err) {
+            return json({ ok: true, on: true, modules: [], message: sentence(err) });
+          }
+        }
         if (path === "/admin/api/all" && req.method === "GET") {
           return json(
             {
@@ -911,6 +984,8 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
                     : ["It reaches nothing on the network."],
                   added: !!mine?.added,
                   module: mine?.module ?? null,
+                  // Where it came from, when that is the store: its license, its source, how far it is proven.
+                  store: mine?.store ? { ...mine.store, proven: PROVEN[mine.store.tested] ?? "" } : null,
                   form: mine?.added ? h.settingsForm ?? null : null,
                   // What is set now, so the form opens filled in. A secret is never sent back, only whether it is set.
                   settings: mine?.added

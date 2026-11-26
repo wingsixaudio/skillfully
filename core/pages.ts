@@ -384,7 +384,9 @@ export function adminPage(): string {
     const box = $("drivers"); box.innerHTML = "";
     for (const d of drivers) {
       const item = el("div", { className: "item" }, el("h3", { textContent: d.name }));
-      if (d.module) item.append(el("p", { className: "dim", style: "margin:0 0 4px", textContent: "Companion module " + d.module.name + " " + d.module.version + ". Nobody has reviewed it for this hub." }));
+      if (d.module && d.store) item.append(el("p", { className: "dim", style: "margin:0 0 4px" }, "From the store: Companion module " + d.module.name + " " + d.module.version + (d.store.license ? ", " + d.store.license + " license" : "") + ". " + d.store.proven + " ",
+        el("a", { href: d.store.repo, target: "_blank", rel: "noopener noreferrer", textContent: "Its author's source" }), "."));
+      else if (d.module) item.append(el("p", { className: "dim", style: "margin:0 0 4px", textContent: "Companion module " + d.module.name + " " + d.module.version + ", added from a file. Nobody has reviewed it for this hub." }));
       item.append(el("div", {}, el("span", { className: "chip", textContent: STATE[d.status] || d.status }), el("span", { className: "chip" + (d.mode === "act" ? " on" : ""), textContent: d.mode === "act" ? "Act" : "Listen" })));
       const [words, kind] = statusOf(d);
       item.append(el("p", { className: "status " + kind, textContent: words }));
@@ -480,34 +482,76 @@ export function adminPage(): string {
     let seen = null;
     ask("Add a device", (x) => {
       $("dlgOk").disabled = true;
-      x.append(el("p", { className: "dim", textContent: "Many devices already have a Bitfocus Companion module. Download that module's package (a file ending in .tgz) and choose it here. Nothing is added until you say so." }));
-      const file = input(x, "pkg", "The module's package", { type: "file", accept: ".tgz,.tar.gz,application/gzip" });
+      const pick = el("div", { id: "pkgPick" });
       const rest = el("div", { id: "pkgRest", hidden: true });
-      x.append(rest);
+      x.append(pick, rest);
+
+      // Whatever was chosen, from the store or from a file: say what it is, then ask the same few things.
+      const chosen = (r) => {
+        say("dlgMsg", ""); seen = r; pick.hidden = true; rest.innerHTML = "";
+        const m = r.module, st = r.store;
+        const title = st ? st.name : (m.makes || m.name);
+        rest.append(el("div", { className: "about" }, el("b", { textContent: title }), el("span", { textContent: "Module " + m.name + " " + m.version + (m.license ? ", " + m.license + " license" : "") + ". " + (st ? st.description : m.description) })));
+        const facts = el("ul", { className: "facts" });
+        if (st) {
+          facts.append(el("li", { textContent: st.proven }));
+          if (st.advance.length) facts.append(el("li", { textContent: "The store lets it, without asking you: " + st.advance.map((w) => w.charAt(0).toLowerCase() + w.slice(1)).join("; ") + "." }));
+          facts.append(el("li", { textContent: "Before it reaches anything else, you are asked first." }));
+          facts.append(el("li", { textContent: "It can read its own folder, and no other file on this computer." }));
+          if (st.notes) facts.append(el("li", { textContent: st.notes }));
+          const src = el("a", { href: st.source, target: "_blank", rel: "noopener noreferrer", textContent: "its author's source" });
+          facts.append(el("li", {}, "Built by the store from ", src, "."));
+        } else for (const n of r.notes) facts.append(el("li", { textContent: n }));
+        rest.append(facts);
+        input(rest, "devName", "What do you call this device?", { value: title, required: true, maxLength: 80 });
+        rest.append(el("label", { textContent: "Which screens may use it?" }));
+        if (!r.screens.length) rest.append(el("p", { className: "dim", textContent: "No screen on this hub works with it yet." }));
+        for (const sc of r.screens) rest.append(el("label", { className: "check" }, el("input", { type: "checkbox", value: sc.id, className: "useScreen" }), el("span", { textContent: sc.name })));
+        rest.append(el("p", { className: "help", textContent: "You can change this later under Screens. It starts out listening." }));
+        confirmField(rest);
+        const back = el("button", { type: "button", className: "small quiet", textContent: "Choose something else", style: "margin-top:12px" });
+        back.onclick = () => { seen = null; rest.hidden = true; pick.hidden = false; $("dlgOk").disabled = true; say("dlgMsg", ""); };
+        rest.append(back);
+        rest.hidden = false; $("dlgOk").disabled = false;
+      };
+
+      // From the store.
+      pick.append(el("h3", { textContent: "From the store", style: "font-size:15px;margin:0 0 6px" }));
+      const shelf = el("div", { id: "shelf" }, el("p", { className: "dim", textContent: "Looking at the store" }));
+      pick.append(shelf);
+      call("/admin/api/store").then((r) => {
+        shelf.innerHTML = "";
+        if (!r.on) return shelf.append(el("p", { className: "dim", textContent: "This hub is not set up to use a store." }));
+        if (r.message) shelf.append(el("p", { className: "dim", textContent: r.message }));
+        else if (!r.modules.length) shelf.append(el("p", { className: "dim", textContent: "The store has nothing listed yet." }));
+        for (const m of r.modules || []) {
+          const b = el("button", { type: "button", className: "small quiet", textContent: "Choose" });
+          b.onclick = async () => {
+            say("dlgMsg", "Getting it from the store and checking it");
+            const got = await call("/admin/api/store/fetch", { id: m.id });
+            if (!got.ok) return say("dlgMsg", got.message, "bad");
+            chosen(got);
+          };
+          shelf.append(el("div", { className: "item shelfItem" }, el("h3", { textContent: m.name }), el("p", { className: "dim", style: "margin:0 0 6px", textContent: m.description }),
+            el("p", { className: "help", style: "margin:0 0 8px", textContent: m.proven }), b));
+        }
+      });
+
+      // From a file.
+      pick.append(el("h3", { textContent: "From a file", style: "font-size:15px;margin:18px 0 0" }));
+      pick.append(el("p", { className: "help", textContent: "Many devices have a Bitfocus Companion module that is not in the store. Download that module's package (a file ending in .tgz) and choose it here." }));
+      const file = input(pick, "pkg", "The module's package", { type: "file", accept: ".tgz,.tar.gz,application/gzip" });
       file.onchange = async () => {
-        rest.hidden = true; rest.innerHTML = ""; $("dlgOk").disabled = true; seen = null;
         if (!file.files[0]) return;
         say("dlgMsg", "Checking the package");
         let r;
         try { r = await (await fetch("/admin/api/module/inspect", { method: "POST", headers: { "content-type": "application/gzip" }, body: file.files[0] })).json(); }
         catch { r = { ok: false, message: "The hub could not read that file." }; }
         if (!r.ok) return say("dlgMsg", r.message, "bad");
-        say("dlgMsg", ""); seen = r;
-        const m = r.module;
-        rest.append(el("div", { className: "about" }, el("b", { textContent: m.makes || m.name }), el("span", { textContent: "Module " + m.name + " " + m.version + (m.license ? ", " + m.license + " license" : "") + (m.description ? ". " + m.description : "") })));
-        input(rest, "devName", "What do you call this device?", { value: m.makes || m.name, required: true, maxLength: 80 });
-        const facts = el("ul", { className: "facts" });
-        for (const n of r.notes) facts.append(el("li", { textContent: n }));
-        rest.append(facts);
-        rest.append(el("label", { textContent: "Which screens may use it?" }));
-        if (!r.screens.length) rest.append(el("p", { className: "dim", textContent: "No screen on this hub works with it yet." }));
-        for (const sc of r.screens) rest.append(el("label", { className: "check" }, el("input", { type: "checkbox", value: sc.id, className: "useScreen" }), el("span", { textContent: sc.name })));
-        rest.append(el("p", { className: "help", textContent: "You can change this later under Screens. It starts out listening." }));
-        confirmField(rest);
-        rest.hidden = false; $("dlgOk").disabled = false;
+        chosen(r);
       };
     }, async () => {
-      if (!seen) return { ok: false, message: "Choose the package first." };
+      if (!seen) return { ok: false, message: "Choose something first." };
       const r = await call("/admin/api/module/add", { upload: seen.upload, name: $("devName").value, screens: [...document.querySelectorAll(".useScreen:checked")].map((i) => i.value), confirm: $("confirm").value });
       if (r.ok) { say("driversMsg", r.name + " was added. Fill in its settings next.", "ok"); setTimeout(async () => { await load(); openSettings(r.id); }, 300); }
       return r;

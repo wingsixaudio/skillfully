@@ -7,6 +7,7 @@
 import { type PluginConfig, startHub } from "./hub.ts";
 import { readInstall } from "./install.ts";
 import { here } from "./paths.ts";
+import { STORE_URL } from "./store.ts";
 
 const root = here("..", import.meta.url).replace(/\/$/, "");
 const lan = Deno.args.includes("--lan");
@@ -44,6 +45,10 @@ const hub = await startHub({
   port: portArg ? Number(portArg.slice(7)) : 8080,
   plugins,
   dataDir,
+  // --store=<address> reads another store's list. --no-store uses none: devices are then added from files.
+  ...(Deno.args.includes("--no-store")
+    ? {}
+    : { storeUrl: Deno.args.find((a) => a.startsWith("--store="))?.slice(8) ?? STORE_URL }),
 });
 
 await Promise.all([...hub.hosts.values()].map((h) => h.whenReady().catch(() => {})));

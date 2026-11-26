@@ -60,18 +60,28 @@ tests/browser/run.sh chromium              # the real-browser test (needs Python
 tests/compat/kasa.sh                       # a real Companion module against a pretend plug (needs Node)
 ```
 
-Many devices already have a [Bitfocus Companion](https://bitfocus.io/companion) module. To use one, download
-the module's package (the `.tgz` file Companion itself installs), open the admin page, and choose **Add a
-device**. The page shows what the module is before anything is added, then asks for the settings the module
-itself declares.
+To add a device, open the admin page and choose **Add a device**. There are two ways in:
+
+- **From the store.** The hub reads the list published by
+  [skillfully-plugins](https://github.com/wingsixaudio/skillfully-plugins), downloads what you pick, and
+  checks it against the store's checksum.
+- **From a file.** Many devices have a [Bitfocus Companion](https://bitfocus.io/companion) module that is not
+  in the store. Download that module's package (the `.tgz` file Companion itself installs) and choose it.
+
+Either way the page shows what it is before anything is added, then asks for the settings the module itself
+declares.
 
 A device starts with no access to your network. When it tries to reach something, the page asks you first, in
-plain words, the way a phone asks before an app uses the camera. It also starts out listening: the hub watches
-it and sends it nothing until you switch it to Act.
+plain words, the way a phone asks before an app uses the camera. Something from the store may come with a few
+of those answers already given, such as "the address you type in". It also starts out listening: the hub
+watches it and sends it nothing until you switch it to Act.
 
 The same thing from a command line, for a hub with no screen:
 `deno task add-module module.tgz --set
 host=192.168.1.50`, then restart the hub.
+
+`deno task hub --no-store` runs a hub that never looks at the store, and `--store=<address>` points it at
+another one.
 
 The first run downloads one library (the JSON Schema validator). After that it runs offline.
 
