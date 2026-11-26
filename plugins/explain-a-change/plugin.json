@@ -1,0 +1,10 @@
+{
+  "kind": "skill",
+  "id": "explain-a-change",
+  "name": "Explain a change",
+  "description": "Teaches an agent to answer \"why did that change?\" from the hub's log, without touching anything.",
+  "version": "0.1.0",
+  "contract": "1",
+  "entry": "SKILL.md",
+  "uses": { "log": "read" }
+}

@@ -268,7 +268,7 @@
       </section>
 
       <section class="card" aria-labelledby="b">
-        <h2 id="b">Board plugin</h2>
+        <h2 id="b">Soundboard</h2>
         <dl id="plugin">
           <dt>Status</dt>
           <dd>Unknown</dd>
@@ -284,13 +284,19 @@
     </main>
 
     <script>
+    // This page runs in the hub's sandbox. It has no network and no access to the
+    // hub's own pages. Everything it knows arrives as a message from the page
+    // around it, and everything it wants goes out the same way. What it may ask
+    // for is fixed by "uses" in its plugin.json.
     (() => {
-      const PARAM = "input/1/bus/1/level", NAME = "input/1/name";
+      const KEY = "console/input/1/bus/1/level", NAME = "console/input/1/name";
       const MIN = -90, KNEE = -60, MAX = 10, KNEE_AT = 0.1; // the first tenth of travel covers off to -60 dB
       const $ = (id) => document.getElementById(id);
       const fader = $("fader"), thumb = $("thumb"), fill = $("fill"), note = $("note");
+      const toHub = (m) => parent.postMessage(m, "*");
 
-      let ws, value = MIN, dragging = false, quietUntil = 0, lastSent = 0, queued = null, ref = 0;
+      let linked = false, board = null, value = MIN, held = MIN;
+      let dragging = false, quietUntil = 0, lastSent = 0, queued = null, ref = 0;
 
       const toPos = (db) =>
         db <= KNEE ? (db - MIN) / (KNEE - MIN) * KNEE_AT : KNEE_AT + (db - KNEE) / (MAX - KNEE) * (1 - KNEE_AT);
@@ -347,9 +353,8 @@
       }
       function push(db) {
         lastSent = performance.now();
-        if (ws && ws.readyState === 1) {
-          ws.send(JSON.stringify({ type: "set", param: PARAM, value: db, ref: ++ref }));
-        } else say("Not connected to the hub, so this was not sent.", true);
+        if (linked && board) toHub({ type: "set", plugin: board, key: KEY, value: db, ref: ++ref });
+        else say(board ? "Not connected to the hub, so this was not sent." : "No soundboard is connected.", true);
       }
 
       const fromPointer = (e) => {
@@ -381,6 +386,7 @@
 
       function showPlugins(list) {
         const p = list.find((x) => x.capabilities && x.capabilities.console);
+        board = p ? p.id : null;
         const rows = p
           ? [["Name", p.name], [
             "Status",
@@ -392,11 +398,8 @@
           ], [
             "Mode",
             p.mode === "act" ? "Act: changes are sent to the board" : "Listen: nothing is sent to the board",
-          ], [
-            "May reach",
-            (p.permissions.network || []).length ? p.permissions.network.join(", ") : "Only the hub",
-          ], ["Restarts", String(p.restarts)]]
-          : [["Status", "No board plugin is loaded"]];
+          ]]
+          : [["Status", "No soundboard is connected"]];
         $("plugin").innerHTML = "";
         for (const [k, v] of rows) {
           const dt = document.createElement("dt"), dd = document.createElement("dd");
@@ -416,105 +419,99 @@
           case "skillfully.command.failed":
             return `${who} asked for ${d.requested} dB. It failed: ${d.message}.`;
           case "skillfully.command.blocked":
-            return `${who} asked for ${d.requested} dB. Not sent: the board plugin is in Listen mode.`;
+            return `${who} asked for ${d.requested} dB. Not sent: the board is in Listen mode.`;
           case "skillfully.command.rejected":
             return `${who} asked for ${d.requested}. Refused: ${d.message}.`;
           case "skillfully.state.changed": {
-            const c = d.changes && d.changes[PARAM];
+            const c = d.changes && d.changes[KEY];
             return c ? `Changed at the board itself: now ${words(c.value)} dB, was ${words(c.before)}.` : null;
           }
-          case "skillfully.plugin.limit":
-            return `The board plugin went over its ${d.limit} limit (${d.used}, allowed ${d.allowed}). The hub stopped it.`;
-          case "skillfully.plugin.quarantined":
-            return "The board plugin broke its limits three times. The hub will not restart it until someone releases it.";
           case "skillfully.plugin.crashed":
-            return "The board plugin stopped unexpectedly. The hub is restarting it.";
+            return "The board's driver stopped unexpectedly. The hub is restarting it.";
+          case "skillfully.plugin.limit":
+            return `The board's driver went over its ${d.limit} limit (${d.used}, allowed ${d.allowed}). The hub stopped it.`;
+          case "skillfully.plugin.quarantined":
+            return "The board's driver broke its limits three times. The hub will not restart it until someone releases it.";
           case "skillfully.plugin.ready":
-            return `The board plugin is ready with ${d.values} values.`;
+            return `The board's driver is ready with ${d.values} values.`;
           case "skillfully.plugin.mode":
-            return `The board plugin was switched from ${d.before} to ${d.mode}.`;
+            return `The board's driver was switched from ${d.before} to ${d.mode}.`;
           default:
             return null;
         }
       };
-      let logTimer;
-      async function showLog() {
-        try {
-          const entries = await (await fetch("/api/log?limit=40")).json();
-          const items = [];
-          for (const e of entries.reverse()) {
-            if (e.subject && e.subject.includes(":") && !e.subject.endsWith(PARAM)) continue;
-            const text = line(e);
-            if (text) items.push([e.time, text]);
-            if (items.length === 6) break;
-          }
-          const ol = $("log");
-          ol.innerHTML = items.length ? "" : '<li class="empty">Nothing yet. Move the fader.</li>';
-          for (const [time, text] of items) {
-            const li = document.createElement("li"), t = document.createElement("time");
-            t.textContent = new Date(time).toLocaleTimeString();
-            li.append(t, document.createTextNode(text));
-            ol.append(li);
-          }
-        } catch { /* the log list is a convenience; the fader does not depend on it */ }
+      function showLog(entries) {
+        const items = [];
+        for (const e of entries.slice().reverse()) {
+          const about = e.subject || "";
+          if (board && about !== board && !about.startsWith(board + ":")) continue;
+          if (about.includes(":") && !about.endsWith(KEY)) continue;
+          const text = line(e);
+          if (text) items.push([e.time, text]);
+          if (items.length === 6) break;
+        }
+        const ol = $("log");
+        ol.innerHTML = items.length ? "" : '<li class="empty">Nothing yet. Move the fader.</li>';
+        for (const [time, text] of items) {
+          const li = document.createElement("li"), t = document.createElement("time");
+          t.textContent = new Date(time).toLocaleTimeString();
+          li.append(t, document.createTextNode(text));
+          ol.append(li);
+        }
       }
-      const showLogSoon = () => {
+      let logTimer;
+      const askLogSoon = () => {
         clearTimeout(logTimer);
-        logTimer = setTimeout(showLog, 150);
+        logTimer = setTimeout(() => toHub({ type: "log", limit: 60 }), 150);
       };
 
-      function connect() {
-        ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
-        ws.onopen = () => {
-          $("led").classList.add("on");
-          $("linkText").textContent = "Connected";
-          ws.send(JSON.stringify({ type: "hello", actor: "person:p1" }));
-          say("");
-          showLog();
-        };
-        ws.onclose = () => {
-          $("led").classList.remove("on");
-          $("linkText").textContent = "Reconnecting";
-          setTimeout(connect, 1000);
-        };
-        ws.onmessage = (ev) => {
-          const m = JSON.parse(ev.data);
-          if (m.type === "plugins") {
-            showPlugins(m.plugins);
-            showLogSoon();
-          }
-          if (m.type === "state") {
-            if (typeof m.values[NAME] === "string") $("inputName").textContent = m.values[NAME] + " on the board";
+      addEventListener("message", (ev) => {
+        if (ev.source !== parent) return;
+        const m = ev.data;
+        if (m.type === "link") {
+          linked = m.up;
+          $("led").classList.toggle("on", m.up);
+          $("linkText").textContent = m.up ? "Connected" : "Reconnecting";
+          if (m.up) say("");
+        }
+        if (m.type === "hello" || m.type === "plugins") {
+          showPlugins(m.plugins);
+          askLogSoon();
+        }
+        if (m.type === "state" && m.plugin === board) {
+          if (typeof m.values[NAME] === "string") $("inputName").textContent = m.values[NAME] + " on the board";
+          if (typeof m.values[KEY] === "number") {
+            held = m.values[KEY];
             // While a thumb is on the fader, the thumb is in charge. Otherwise the board is.
-            if (typeof m.values[PARAM] === "number" && !dragging && performance.now() > quietUntil) {
-              value = m.values[PARAM];
+            if (!dragging && performance.now() > quietUntil) {
+              value = held;
               paint();
             }
-            if (!m.full) showLogSoon();
           }
-          if (m.type === "ack") {
-            if (m.ok && !m.superseded && m.ref === ref && !dragging) {
-              value = m.value;
+          if (!m.full) askLogSoon();
+        }
+        if (m.type === "ack") {
+          if (m.ok && !m.superseded) held = m.value;
+          if (m.ok && !m.superseded && m.ref === ref && !dragging) {
+            value = m.value;
+            paint();
+            say("");
+          }
+          if (!m.ok) {
+            say(m.error.message, true);
+            quietUntil = 0;
+            if (!dragging) {
+              value = held;
               paint();
-              say("");
             }
-            if (!m.ok) {
-              say(m.error.message, true);
-              quietUntil = 0;
-              fetch("/api/state").then((r) => r.json()).then((s) => {
-                if (!dragging && typeof s[PARAM] === "number") {
-                  value = s[PARAM];
-                  paint();
-                }
-              });
-            }
-            showLogSoon();
           }
-        };
-      }
+          askLogSoon();
+        }
+        if (m.type === "log") showLog(m.entries);
+      });
 
       paint();
-      connect();
+      toHub({ type: "ready" });
     })();
     </script>
   </body>

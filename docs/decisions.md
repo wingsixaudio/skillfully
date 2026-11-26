@@ -44,6 +44,28 @@ were left out. Entries for commands the hub sent are not limited, because the hu
 **One log entry per board-side message.** A scene recall that moves 1,500 values is one entry holding all of
 them.
 
+**The hub names no capability.** A capability is a definition file. Drivers are checked against it, screens
+are scoped by it, and the conformance test reads it. The first version had the soundboard written into the hub
+and the contract; that was a sound hub with plugins, not a plugin hub.
+
+**Keys carry their capability.** A value is named `console/input/3/bus/5/level`, so a driver with two
+capabilities needs no extra bookkeeping and the hub can scope a screen by looking at the first part of the
+key.
+
+**A screen is a real web page in a sandbox, not a description drawn from fixed components.** This lets any web
+developer contribute with any tools, and keeps the ear-mix gestures possible. The sandbox pays for it: the
+page is served with a policy that gives it no origin and no network, it is framed by the hub's own page, and
+the hub refuses any browser connection that is not from its own page. Screens described as data can be added
+later as one more screen. The evidence is `tests/browser/screen_sandbox.py`, run in Chrome.
+
+**A screen never says who the person is.** The hub's shell page does. A screen that tries is ignored.
+
+**Skills are listed, never run.** A skill is a folder in the Agent Skills format with a manifest. The hub
+checks its shape and puts it in the catalog.
+
+**The conformance test is generic.** It is written against capability definitions, so a driver for a kind of
+device nobody has thought of yet can be proven without new test code.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins
@@ -58,7 +80,12 @@ them.
 - **The hub itself.** Nothing restarts the hub if it stops. That belongs to how it is installed (a system
   service).
 - **Log retention.** The log grows forever. No rule yet for how long to keep what.
-- **Sign-in and roles.** None yet. The phone states who it is.
+- **Sign-in and roles.** None yet. Everyone is a guest on the default home screen, and the read-only API pages
+  are open to the network.
+- **Capabilities from outside this repository.** Definitions live in `capabilities/`. There is no rule yet for
+  a plugin that brings its own, or for naming them so two authors do not collide.
+- **Browser coverage.** The screen sandbox was proven in Chrome only. Safari on a phone matters most and has
+  not been run.
 - **Record and replay.** The spec calls for recording plugin traffic and replaying it as tests. Not built.
 - **Install, update, rollback, uninstall.** Plugins are listed in `core/main.ts` for now.
 - **License.** Not chosen.

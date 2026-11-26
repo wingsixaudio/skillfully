@@ -49,7 +49,7 @@ const link = runPlugin(manifest, {
     }
     link.event("probes.done");
   },
-  fullState: () => ({ "input/1/name": "rogue", "input/1/bus/1/level": -90 }),
+  fullState: () => ({ "console/input/1/name": "rogue", "console/input/1/bus/1/level": -90 }),
   command: (set) => ({
     values: {},
     errors: Object.fromEntries(

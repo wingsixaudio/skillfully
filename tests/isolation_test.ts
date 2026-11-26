@@ -1,9 +1,10 @@
 // Isolation: a plugin gets its link to the hub and what its manifest declares. Nothing else.
 
 import { assert, assertEquals } from "./assert.ts";
+import type { DriverManifest } from "../contract/mod.ts";
 import { PluginHost } from "../core/host.ts";
 import { loadManifest, PluginGateway } from "../core/process.ts";
-import { FIXTURES, hubWith, ofType, ROOT, SIM, until } from "./helpers.ts";
+import { board, FIXTURES, hubWith, ofType, ROOT, SIM, until } from "./helpers.ts";
 
 Deno.test("a plugin that declares nothing can reach nothing but the hub", async () => {
   // Something for the rogue to find: a real database file and another local service.
@@ -17,12 +18,13 @@ Deno.test("a plugin that declares nothing can reach nothing but the hub", async 
   const hub2 = await hubWith([{ dir: SIM, mode: "act" }], dbPath);
   const gateway = new PluginGateway();
   const rogue = new PluginHost(
-    await loadManifest(`${FIXTURES}/rogue`),
+    (await loadManifest(`${FIXTURES}/rogue`)) as DriverManifest,
     `${FIXTURES}/rogue`,
     { hubPort: hub2.port, otherPort: (other.addr as Deno.NetAddr).port, dbPath },
     "act",
     hub2.log,
     gateway,
+    hub2.capabilities,
   );
   await rogue.start();
   const events = () => ofType(hub2, "skillfully.plugin.event").filter((e) => e.source === "plugin/rogue");
@@ -72,7 +74,10 @@ Deno.test("the plugin door turns away anyone without a token the hub just issued
     await closeCode({ type: "hello", contract: "1", id: "sim-console", version: "0.1.0", token: "guessed" }),
     4401,
   );
-  assertEquals(await closeCode({ type: "command", id: "x", set: { "input/1/bus/1/level": 10 } }), 4401);
+  assertEquals(
+    await closeCode({ type: "command", id: "x", set: { "console/input/1/bus/1/level": 10 } }),
+    4401,
+  );
   assertEquals(await closeCode("not json"), 4400);
   const res = await fetch(`http://127.0.0.1:${gateway.port}/api/log`);
   assertEquals(res.status, 404, "the plugin door serves nothing else");
@@ -92,7 +97,7 @@ Deno.test("a plugin that says hello as someone else is refused", async () => {
   const failed = ofType(hub, "skillfully.plugin.failed")[0];
   assert(String(failed.data.message).includes("said hello as misbehave"), String(failed.data.message));
   assertEquals(hub.hosts.get("someone-else")!.status, "down");
-  assertEquals(hub.console!.status, "running");
+  assertEquals(board(hub).status, "running");
   await hub.stop();
   await Deno.remove(dir, { recursive: true });
 });
@@ -128,6 +133,8 @@ Deno.test("a plugin reaches the device address it declared, and only that one", 
 });
 
 Deno.test("the repository's own plugins declare no network access beyond the hub", async () => {
-  const m = await loadManifest(`${ROOT}/plugins/sim-console`);
-  assertEquals(m.permissions?.network ?? [], []);
+  for (const name of ["sim-console", "sim-switch"]) {
+    const m = (await loadManifest(`${ROOT}/plugins/${name}`)) as DriverManifest;
+    assertEquals(m.permissions?.network ?? [], []);
+  }
 });

@@ -1,9 +1,10 @@
 import { assert, assertEquals, assertThrows } from "./assert.ts";
-import { checkManifest, checkMessage, FROM_PLUGIN, type Manifest, TO_PLUGIN } from "../contract/mod.ts";
+import { checkManifest, checkMessage, type DriverManifest, FROM_PLUGIN, TO_PLUGIN } from "../contract/mod.ts";
 import { denoArgs, loadManifest, resolveNetwork } from "../core/process.ts";
 import { FIXTURES, SIM } from "./helpers.ts";
 
-const base = (): Manifest => ({
+const base = (): DriverManifest => ({
+  kind: "driver",
   id: "example",
   name: "Example",
   version: "1.2.3",
@@ -16,6 +17,7 @@ const base = (): Manifest => ({
 Deno.test("the simulated board's manifest follows the contract", async () => {
   const m = await loadManifest(SIM);
   assertEquals(m.id, "sim-console");
+  assertEquals(m.kind, "driver");
 });
 
 Deno.test("a manifest is refused when it breaks the contract", () => {
@@ -25,8 +27,9 @@ Deno.test("a manifest is refused when it breaks the contract", () => {
     ["another contract version", { contract: "2" }],
     ["an entry outside its own folder", { entry: "../../core/main.ts" }],
     ["an absolute entry", { entry: "/etc/passwd.ts" }],
-    ["a capability the contract does not define", { capabilities: { teleport: {} } }],
     ["no capability at all", { capabilities: {} }],
+    ["a kind that does not exist", { kind: "gadget" }],
+    ["no kind", { kind: undefined }],
     ["a wildcard network permission", { permissions: { network: ["*:*"] } }],
     ["a network permission without a port", { permissions: { network: ["example.com"] } }],
     ["a permission kind that does not exist", { permissions: { files: ["/"] } }],
@@ -72,12 +75,12 @@ Deno.test("a plugin's command line grants the hub link, its declared hosts and n
 });
 
 Deno.test("messages are checked in both directions", () => {
-  const good = { type: "command", id: "c1", set: { "input/1/bus/1/level": -8 } };
+  const good = { type: "command", id: "c1", set: { "console/input/1/bus/1/level": -8 } };
   assert(checkMessage(good, TO_PLUGIN).ok);
   assert(!checkMessage(good, FROM_PLUGIN).ok, "a plugin may not send a command");
   assert(!checkMessage({ type: "command", id: "c1", set: {} }, TO_PLUGIN).ok, "a command must set something");
   assert(
-    !checkMessage({ type: "command", id: "c1", add: { "input/1/bus/1/level": 2 } }, TO_PLUGIN).ok,
+    !checkMessage({ type: "command", id: "c1", add: { "console/input/1/bus/1/level": 2 } }, TO_PLUGIN).ok,
     "no relative changes",
   );
   assert(

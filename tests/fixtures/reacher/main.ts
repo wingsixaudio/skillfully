@@ -18,6 +18,6 @@ const link = runPlugin(manifest, {
       undeclared: await reach(s.host, s.undeclaredPort),
     });
   },
-  fullState: () => ({ "input/1/name": "reacher", "input/1/bus/1/level": -90 }),
+  fullState: () => ({ "console/input/1/name": "reacher", "console/input/1/bus/1/level": -90 }),
   command: () => ({ values: {}, errors: {} }),
 });

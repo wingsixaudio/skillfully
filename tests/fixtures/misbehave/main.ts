@@ -15,7 +15,11 @@ ws.onmessage = (e) => {
   }
   if (m.type !== "welcome") return;
   const behavior = m.settings.behavior;
-  send({ type: "state", full: true, values: { "input/1/name": "x", "input/1/bus/1/level": -90 } });
+  send({
+    type: "state",
+    full: true,
+    values: { "console/input/1/name": "x", "console/input/1/bus/1/level": -90 },
+  });
   send({ type: "health", status: "ok" });
   if (behavior === "crash") {
     setTimeout(() => {
@@ -54,7 +58,7 @@ ws.onmessage = (e) => {
     }, 100);
   } else if (behavior === "big") {
     ws.send("x".repeat(9_000_000));
-    send({ type: "state", full: false, values: { "input/7/bus/3/level": 0 } });
+    send({ type: "state", full: false, values: { "console/input/7/bus/3/level": 0 } });
   }
 };
 ws.onclose = () => Deno.exit(0);

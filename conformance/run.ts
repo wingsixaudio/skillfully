@@ -1,22 +1,21 @@
-// Run the console conformance test against a plugin folder.
+// Run the conformance test against a driver's folder.
 //   deno task conformance plugins/sim-console
-//   deno task conformance path/to/plugin --settings='{"host":"192.168.1.50"}' --input=40 --bus=16
+//   deno task conformance path/to/driver --settings='{"host":"192.168.1.50"}' --keys=console/input/40/bus/16/level
 //
-// WARNING: this writes to the console. Never run it against a board that is in use.
+// WARNING: this writes to the device. Never run it against equipment that is in use.
 
-import { report, runConsoleConformance } from "./console.ts";
+import { report, runConformance } from "./suite.ts";
 
 const dir = Deno.args.find((a) => !a.startsWith("--"));
 if (!dir) {
-  console.error("usage: deno task conformance <plugin folder> [--settings=<json>] [--input=<n>] [--bus=<n>]");
+  console.error("usage: deno task conformance <driver folder> [--settings=<json>] [--keys=<key>,<key>]");
   Deno.exit(2);
 }
 const opt = (name: string) => Deno.args.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
 
-const checks = await runConsoleConformance(dir.replace(/\/$/, ""), {
+const checks = await runConformance(dir.replace(/\/$/, ""), {
   settings: opt("settings") ? JSON.parse(opt("settings")!) : {},
-  input: opt("input") ? Number(opt("input")) : undefined,
-  bus: opt("bus") ? Number(opt("bus")) : undefined,
+  keys: opt("keys")?.split(","),
 });
 console.log(report(checks));
 Deno.exit(checks.every((c) => c.ok) ? 0 : 1);

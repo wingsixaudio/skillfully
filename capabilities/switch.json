@@ -1,0 +1,47 @@
+{
+  "capability": "switch",
+  "version": 1,
+  "title": "Switch",
+  "description": "Things that turn on and off: smart plugs, relays, simple lights. Outlets count from 1.",
+  "options": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["outlets"],
+    "properties": {
+      "outlets": { "type": "integer", "minimum": 1, "maximum": 64 },
+      "dimmable": {
+        "description": "True when each outlet has a brightness.",
+        "type": "boolean",
+        "default": false
+      }
+    }
+  },
+  "values": [
+    {
+      "key": "outlet/{outlet}/name",
+      "title": "Outlet name",
+      "kind": "text",
+      "writable": false,
+      "bounds": { "outlet": "outlets" }
+    },
+    {
+      "key": "outlet/{outlet}/on",
+      "title": "On",
+      "kind": "boolean",
+      "writable": true,
+      "bounds": { "outlet": "outlets" }
+    },
+    {
+      "key": "outlet/{outlet}/brightness",
+      "title": "Brightness",
+      "kind": "number",
+      "unit": "%",
+      "writable": true,
+      "when": "dimmable",
+      "bounds": { "outlet": "outlets" },
+      "min": 0,
+      "max": 100,
+      "tolerance": 1
+    }
+  ]
+}

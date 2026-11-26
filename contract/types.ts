@@ -1,14 +1,15 @@
-// Contract 1 as TypeScript types, plus helpers for value names.
+// Contract 1 as TypeScript types.
 // This file imports nothing, so a plugin can use it without pulling in the validator.
 
 export const CONTRACT = "1";
 
 export type Value = number | string | boolean;
+/** Values by key. A key is a capability, then the value's name: console/input/3/bus/5/level */
 export type Values = Record<string, Value>;
 export type Mode = "listen" | "act";
 export type HealthStatus = "ok" | "degraded" | "down";
 export type ErrorCode =
-  | "unknown_param"
+  | "unknown_key"
   | "out_of_range"
   | "read_only"
   | "invalid"
@@ -20,29 +21,73 @@ export interface CommandError {
   message: string;
 }
 
-export interface ConsoleCapability {
-  inputs: number;
-  buses: number;
-  level: { min: number; max: number };
-  pan?: boolean;
-}
+// --- Manifests ---
 
-export interface Manifest {
+interface ManifestBase {
   id: string;
   name: string;
   description?: string;
   version: string;
   contract: "1";
   license?: string;
+}
+
+export type Access = "read" | "write";
+
+export interface DriverManifest extends ManifestBase {
+  kind: "driver";
   runtime: "deno";
   entry: string;
-  capabilities: { console?: ConsoleCapability };
+  /** Capability name to the options this driver declares for it. */
+  capabilities: Record<string, Record<string, unknown>>;
   permissions?: { network?: string[] };
   settings?: Record<string, unknown>;
   limits?: { writesPerSecond?: number; memoryMb?: number; cpuPercent?: number; messagesPerSecond?: number };
 }
 
-// Plugin to hub
+export interface ScreenManifest extends ManifestBase {
+  kind: "screen";
+  entry: string;
+  /** Capability name (or "log") to how much of it the screen may use. */
+  uses: Record<string, Access>;
+  home?: string[];
+}
+
+export interface SkillManifest extends ManifestBase {
+  kind: "skill";
+  entry: "SKILL.md";
+  uses?: Record<string, Access>;
+}
+
+export type Manifest = DriverManifest | ScreenManifest | SkillManifest;
+
+// --- Capability definitions ---
+
+export interface ValueDef {
+  key: string;
+  title: string;
+  description?: string;
+  kind: "number" | "text" | "boolean";
+  unit?: string;
+  writable: boolean;
+  bounds?: Record<string, string>;
+  min?: number | string;
+  max?: number | string;
+  tolerance?: number;
+  when?: string;
+}
+
+export interface CapabilityDef {
+  capability: string;
+  version: number;
+  title: string;
+  description: string;
+  options: Record<string, unknown>;
+  values: ValueDef[];
+}
+
+// --- Messages: driver to hub ---
+
 export interface Hello {
   type: "hello";
   contract: "1";
@@ -73,7 +118,8 @@ export interface Health {
 }
 export type FromPlugin = Hello | State | PluginEvent | Result | Health;
 
-// Hub to plugin
+// --- Messages: hub to driver ---
+
 export interface Welcome {
   type: "welcome";
   contract: "1";
@@ -99,47 +145,3 @@ export type ToPlugin = Welcome | Command | Resync | ModeNotice | Shutdown;
 
 export const FROM_PLUGIN = ["hello", "state", "event", "result", "health"] as const;
 export const TO_PLUGIN = ["welcome", "command", "resync", "mode", "shutdown"] as const;
-
-const PARAM = /^input\/([1-9][0-9]{0,2})\/(name|bus\/([1-9][0-9]{0,2})\/(level|pan))$/;
-
-export interface ParsedParam {
-  input: number;
-  bus?: number;
-  field: "name" | "level" | "pan";
-}
-
-export function parseParam(param: string): ParsedParam | null {
-  const m = PARAM.exec(param);
-  if (!m) return null;
-  if (m[2] === "name") return { input: Number(m[1]), field: "name" };
-  return { input: Number(m[1]), bus: Number(m[3]), field: m[4] as "level" | "pan" };
-}
-
-/** Does a console with this capability have this value at all? */
-export function consoleHas(cap: ConsoleCapability, param: string): boolean {
-  const p = parseParam(param);
-  if (!p || p.input > cap.inputs) return false;
-  if (p.field === "name") return true;
-  if (p.bus! > cap.buses) return false;
-  return p.field === "level" || !!cap.pan;
-}
-
-export const levelParam = (input: number, bus: number) => `input/${input}/bus/${bus}/level`;
-export const panParam = (input: number, bus: number) => `input/${input}/bus/${bus}/pan`;
-export const nameParam = (input: number) => `input/${input}/name`;
-
-/** Is this param one the console says it has, and is the value the right kind? Range is the device's call. */
-export function checkConsoleValue(cap: ConsoleCapability, param: string, value: Value): CommandError | null {
-  const p = parseParam(param);
-  if (!p || p.input > cap.inputs || (p.bus !== undefined && p.bus > cap.buses)) {
-    return { code: "unknown_param", message: `${param} does not exist on this console` };
-  }
-  if (p.field === "name") return { code: "read_only", message: "input names cannot be set" };
-  if (p.field === "pan" && !cap.pan) {
-    return { code: "unknown_param", message: "this console has no pan on sends" };
-  }
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return { code: "invalid", message: `${p.field} must be a number` };
-  }
-  return null;
-}

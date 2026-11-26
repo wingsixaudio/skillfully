@@ -4,15 +4,16 @@
   "title": "Skillfully plugin messages, contract 1",
   "description": "Every message that may cross between the hub and a plugin. Each is one JSON object with a type.",
   "$defs": {
-    "param": {
-      "description": "A value on a console, in the hub's own vocabulary. Vendor names never appear here.",
+    "key": {
+      "description": "The name of one value: a capability, then the value's name within it, for example console/input/3/bus/5/level. Names come from the capability's definition, never from a vendor.",
       "type": "string",
-      "pattern": "^input/[1-9][0-9]{0,2}/(name|bus/[1-9][0-9]{0,2}/(level|pan))$"
+      "maxLength": 120,
+      "pattern": "^[a-z][a-z0-9-]*(/[a-z0-9][a-z0-9-]*){1,9}$"
     },
     "value": { "type": ["number", "string", "boolean"] },
     "values": {
       "type": "object",
-      "propertyNames": { "$ref": "#/$defs/param" },
+      "propertyNames": { "$ref": "#/$defs/key" },
       "additionalProperties": { "$ref": "#/$defs/value" }
     },
     "error": {
@@ -22,7 +23,7 @@
       "properties": {
         "code": {
           "enum": [
-            "unknown_param",
+            "unknown_key",
             "out_of_range",
             "read_only",
             "invalid",
@@ -81,7 +82,7 @@
         "values": { "$ref": "#/$defs/values" },
         "errors": {
           "type": "object",
-          "propertyNames": { "$ref": "#/$defs/param" },
+          "propertyNames": { "$ref": "#/$defs/key" },
           "additionalProperties": { "$ref": "#/$defs/error" }
         }
       }

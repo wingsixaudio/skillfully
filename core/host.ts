@@ -3,17 +3,16 @@
 // read-back, enforces the plugin's mode, restarts it when it dies, and writes
 // all of that to the log.
 
-import {
-  checkConsoleValue,
-  consoleHas,
-  type FromPlugin,
-  type HealthStatus,
-  type Hello,
-  type Manifest,
-  type Mode,
-  type Value,
-  type Values,
+import type {
+  DriverManifest,
+  FromPlugin,
+  HealthStatus,
+  Hello,
+  Mode,
+  Value,
+  Values,
 } from "../contract/mod.ts";
+import type { Capabilities } from "./capabilities.ts";
 import { type Log, newId } from "./log.ts";
 import { type PluginGateway, PluginProcess, PluginRefused, resolveNetwork, usageOf } from "./process.ts";
 
@@ -94,12 +93,13 @@ export class PluginHost {
   #healthListeners = new Set<() => void>();
 
   constructor(
-    readonly manifest: Manifest,
+    readonly manifest: DriverManifest,
     readonly dir: string,
     private settings: Record<string, unknown>,
     public mode: Mode,
     private log: Log,
     private gateway: PluginGateway,
+    private capabilities: Capabilities,
     private tuning: Tuning = {},
   ) {}
 
@@ -254,20 +254,21 @@ export class PluginHost {
     // Changes we did not ask for happened at the device itself. A value we are in
     // the middle of setting is ours and gets logged when its result arrives.
     const atDevice: Record<string, { before: Value | null; value: Value }> = {};
-    const cap = this.manifest.capabilities.console;
+    const declared = this.manifest.capabilities;
     let undeclared = 0;
-    for (const [param, value] of Object.entries(values)) {
-      // A value the manifest never promised is not taken on trust.
-      if (cap && !consoleHas(cap, param)) {
+    for (const [key, value] of Object.entries(values)) {
+      // A value the manifest never promised, or of the wrong kind, is not taken on trust.
+      const found = this.capabilities.resolve(declared, key);
+      if (!found || this.capabilities.kindProblem(found, value)) {
         undeclared++;
         continue;
       }
-      const before = this.state.get(param);
+      const before = this.state.get(key);
       if (before === value) continue;
-      this.state.set(param, value);
-      changed[param] = value;
-      if (!this.#inflight?.items.has(param) && (hadState || !full)) {
-        atDevice[param] = { before: before ?? null, value };
+      this.state.set(key, value);
+      changed[key] = value;
+      if (!this.#inflight?.items.has(key) && (hadState || !full)) {
+        atDevice[key] = { before: before ?? null, value };
       }
     }
     if (undeclared) {
@@ -275,23 +276,24 @@ export class PluginHost {
         type: "skillfully.plugin.invalid",
         source: this.#source,
         data: {
-          problem: `it reported ${undeclared} values its manifest does not declare; they were ignored`,
+          problem:
+            `it reported ${undeclared} values that its manifest does not declare or that were the wrong kind; they were ignored`,
         },
       });
     }
-    const params = Object.keys(atDevice);
-    if (params.length) {
+    const keys = Object.keys(atDevice);
+    if (keys.length) {
       // One entry for one message, however many values moved: a scene recall is one event, not 1,500.
       this.#plog({
         type: "skillfully.state.changed",
         source: this.#source,
-        subject: params.length === 1 ? `${this.id}:${params[0]}` : this.id,
+        subject: keys.length === 1 ? `${this.id}:${keys[0]}` : this.id,
         via: "board",
-        data: { count: params.length, changes: atDevice, ...(full ? { foundBy: "resync" } : {}) },
+        data: { count: keys.length, changes: atDevice, ...(full ? { foundBy: "resync" } : {}) },
       });
     }
     if (full) {
-      for (const param of [...this.state.keys()]) if (!(param in values)) this.state.delete(param);
+      for (const key of [...this.state.keys()]) if (!(key in values)) this.state.delete(key);
     }
     if (firstFull) {
       this.status = "running";
@@ -308,9 +310,9 @@ export class PluginHost {
   }
 
   /** Ask for a value to be set. Resolves when the device has read it back, or says why not. */
-  set(param: string, value: Value, ctx: SetContext): Promise<SetOutcome> {
+  set(key: string, value: Value, ctx: SetContext): Promise<SetOutcome> {
     const full = { ...ctx, traceid: ctx.traceid ?? newId() };
-    const subject = `${this.id}:${param}`;
+    const subject = `${this.id}:${key}`;
     const refuse = (type: string, code: string, message: string): Promise<SetOutcome> => {
       this.log.append({
         type,
@@ -319,14 +321,12 @@ export class PluginHost {
         actor: full.actor,
         via: full.via,
         traceid: full.traceid,
-        data: { param, requested: value, code, message },
+        data: { key, requested: value, code, message },
       });
       return Promise.resolve({ ok: false, error: { code, message } });
     };
 
-    const cap = this.manifest.capabilities.console;
-    if (!cap) return refuse("skillfully.command.rejected", "not_a_console", `${this.id} is not a console`);
-    const bad = checkConsoleValue(cap, param, value);
+    const bad = this.capabilities.writeProblem(this.manifest.capabilities, key, value);
     if (bad) return refuse("skillfully.command.rejected", bad.code, bad.message);
     if (this.mode === "listen") {
       return refuse(
@@ -339,11 +339,11 @@ export class PluginHost {
       return refuse("skillfully.command.rejected", "plugin_down", `${this.id} is not running`);
     }
 
-    // Newest value wins. An older value still waiting for the same param is dropped.
-    const waiting = this.#pending.get(param);
+    // Newest value wins. An older value still waiting for the same key is dropped.
+    const waiting = this.#pending.get(key);
     waiting?.resolve({ ok: true, superseded: true });
     return new Promise((resolve) => {
-      this.#pending.set(param, {
+      this.#pending.set(key, {
         value,
         ctx: full,
         superseded: waiting ? waiting.superseded + 1 : 0,
@@ -360,20 +360,20 @@ export class PluginHost {
     const items = new Map(this.#pending);
     this.#pending.clear();
     const set: Values = {};
-    for (const [param, item] of items) {
-      set[param] = item.value;
+    for (const [key, item] of items) {
+      set[key] = item.value;
       item.sentAt = performance.now();
       item.sentId = this.log.append({
         type: "skillfully.command.sent",
         source: "core",
-        subject: `${this.id}:${param}`,
+        subject: `${this.id}:${key}`,
         actor: item.ctx.actor,
         via: item.ctx.via,
         traceid: item.ctx.traceid,
         data: {
-          param,
+          key,
           requested: item.value,
-          before: this.state.get(param) ?? null,
+          before: this.state.get(key) ?? null,
           superseded: item.superseded,
           command: id,
         },
@@ -396,37 +396,37 @@ export class PluginHost {
     clearTimeout(flight.timer);
     this.#inflight = undefined;
     const changed: Values = {};
-    for (const [param, item] of flight.items) {
+    for (const [key, item] of flight.items) {
       const base = {
         source: this.#source,
-        subject: `${this.id}:${param}`,
+        subject: `${this.id}:${key}`,
         actor: item.ctx.actor,
         via: item.ctx.via,
         traceid: item.ctx.traceid,
         parentid: item.sentId,
       };
       const ms = Math.round(performance.now() - (item.sentAt ?? 0));
-      if (param in values && !(param in errors)) {
-        const value = values[param];
-        const before = this.state.get(param) ?? null;
-        this.state.set(param, value);
-        if (before !== value) changed[param] = value;
+      if (key in values && !(key in errors)) {
+        const value = values[key];
+        const before = this.state.get(key) ?? null;
+        this.state.set(key, value);
+        if (before !== value) changed[key] = value;
         const adjusted = value !== item.value;
         this.log.append({
           ...base,
           type: "skillfully.command.confirmed",
-          data: { param, requested: item.value, value, before, adjusted, ms },
+          data: { key, requested: item.value, value, before, adjusted, ms },
         });
         item.resolve({ ok: true, superseded: false, value, requested: item.value, adjusted });
       } else {
         // The contract says every value is answered exactly once. No answer is a broken plugin.
-        const error = errors[param] && !(param in values)
-          ? errors[param]
+        const error = errors[key] && !(key in values)
+          ? errors[key]
           : { code: "internal", message: "the plugin did not give one clear answer for this value" };
         this.log.append({
           ...base,
           type: "skillfully.command.failed",
-          data: { param, requested: item.value, code: error.code, message: error.message, ms },
+          data: { key, requested: item.value, code: error.code, message: error.message, ms },
         });
         item.resolve({ ok: false, error });
       }
@@ -444,16 +444,16 @@ export class PluginHost {
   }
 
   #failItems(items: Map<string, Pending>, code: string, message: string): void {
-    for (const [param, item] of items) {
+    for (const [key, item] of items) {
       this.log.append({
         type: "skillfully.command.failed",
         source: "core",
-        subject: `${this.id}:${param}`,
+        subject: `${this.id}:${key}`,
         actor: item.ctx.actor,
         via: item.ctx.via,
         traceid: item.ctx.traceid,
         parentid: item.sentId,
-        data: { param, requested: item.value, code, message },
+        data: { key, requested: item.value, code, message },
       });
       item.resolve({ ok: false, error: { code, message } });
     }

@@ -2,17 +2,30 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:skillfully:contract:1:manifest",
   "title": "Skillfully plugin manifest, contract 1",
-  "description": "Describes one plugin: what it is, what it can do, what it may reach and what it needs to be told. The hub reads this file before it runs any of the plugin's code.",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["id", "name", "version", "contract", "runtime", "entry", "capabilities"],
-  "properties": {
+  "description": "Every plugin is a folder with this file, plugin.json. The hub reads it before it runs or serves anything from the folder. There are three kinds: a driver talks to a device, a screen is what a person sees, and a skill teaches an agent a procedure.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/driver"
+    },
+    {
+      "$ref": "#/$defs/screen"
+    },
+    {
+      "$ref": "#/$defs/skill"
+    }
+  ],
+  "$defs": {
     "id": {
       "description": "Stable identifier. Lowercase letters, digits and dashes.",
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]{1,62}$"
     },
-    "name": { "description": "Name shown to people.", "type": "string", "minLength": 1, "maxLength": 80 },
+    "name": {
+      "description": "Name shown to people.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
     "description": {
       "description": "One or two plain sentences. Shown to people and to agents as data, never followed as instructions.",
       "type": "string",
@@ -23,102 +36,233 @@
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
     },
-    "contract": { "description": "Contract version this plugin speaks.", "const": "1" },
-    "license": { "description": "SPDX license identifier.", "type": "string", "maxLength": 64 },
-    "runtime": { "description": "What runs the entry file.", "enum": ["deno"] },
-    "entry": {
-      "description": "Program to run, relative to the plugin folder. It may not leave the folder.",
+    "license": {
+      "description": "SPDX license identifier.",
       "type": "string",
-      "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]+\\.(ts|js|mjs)$"
+      "maxLength": 64
     },
-    "capabilities": {
-      "description": "What the plugin can do, from the fixed set the contract defines. Options inside a capability are declared, never assumed.",
+    "uses": {
+      "description": "What this plugin needs from the hub, and how much. Keys are capability names, or 'log' for the hub's log. The hub gives it these and nothing else.",
       "type": "object",
-      "additionalProperties": false,
-      "minProperties": 1,
-      "properties": {
-        "console": { "$ref": "#/$defs/console" }
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9-]{1,30}$"
+      },
+      "additionalProperties": {
+        "enum": [
+          "read",
+          "write"
+        ]
       }
     },
-    "permissions": {
-      "description": "Everything the plugin may reach beyond its link to the hub. Anything not listed is blocked by the hub.",
+    "driver": {
+      "description": "A driver talks to a device. It runs as its own process, limited to what this file declares.",
       "type": "object",
       "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "name",
+        "version",
+        "contract",
+        "runtime",
+        "entry",
+        "capabilities"
+      ],
       "properties": {
-        "network": {
-          "description": "host:port pairs. A part in braces is filled from the plugin's settings, for example {host}:2223.",
+        "kind": {
+          "const": "driver"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "description": {
+          "$ref": "#/$defs/description"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "contract": {
+          "const": "1"
+        },
+        "license": {
+          "$ref": "#/$defs/license"
+        },
+        "runtime": {
+          "description": "What runs the entry file.",
+          "enum": [
+            "deno"
+          ]
+        },
+        "entry": {
+          "description": "Program to run, relative to the plugin folder. It may not leave the folder.",
+          "type": "string",
+          "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]+\\.(ts|js|mjs)$"
+        },
+        "capabilities": {
+          "description": "What the driver can do. Each key names a capability the hub has a definition for, and its value is checked against that definition's options.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9-]{1,30}$"
+          },
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "permissions": {
+          "description": "Everything the driver may reach beyond its link to the hub. Anything not listed is blocked.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "network": {
+              "description": "host:port pairs. A part in braces is filled from the driver's settings, for example {host}:2223.",
+              "type": "array",
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^(\\{[A-Za-z][A-Za-z0-9]*\\}|[A-Za-z0-9.-]+):(\\{[A-Za-z][A-Za-z0-9]*\\}|[0-9]{1,5})$"
+              }
+            }
+          }
+        },
+        "settings": {
+          "description": "A JSON Schema for the settings the hub hands the driver at start. A driver stores nothing itself.",
+          "type": "object"
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "writesPerSecond": {
+              "description": "Most commands per second the hub will send.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30
+            },
+            "memoryMb": {
+              "description": "Most memory the driver's whole process may hold. The hub stops a driver that goes over.",
+              "type": "integer",
+              "minimum": 64,
+              "maximum": 4096,
+              "default": 256
+            },
+            "cpuPercent": {
+              "description": "Most processor the driver may use, as a percentage of one core, averaged over 10 seconds.",
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 400,
+              "default": 50
+            },
+            "messagesPerSecond": {
+              "description": "Most messages per second the driver may send the hub.",
+              "type": "integer",
+              "minimum": 10,
+              "maximum": 5000,
+              "default": 200
+            }
+          }
+        }
+      }
+    },
+    "screen": {
+      "description": "A screen is a web page a person uses. The hub shows it inside a sandbox: it cannot reach the network, the hub's own pages or other screens. It talks to the hub through messages, limited to what it lists under uses.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "name",
+        "version",
+        "contract",
+        "entry",
+        "uses"
+      ],
+      "properties": {
+        "kind": {
+          "const": "screen"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "$ref": "#/$defs/name"
+        },
+        "description": {
+          "$ref": "#/$defs/description"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "contract": {
+          "const": "1"
+        },
+        "license": {
+          "$ref": "#/$defs/license"
+        },
+        "entry": {
+          "description": "The page to show, relative to the plugin folder.",
+          "type": "string",
+          "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9_./-]+\\.html$"
+        },
+        "uses": {
+          "$ref": "#/$defs/uses"
+        },
+        "home": {
+          "description": "Roles this screen suggests itself as the first screen for. The hub's own settings decide.",
           "type": "array",
           "maxItems": 16,
           "uniqueItems": true,
           "items": {
             "type": "string",
-            "pattern": "^(\\{[A-Za-z][A-Za-z0-9]*\\}|[A-Za-z0-9.-]+):(\\{[A-Za-z][A-Za-z0-9]*\\}|[0-9]{1,5})$"
+            "pattern": "^[a-z][a-z0-9-]{1,30}$"
           }
         }
       }
     },
-    "settings": {
-      "description": "A JSON Schema for the settings the hub hands the plugin at start. The plugin stores nothing itself.",
-      "type": "object"
-    },
-    "limits": {
+    "skill": {
+      "description": "A skill teaches an agent one procedure, in the open Agent Skills format: a folder with a SKILL.md. Nothing in it runs.",
       "type": "object",
       "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "name",
+        "version",
+        "contract",
+        "entry"
+      ],
       "properties": {
-        "writesPerSecond": {
-          "description": "Most commands per second the hub will send.",
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 100,
-          "default": 30
+        "kind": {
+          "const": "skill"
         },
-        "memoryMb": {
-          "description": "Most memory the plugin's whole process may hold. The hub stops a plugin that goes over.",
-          "type": "integer",
-          "minimum": 64,
-          "maximum": 4096,
-          "default": 256
+        "id": {
+          "$ref": "#/$defs/id"
         },
-        "cpuPercent": {
-          "description": "Most processor the plugin may use, as a percentage of one core, averaged over 10 seconds.",
-          "type": "integer",
-          "minimum": 5,
-          "maximum": 400,
-          "default": 50
+        "name": {
+          "$ref": "#/$defs/name"
         },
-        "messagesPerSecond": {
-          "description": "Most messages per second the plugin may send the hub.",
-          "type": "integer",
-          "minimum": 10,
-          "maximum": 5000,
-          "default": 200
-        }
-      }
-    }
-  },
-  "$defs": {
-    "console": {
-      "description": "A soundboard. Inputs and buses are numbered from 1.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["inputs", "buses", "level"],
-      "properties": {
-        "inputs": { "type": "integer", "minimum": 1, "maximum": 512 },
-        "buses": { "type": "integer", "minimum": 1, "maximum": 128 },
-        "level": {
-          "description": "Range of a send level in dB. The minimum means off.",
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["min", "max"],
-          "properties": {
-            "min": { "type": "number", "maximum": 0 },
-            "max": { "type": "number", "minimum": 0 }
-          }
+        "description": {
+          "$ref": "#/$defs/description"
         },
-        "pan": {
-          "description": "True when sends can be panned, from -100 (left) to +100 (right).",
-          "type": "boolean",
-          "default": false
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "contract": {
+          "const": "1"
+        },
+        "license": {
+          "$ref": "#/$defs/license"
+        },
+        "entry": {
+          "const": "SKILL.md"
+        },
+        "uses": {
+          "$ref": "#/$defs/uses"
         }
       }
     }

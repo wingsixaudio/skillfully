@@ -4,6 +4,7 @@
 import {
   checkManifest,
   checkMessage,
+  type DriverManifest,
   FROM_PLUGIN,
   type FromPlugin,
   type Hello,
@@ -28,7 +29,7 @@ export async function loadManifest(dir: string): Promise<Manifest> {
 const HOST = /^[A-Za-z0-9.-]{1,253}$/;
 
 /** Turn the manifest's network list into real host:port pairs, filling {placeholders} from settings. */
-export function resolveNetwork(manifest: Manifest, settings: Record<string, unknown>): string[] {
+export function resolveNetwork(manifest: DriverManifest, settings: Record<string, unknown>): string[] {
   const fill = (part: string, what: "host" | "port"): string => {
     const m = /^\{(.+)\}$/.exec(part);
     const value = m ? settings[m[1]] : part;
@@ -52,7 +53,7 @@ export function resolveNetwork(manifest: Manifest, settings: Record<string, unkn
 
 /** The full command line for a plugin. Every permission it gets is on this line and nowhere else. */
 export function denoArgs(
-  manifest: Manifest,
+  manifest: DriverManifest,
   dir: string,
   settings: Record<string, unknown>,
   gatewayPort: number,
@@ -98,7 +99,7 @@ let hubProvidedReal: string[] | undefined;
  * file permission, so without this check a plugin could read any JSON or code
  * file on the computer just by importing it. Links that point outside count as outside.
  */
-export async function inspectImports(dir: string, manifest: Manifest): Promise<void> {
+export async function inspectImports(dir: string, manifest: DriverManifest): Promise<void> {
   const root = (await Deno.realPath(dir)) + "/";
   hubProvidedReal ??= await Promise.all(
     HUB_PROVIDED.map(async (p) => (await Deno.realPath(p)) + (p.endsWith("/") ? "/" : "")),
@@ -297,7 +298,7 @@ export class PluginProcess {
 
   static async start(opts: {
     dir: string;
-    manifest: Manifest;
+    manifest: DriverManifest;
     settings: Record<string, unknown>;
     mode: Mode;
     gateway: PluginGateway;

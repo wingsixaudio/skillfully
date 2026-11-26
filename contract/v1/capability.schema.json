@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:skillfully:contract:1:capability",
+  "title": "Skillfully capability definition, contract 1",
+  "description": "A capability is a shared vocabulary for one kind of device: the values it has, what kind each is, and which can be set. Drivers implement capabilities and screens use them. The hub itself knows nothing about any capability beyond its definition file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["capability", "version", "title", "description", "options", "values"],
+  "properties": {
+    "capability": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,30}$" },
+    "version": { "type": "integer", "minimum": 1 },
+    "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+    "description": { "type": "string", "maxLength": 500 },
+    "options": {
+      "description": "A JSON Schema for what a driver declares under this capability in its manifest.",
+      "type": "object"
+    },
+    "values": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "title", "kind", "writable"],
+        "properties": {
+          "key": {
+            "description": "The value's name. A part in braces is a number counted from 1.",
+            "type": "string",
+            "pattern": "^(\\{[a-z]+\\}|[a-z][a-z0-9-]*)(/(\\{[a-z]+\\}|[a-z][a-z0-9-]*)){0,8}$"
+          },
+          "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "description": { "type": "string", "maxLength": 300 },
+          "kind": { "enum": ["number", "text", "boolean"] },
+          "unit": { "type": "string", "maxLength": 12 },
+          "writable": { "type": "boolean" },
+          "bounds": {
+            "description": "For each part in braces, the option that says how many there are.",
+            "type": "object",
+            "additionalProperties": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9.]*$" }
+          },
+          "min": { "description": "A number, or the option that holds it.", "type": ["number", "string"] },
+          "max": { "description": "A number, or the option that holds it.", "type": ["number", "string"] },
+          "tolerance": {
+            "description": "How far a device may land from the number asked for and still count as having set it.",
+            "type": "number",
+            "minimum": 0
+          },
+          "when": { "description": "The option that must be true for this value to exist.", "type": "string" }
+        }
+      }
+    }
+  }
+}

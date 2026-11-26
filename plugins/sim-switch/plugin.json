@@ -1,0 +1,15 @@
+{
+  "kind": "driver",
+  "id": "sim-switch",
+  "name": "Simulated switch",
+  "description": "A pretend four-outlet power strip held in memory, with dimming. Used for tests, and to show that the hub is not only about sound.",
+  "version": "0.1.0",
+  "contract": "1",
+  "runtime": "deno",
+  "entry": "main.ts",
+  "capabilities": {
+    "switch": { "outlets": 4, "dimmable": true }
+  },
+  "permissions": { "network": [] },
+  "settings": { "type": "object", "additionalProperties": false, "properties": {} }
+}

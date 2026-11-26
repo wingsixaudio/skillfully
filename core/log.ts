@@ -8,7 +8,7 @@ export interface LogInput {
   type: string;
   /** What produced the entry: core, or plugin/<id> */
   source: string;
-  /** What it is about, for example sim-console:input/1/bus/1/level */
+  /** What it is about, a driver and one of its values, written driver:key */
   subject?: string;
   /** Who asked. An ID, never a name. */
   actor?: string;

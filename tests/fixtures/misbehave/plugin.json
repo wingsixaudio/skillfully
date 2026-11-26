@@ -1,4 +1,5 @@
 {
+  "kind": "driver",
   "id": "misbehave",
   "name": "Misbehave (test fixture)",
   "description": "Behaves badly in the way its settings ask: crashes, uses too much memory, sends nonsense, or lies about who it is.",
@@ -6,7 +7,20 @@
   "contract": "1",
   "runtime": "deno",
   "entry": "main.ts",
-  "capabilities": { "console": { "inputs": 1, "buses": 1, "level": { "min": -90, "max": 10 } } },
-  "settings": { "type": "object" },
-  "limits": { "memoryMb": 64 }
+  "capabilities": {
+    "console": {
+      "inputs": 1,
+      "buses": 1,
+      "level": {
+        "min": -90,
+        "max": 10
+      }
+    }
+  },
+  "settings": {
+    "type": "object"
+  },
+  "limits": {
+    "memoryMb": 64
+  }
 }

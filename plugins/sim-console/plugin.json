@@ -1,4 +1,5 @@
 {
+  "kind": "driver",
   "id": "sim-console",
   "name": "Simulated board",
   "description": "A pretend soundboard held in memory. It behaves like a real one: it clamps values to its range, rounds levels to 0.1 dB and reports what it actually set. Used for tests and for trying Skillfully without a board.",
@@ -10,11 +11,16 @@
     "console": {
       "inputs": 48,
       "buses": 16,
-      "level": { "min": -90, "max": 10 },
+      "level": {
+        "min": -90,
+        "max": 10
+      },
       "pan": true
     }
   },
-  "permissions": { "network": [] },
+  "permissions": {
+    "network": []
+  },
   "settings": {
     "type": "object",
     "additionalProperties": false,
@@ -25,11 +31,25 @@
         "items": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["afterMs", "param", "value"],
+          "required": [
+            "afterMs",
+            "key",
+            "value"
+          ],
           "properties": {
-            "afterMs": { "type": "integer", "minimum": 0 },
-            "param": { "type": "string" },
-            "value": { "type": ["number", "string"] }
+            "afterMs": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "value": {
+              "type": [
+                "number",
+                "string"
+              ]
+            },
+            "key": {
+              "type": "string"
+            }
           }
         }
       },
@@ -37,10 +57,18 @@
         "description": "Recalls a pretend scene: every send into bus 1 jumps to one level, in a single message. For tests.",
         "type": "object",
         "additionalProperties": false,
-        "required": ["afterMs", "level"],
+        "required": [
+          "afterMs",
+          "level"
+        ],
         "properties": {
-          "afterMs": { "type": "integer", "minimum": 0 },
-          "level": { "type": "number" }
+          "afterMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "level": {
+            "type": "number"
+          }
         }
       },
       "answerDelayMs": {
@@ -52,5 +80,8 @@
       }
     }
   },
-  "limits": { "writesPerSecond": 30, "memoryMb": 256 }
+  "limits": {
+    "writesPerSecond": 30,
+    "memoryMb": 256
+  }
 }

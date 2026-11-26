@@ -1,0 +1,59 @@
+{
+  "capability": "console",
+  "version": 1,
+  "title": "Soundboard",
+  "description": "A mixing console: inputs sent to buses at a level, and optionally panned. Inputs and buses count from 1.",
+  "options": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["inputs", "buses", "level"],
+    "properties": {
+      "inputs": { "type": "integer", "minimum": 1, "maximum": 512 },
+      "buses": { "type": "integer", "minimum": 1, "maximum": 128 },
+      "level": {
+        "description": "Range of a send level in dB. The minimum means off.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["min", "max"],
+        "properties": {
+          "min": { "type": "number", "maximum": 0 },
+          "max": { "type": "number", "minimum": 0 }
+        }
+      },
+      "pan": { "description": "True when sends can be panned.", "type": "boolean", "default": false }
+    }
+  },
+  "values": [
+    {
+      "key": "input/{input}/name",
+      "title": "Input name",
+      "kind": "text",
+      "writable": false,
+      "bounds": { "input": "inputs" }
+    },
+    {
+      "key": "input/{input}/bus/{bus}/level",
+      "title": "Send level",
+      "description": "How much of an input goes to a bus. The minimum means off.",
+      "kind": "number",
+      "unit": "dB",
+      "writable": true,
+      "bounds": { "input": "inputs", "bus": "buses" },
+      "min": "level.min",
+      "max": "level.max",
+      "tolerance": 0.5
+    },
+    {
+      "key": "input/{input}/bus/{bus}/pan",
+      "title": "Send pan",
+      "description": "Where the input sits in a stereo bus, from -100 (left) to +100 (right).",
+      "kind": "number",
+      "writable": true,
+      "when": "pan",
+      "bounds": { "input": "inputs", "bus": "buses" },
+      "min": -100,
+      "max": 100,
+      "tolerance": 1
+    }
+  ]
+}

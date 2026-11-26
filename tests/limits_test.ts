@@ -3,8 +3,9 @@
 // found open.
 
 import { assert, assertEquals } from "./assert.ts";
+import type { DriverManifest } from "../contract/mod.ts";
 import { inspectImports, loadManifest } from "../core/process.ts";
-import { FIXTURES, hubWith, LEVEL, ofType, Phone, SIM, until } from "./helpers.ts";
+import { board, FIXTURES, hubWith, LEVEL, ofType, Phone, SIM, until } from "./helpers.ts";
 
 const MIS = `${FIXTURES}/misbehave`;
 
@@ -24,7 +25,7 @@ async function pluginBesideASecret(mainTs: (secretPath: string) => string, link 
 
 const refusal = async (dir: string) => {
   try {
-    await inspectImports(dir, await loadManifest(dir));
+    await inspectImports(dir, (await loadManifest(dir)) as DriverManifest);
     return "";
   } catch (err) {
     return (err as Error).message;
@@ -43,7 +44,7 @@ Deno.test("a plugin that imports a file outside its folder is refused before any
   assertEquals(ofType(hub, "skillfully.plugin.started").filter((e) => e.subject === "importer").length, 0);
   await new Promise((r) => setTimeout(r, 700));
   assertEquals(ofType(hub, "skillfully.plugin.refused").length, 1, "it is not retried over and over");
-  assertEquals(hub.console!.status, "running");
+  assertEquals(board(hub).status, "running");
   await hub.stop();
   await Deno.remove(base, { recursive: true });
 });
@@ -98,7 +99,7 @@ Deno.test("memory outside the script heap still counts, and three strikes means 
     startsBefore,
     "a quarantined plugin is not restarted",
   );
-  assert((await hub.console!.set(LEVEL, -8, { via: "test" })).ok, "the console was never disturbed");
+  assert((await board(hub).set(LEVEL, -8, { via: "test" })).ok, "the console was never disturbed");
 
   // A person can release it. Who did so is on the record.
   mis.release({ actor: "person:p9", via: "test" });
@@ -120,7 +121,7 @@ Deno.test("a plugin that hogs the processor is stopped", async () => {
   const [hit] = ofType(hub, "skillfully.plugin.limit");
   assertEquals(hit.data.limit, "processor");
   assertEquals(hit.data.allowed, "50% of one core");
-  assertEquals(hub.console!.restarts, 0);
+  assertEquals(board(hub).restarts, 0);
   await hub.stop();
 });
 
@@ -138,7 +139,7 @@ Deno.test("a quiet plugin stays under its limits", async () => {
   );
   assertEquals(ofType(hub, "skillfully.plugin.limit").length, 0);
   assertEquals(ofType(hub, "skillfully.plugin.muted").length, 0);
-  assertEquals(hub.console!.restarts, 0);
+  assertEquals(board(hub).restarts, 0);
   await phone.close();
   await hub.stop();
 });
@@ -158,7 +159,7 @@ Deno.test("a plugin that floods the hub cannot fill the log, and is stopped", as
   assert(kept <= 250, `the log kept ${kept} of the plugin's entries`);
   assert(leftOut > 5000, `the log says how many were left out: ${leftOut}`);
   assert(muted.length <= 10, "and says so in a handful of entries, not thousands");
-  assert((await hub.console!.set(LEVEL, -8, { via: "test" })).ok);
+  assert((await board(hub).set(LEVEL, -8, { via: "test" })).ok);
   await hub.stop();
 });
 
@@ -175,7 +176,7 @@ Deno.test("a scene recall at the board is one log entry, not one per value", asy
   assertEquals(entries[0].subject, "sim-console");
   assertEquals(entries[0].data.count, 48);
   const changes = entries[0].data.changes as Record<string, unknown>;
-  assertEquals(changes["input/48/bus/1/level"], { before: -90, value: -20 });
+  assertEquals(changes["console/input/48/bus/1/level"], { before: -90, value: -20 });
   await phone.close();
   await hub.stop();
 });
@@ -190,6 +191,6 @@ Deno.test("values a plugin never declared, and oversized messages, are ignored a
   const problems = ofType(hub, "skillfully.plugin.invalid").map((e) => String(e.data.problem));
   assert(problems.some((p) => p.includes("larger than 8 MB")));
   assert(problems.some((p) => p.includes("its manifest does not declare")));
-  assert(!hub.hosts.get("misbehave")!.state.has("input/7/bus/3/level"));
+  assert(!hub.hosts.get("misbehave")!.state.has("console/input/7/bus/3/level"));
   await hub.stop();
 });

@@ -2,23 +2,22 @@
 
 import manifest from "./plugin.json" with { type: "json" };
 import { type CommandOutcome, runPlugin } from "../../sdk/plugin.ts";
-import {
-  levelParam,
-  nameParam,
-  panParam,
-  parseParam,
-  type Value,
-  type Values,
-} from "../../contract/types.ts";
+import type { Value, Values } from "../../contract/types.ts";
+
+// Value names come from capabilities/console.json.
+const levelKey = (input: number, bus: number) => `console/input/${input}/bus/${bus}/level`;
+const panKey = (input: number, bus: number) => `console/input/${input}/bus/${bus}/pan`;
+const nameKey = (input: number) => `console/input/${input}/name`;
+const FIELD = /^console\/input\/\d+\/(?:(name)|bus\/\d+\/(level|pan))$/;
 
 const cap = manifest.capabilities.console;
 const board = new Map<string, Value>();
 
 for (let i = 1; i <= cap.inputs; i++) {
-  board.set(nameParam(i), `Input ${i}`);
+  board.set(nameKey(i), `Input ${i}`);
   for (let b = 1; b <= cap.buses; b++) {
-    board.set(levelParam(i, b), cap.level.min);
-    board.set(panParam(i, b), 0);
+    board.set(levelKey(i, b), cap.level.min);
+    board.set(panKey(i, b), 0);
   }
 }
 
@@ -36,12 +35,12 @@ let answerDelayMs = 0;
 const link = runPlugin(manifest, {
   start(settings) {
     answerDelayMs = Number(settings.answerDelayMs ?? 0);
-    const changes = (settings.boardChanges ?? []) as { afterMs: number; param: string; value: Value }[];
+    const changes = (settings.boardChanges ?? []) as { afterMs: number; key: string; value: Value }[];
     for (const c of changes) {
       setTimeout(() => {
-        if (!board.has(c.param)) return;
-        board.set(c.param, c.value);
-        link.changed({ [c.param]: c.value });
+        if (!board.has(c.key)) return;
+        board.set(c.key, c.value);
+        link.changed({ [c.key]: c.value });
       }, c.afterMs);
     }
     const recall = settings.sceneRecall as { afterMs: number; level: number } | undefined;
@@ -49,8 +48,8 @@ const link = runPlugin(manifest, {
       setTimeout(() => {
         const moved: Values = {};
         for (let i = 1; i <= cap.inputs; i++) {
-          board.set(levelParam(i, 1), settle("level", recall.level));
-          moved[levelParam(i, 1)] = board.get(levelParam(i, 1))!;
+          board.set(levelKey(i, 1), settle("level", recall.level));
+          moved[levelKey(i, 1)] = board.get(levelKey(i, 1))!;
         }
         link.changed(moved);
       }, recall.afterMs);
@@ -65,17 +64,17 @@ const link = runPlugin(manifest, {
   async command(set): Promise<CommandOutcome> {
     if (answerDelayMs) await sleep(answerDelayMs);
     const out: CommandOutcome = { values: {}, errors: {} };
-    for (const [param, wanted] of Object.entries(set)) {
-      const p = parseParam(param);
-      if (!p || !board.has(param)) {
-        out.errors[param] = { code: "unknown_param", message: `${param} does not exist on this board` };
-      } else if (p.field === "name") {
-        out.errors[param] = { code: "read_only", message: "input names cannot be set" };
+    for (const [key, wanted] of Object.entries(set)) {
+      const m = FIELD.exec(key);
+      if (!m || !board.has(key)) {
+        out.errors[key] = { code: "unknown_key", message: `${key} does not exist on this board` };
+      } else if (m[1]) {
+        out.errors[key] = { code: "read_only", message: "input names cannot be set" };
       } else if (typeof wanted !== "number" || !Number.isFinite(wanted)) {
-        out.errors[param] = { code: "invalid", message: `${p.field} must be a number` };
+        out.errors[key] = { code: "invalid", message: `${m[2]} must be a number` };
       } else {
-        board.set(param, settle(p.field, wanted));
-        out.values[param] = board.get(param)!; // read back from the board, never echoed from the request
+        board.set(key, settle(m[2] as "level" | "pan", wanted));
+        out.values[key] = board.get(key)!; // read back from the board, never echoed from the request
       }
     }
     return out;
