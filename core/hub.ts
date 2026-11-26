@@ -279,6 +279,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
           return r.ok ? json({ ok: true }, 200, setCookie(r.token, secure)) : outcome(r);
         }
         if (path === "/auth/signout") {
+          if (session) accounts.lock(session.person.id, session.id);
           if (token) await accounts.signOut(token);
           if (me) screens.drop(me.id);
           return json({ ok: true }, 200, setCookie("", secure, true));
@@ -294,7 +295,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       if (path.startsWith("/admin/api/")) {
         if (!me) return refuse(401, "Please sign in again.");
         if (!accounts.isSuperuser(me)) return refuse(403, "Only a superuser can do that.");
-        return await admin(req, path.slice("/admin/api/".length), me, origin);
+        return await admin(req, path.slice("/admin/api/".length), me, origin, session!.id);
       }
 
       if (req.method !== "GET") return new Response("not found", { status: 404 });
@@ -310,7 +311,10 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
 
       if (path === "/account") return html(authPage("account"));
       if (me.mustChange && !path.startsWith("/api/")) return go("/account");
-      if (path === "/admin") return accounts.isSuperuser(me) ? html(adminPage()) : go("/");
+      // One page, with a place at each address under it: Home, Devices, Screens, People, Hub.
+      if (path === "/admin" || path.startsWith("/admin/")) {
+        return accounts.isSuperuser(me) ? html(adminPage()) : go("/");
+      }
       if (path === "/") {
         const to = screens.homeFor(me);
         // A superuser with no screen that has anything to show has setting up to do.

@@ -242,6 +242,40 @@ export class Accounts {
     return ok;
   }
 
+  // --- One confirmation that holds for a few minutes ---
+
+  /** How long one confirmation lasts. Short, because a signed-in laptop gets left open on a desk. */
+  unlockSeconds = 300;
+  /** The sessions whose superuser said who they are a moment ago, and until when that holds. */
+  #open = new Map<string, number>();
+
+  /**
+   * Confirm who someone is once, for this one session and the next few minutes, in place of asking again
+   * at every change. A wrong secret counts as a failed try like any other. Returns the seconds it holds
+   * for, or 0 when it was refused.
+   */
+  async unlock(person: string, session: string, secret: unknown): Promise<number> {
+    if (!(await this.confirm(person, secret))) return 0;
+    const now = Date.now();
+    for (const [id, until] of this.#open) if (until <= now) this.#open.delete(id);
+    this.#open.set(session, now + this.unlockSeconds * 1000);
+    this.#note("skillfully.admin.unlocked", person, person, { session, seconds: this.unlockSeconds });
+    return this.unlockSeconds;
+  }
+
+  /** The seconds this session's confirmation still holds for. 0 when it has to be given again. */
+  unlocked(session: string): number {
+    const until = this.#open.get(session) ?? 0;
+    if (until > Date.now()) return Math.ceil((until - Date.now()) / 1000);
+    this.#open.delete(session);
+    return 0;
+  }
+
+  /** End a session's confirmation now. */
+  lock(person: string, session: string): void {
+    if (this.#open.delete(session)) this.#note("skillfully.admin.locked", person, person, { session });
+  }
+
   // --- Too many tries ---
 
   #mustWait(who: string): number {

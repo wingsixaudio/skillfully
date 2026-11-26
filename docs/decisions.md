@@ -274,6 +274,21 @@ and what it asks for that it did not before. They run with no secrets and a toke
 what makes it safe to run them on a pull request from a stranger. A nightly run repeats the suite five times
 on each system, because a test that fails one time in twenty is found by repetition and by nothing else.
 
+**The admin is five places, each at its own address.** Home says whether everything is working and lists what
+is waiting on a superuser, with the answer beside it. Devices, Screens, People and Hub hold what their names
+say, and each device has an address of its own. One page draws all of them and moves between them without
+loading again, so nothing a person was in the middle of is lost. On a phone the places run along the bottom,
+where a thumb is; on a wide screen, down the side. Nothing was taken away: every control on the old single
+page is in one of the five.
+
+**One confirmation holds for five minutes, for one session.** A change that hands out power used to ask for
+the superuser's own PIN or password every time, which in one evening of setting up was a dozen times. Now it
+is asked once, the hub remembers it for that one browser for five minutes, and the page says so with a way to
+lock again at once. It is kept in memory only, so a restart locks everything. It belongs to the session and
+not the person: the same superuser on another device is still locked. A secret that is sent with a change is
+still checked, so a wrong one is refused even while unlocked. Each unlock and lock is in the log. What this
+gives up: someone who picks up a signed-in, just-unlocked laptop has up to five minutes.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins

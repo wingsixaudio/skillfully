@@ -1,6 +1,91 @@
-// The admin page: people, roles, screens, devices and sign-in rules. Superusers only.
+// The admin: five places, each at its own address, drawn by this one page. Superusers only.
+//   /admin            Home     is everything working, and what is waiting on you
+//   /admin/devices    Devices  what the hub talks to (/admin/devices/<id> is one of them)
+//   /admin/screens    Screens  what people open, and which devices each may use
+//   /admin/people     People   who is on the team and what each can do
+//   /admin/hub        Hub      the hub's own settings
 let people = [], roles = [], offered = [], drivers = [], meId = "";
 const SUPER = "superuser";
+
+// --- One confirmation that holds for a few minutes ---
+// The hub remembers, for this one browser, that its superuser has just said who they are. While that
+// holds, a change is not asked to be confirmed again. The time left is shown, with a way to end it now.
+let unlockedUntil = 0;
+const unlocked = () => unlockedUntil > Date.now();
+function drawLock() {
+  const left = Math.max(0, Math.ceil((unlockedUntil - Date.now()) / 60000));
+  $("lockbar").hidden = !unlocked();
+  $("lockLeft").textContent = left <= 1
+    ? "Unlocked for a minute more."
+    : "Unlocked for " + left + " minutes.";
+}
+setInterval(drawLock, 5000);
+$("lockNow").onclick = async () => {
+  await call("/admin/api/lock", {});
+  unlockedUntil = 0;
+  drawLock();
+};
+// A change that has to be confirmed. When the dialog asked for the PIN or password, that is given to the
+// hub first, once, and holds for the changes that follow. The change itself never carries it.
+async function sureCall(path, body) {
+  const field = $("confirm");
+  if (field) {
+    const r = await call("/admin/api/unlock", { confirm: field.value });
+    if (!r.ok) return r;
+    unlockedUntil = Date.now() + r.unlocked * 1000;
+    document.querySelector('label[for="confirm"]')?.remove();
+    field.remove();
+    drawLock();
+  }
+  const r = await call(path, body);
+  if (r.locked) unlockedUntil = 0;
+  return r;
+}
+
+// --- Places ---
+// Which place the address names, and which device when it names one. An address nobody gave a place is Home.
+const PLACES = { "": "Home", devices: "Devices", screens: "Screens", people: "People", hub: "Hub" };
+function here() {
+  const [first = "", second = ""] = location.pathname.replace(/^\/admin\/?/, "").split("/");
+  const place = Object.hasOwn(PLACES, first) ? first : "";
+  let device = "";
+  try {
+    device = place === "devices" ? decodeURIComponent(second) : "";
+  } catch { /* an address that is not text names no device */ }
+  return { place, device };
+}
+function showPlace() {
+  const { place } = here();
+  for (const part of document.querySelectorAll(".place")) part.hidden = part.dataset.place !== place;
+  for (const a of document.querySelectorAll("#places a")) {
+    if (a.dataset.place === place) a.setAttribute("aria-current", "page");
+    else a.removeAttribute("aria-current");
+  }
+  document.title = PLACES[place] + " | Skillfully";
+}
+// Moving between places changes the address and nothing else: no page is fetched again.
+function go(to) {
+  if (to !== location.pathname) history.pushState(null, "", to);
+  showPlace();
+  drawDrivers();
+  scrollTo(0, 0);
+}
+const link = (to, text, props = {}) => {
+  const a = el("a", { href: to, textContent: text, ...props });
+  a.dataset.go = "1";
+  return a;
+};
+document.addEventListener("click", (e) => {
+  const a = e.target.closest ? e.target.closest("a[data-go]") : null;
+  if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault();
+  go(new URL(a.href).pathname);
+});
+addEventListener("popstate", () => {
+  showPlace();
+  drawDrivers();
+});
+showPlace();
 
 // One dialog, reused. fill() builds the fields; done() returns a result with ok, or nothing to close.
 function ask(title, fill, done, okText = "Save") {
@@ -14,7 +99,11 @@ function ask(title, fill, done, okText = "Save") {
     if (e.submitter && e.submitter.value === "cancel") return;
     e.preventDefault();
     const r = await done();
-    if (r && r.ok === false) return say("dlgMsg", r.message, "bad");
+    if (r && r.ok === false) {
+      // The few minutes ran out while this was open: ask here, and keep everything that was filled in.
+      if (r.locked && !$("confirm")) confirmField($("dlgBody"));
+      return say("dlgMsg", r.message, "bad");
+    }
     $("dlg").close();
     load();
   };
@@ -26,14 +115,19 @@ const input = (parent, id, label, props = {}) => {
   return i;
 };
 const confirmField = (parent) =>
-  input(parent, "confirm", "Your own PIN or password, to confirm", { type: "password", required: true });
+  unlocked()
+    ? null
+    : input(parent, "confirm", "Your own PIN or password, to confirm", { type: "password", required: true });
 
 async function load() {
   const r = await call("/admin/api/all");
   if (!r.ok) return location.replace("/");
   ({ people, roles, offered, drivers } = r);
   meId = r.me;
+  unlockedUntil = r.unlocked ? Date.now() + r.unlocked * 1000 : 0;
+  drawLock();
   $("addDevice").hidden = !r.canAdd;
+  drawHome();
   drawSetup();
   drawPeople();
   drawRoles();
@@ -116,10 +210,9 @@ function drawPeople() {
         }
         confirmField(b);
       }, () =>
-        call("/admin/api/person/roles", {
+        sureCall("/admin/api/person/roles", {
           id: p.id,
           roles: [...$("dlgBody").querySelectorAll("input[type=checkbox]:checked")].map((c) => c.value),
-          confirm: $("confirm").value,
         })));
     btn("Assign", () =>
       ask("What is " + p.name + "'s", (b) => {
@@ -160,10 +253,9 @@ function drawPeople() {
         input(b, "temp", "Temporary PIN or password", { required: true });
         confirmField(b);
       }, () =>
-        call("/admin/api/person/reset", {
+        sureCall("/admin/api/person/reset", {
           id: p.id,
           temporary: $("temp").value,
-          confirm: $("confirm").value,
         })));
     btn("Sign out everywhere", async () => {
       const r = await call("/admin/api/person/revoke", { id: p.id });
@@ -317,10 +409,9 @@ function drawScreens() {
           }
           confirmField(x);
         }, () =>
-          call("/admin/api/screen/connections", {
+          sureCall("/admin/api/screen/connections", {
             id: o.plugin,
             drivers: [...document.querySelectorAll(".conn:checked")].map((i) => i.value),
-            confirm: $("confirm").value,
           }));
       item.append(b);
     }
@@ -331,18 +422,18 @@ function drawScreens() {
 // What a new hub still needs, in the order it is needed. It goes away once all of it is done.
 function drawSetup() {
   const steps = [
-    [drivers.length > 0, "Add a device", "Something for the hub to talk to.", "secDevices"],
+    [drivers.length > 0, "Add a device", "Something for the hub to talk to.", "/admin/devices"],
     [
       offered.some((o) => o.connections.length > 0),
       "Give a screen a device",
       "A screen reaches nothing until you choose what it may use.",
-      "secScreens",
+      "/admin/screens",
     ],
     [
       people.length > 1,
       "Add your people",
       "Add a name, give them a role, and hand them their invitation.",
-      "secPeople",
+      "/admin/people",
     ],
   ];
   let hidden = false;
@@ -359,7 +450,7 @@ function drawSetup() {
       el("i", { textContent: done ? "✓" : "" }),
       el("span", {}, title, el("small", { textContent: done ? "Done" : why })),
     );
-    b.onclick = () => $(where).scrollIntoView({ behavior: "smooth", block: "start" });
+    b.onclick = () => go(where);
     box.append(b);
   }
 }
@@ -369,6 +460,125 @@ $("hideSetup").onclick = () => {
   } catch { /* it stays hidden until the page is loaded again */ }
   $("setup").hidden = true;
 };
+
+// --- Home ---
+// One sentence on how the hub is doing, then everything that is waiting on its superuser with the answer
+// beside it, then each device and how it is. Nothing here is a setting: it all leads to where the thing is.
+const deviceAt = (id) => "/admin/devices/" + encodeURIComponent(id);
+function needs() {
+  const list = [];
+  for (const d of drivers) {
+    if (d.status === "quarantined") {
+      list.push({
+        d,
+        text: "The hub stopped " + d.name + " for misbehaving.",
+        act: ["Release it", async () => await call("/admin/api/driver/release", { id: d.id })],
+      });
+    } else if (d.asks.length) {
+      // One plain request, that nobody warns about, can be answered where it is shown. Anything more is
+      // looked at whole, in the place that shows everything it asks for and what the store advises.
+      const one = d.asks.length === 1 ? d.asks[0] : null;
+      const plain = one && !one.caution && (!one.advice || one.advice.say === "yes");
+      list.push({
+        d,
+        text: one
+          ? d.name + " asks to " + lower(one.words) + "."
+          : d.name + " asks for " + d.asks.length + " things.",
+        note: one && one.advice
+          ? (one.advice.say === "no"
+            ? "The store's reviewers advise against this. "
+            : "The store's reviewers expect this. ") +
+            one.advice.why
+          : one && one.caution
+          ? one.caution
+          : "",
+        act: plain && unlocked()
+          ? [
+            "Allow",
+            async () =>
+              await sureCall("/admin/api/driver/allow", {
+                id: d.id,
+                allow: [one.value],
+                deny: [],
+                revoke: [],
+              }),
+          ]
+          : null,
+        look: [plain ? "Look closer" : "See what it asks for", () => openAccess(d.id)],
+      });
+    } else if (d.status !== "running" && d.status !== "starting") {
+      list.push({ d, text: d.name + " is not running." });
+    } else if (d.status === "running" && d.health.status !== "ok" && d.health.status !== "degraded") {
+      list.push({ d, text: d.name + ": " + lower(d.health.reason || "not ready") + "." });
+    }
+    if (d.update && d.update.newer) {
+      list.push({ d, text: d.name + " has a newer version, " + d.update.version + ", in the store." });
+    }
+  }
+  return list;
+}
+const lower = (words) => words ? words[0].toLowerCase() + words.slice(1).replace(/\.$/, "") : "";
+function drawHome() {
+  const waiting = needs();
+  const well = drivers.filter((d) => statusOf(d)[1] === "ok").length;
+  $("homeStatus").textContent = !drivers.length
+    ? "Nothing is set up yet."
+    : !waiting.length
+    ? "Everything is working."
+    : waiting.length === 1
+    ? "Running. One thing needs you."
+    : "Running. " + waiting.length + " things need you.";
+  $("homeDetail").textContent = !drivers.length
+    ? "Start with a device: something for the hub to talk to."
+    : well + " of " + drivers.length + (drivers.length === 1 ? " device" : " devices") + " connected. " +
+      people.length + (people.length === 1 ? " person" : " people") + " on the team.";
+  $("homeAdd").hidden = drivers.length > 0;
+
+  $("needs").hidden = !waiting.length;
+  const box = $("needsList");
+  box.innerHTML = "";
+  for (const n of waiting) {
+    const row = el("div", { className: "row" });
+    if (n.act) {
+      const b = el("button", { className: "small", textContent: n.act[0] });
+      b.onclick = async () => {
+        b.disabled = true;
+        const r = await n.act[1]();
+        if (r && r.ok === false) say("needsMsg", r.message, "bad");
+        load();
+      };
+      row.append(b);
+    }
+    if (n.look) {
+      const b = el("button", { className: "small quiet", textContent: n.look[0] });
+      b.onclick = n.look[1];
+      row.append(b);
+    }
+    row.append(link(deviceAt(n.d.id), "Open " + n.d.name, { className: "open" }));
+    box.append(
+      el(
+        "div",
+        { className: "item need" },
+        el("p", { className: "status wait", textContent: n.text }),
+        n.note ? el("p", { className: "help", textContent: n.note }) : "",
+        row,
+      ),
+    );
+  }
+
+  $("homeDevices").hidden = !drivers.length;
+  const rows = $("homeDeviceList");
+  rows.innerHTML = "";
+  for (const d of drivers) {
+    const [text, kind] = statusOf(d);
+    const a = link(deviceAt(d.id), "", { className: "line" });
+    a.append(
+      el("b", { textContent: d.name }),
+      el("span", { className: "status " + kind, textContent: text }),
+    );
+    rows.append(a);
+  }
+}
 
 // --- Devices ---
 const STATE = {
@@ -398,8 +608,14 @@ function statusOf(d) {
 function drawDrivers() {
   const box = $("drivers");
   box.innerHTML = "";
+  // At a device's own address only that device is shown. Every device's name leads to its address.
+  const only = here().device;
+  const known = drivers.some((d) => d.id === only);
+  $("oneDevice").hidden = !only;
+  $("oneDeviceGone").hidden = !only || known || !drivers.length;
   for (const d of drivers) {
-    const item = el("div", { className: "item" }, el("h3", { textContent: d.name }));
+    if (only && known && d.id !== only) continue;
+    const item = el("div", { className: "item" }, el("h3", {}, link(deviceAt(d.id), d.name)));
     if (d.module && d.store) {
       item.append(
         el(
@@ -509,7 +725,7 @@ function drawDrivers() {
             x.append(facts);
             confirmField(x);
           },
-          () => call("/admin/api/driver/update", { id: d.id, confirm: $("confirm").value }),
+          () => sureCall("/admin/api/driver/update", { id: d.id }),
           d.update.newer ? "Update" : "Change",
         ));
     }
@@ -522,10 +738,9 @@ function drawDrivers() {
           (d.mode === "act" ? "Stop sending changes to " : "Start sending changes to ") + d.name,
           (x) => confirmField(x),
           () =>
-            call("/admin/api/driver/mode", {
+            sureCall("/admin/api/driver/mode", {
               id: d.id,
               mode: d.mode === "act" ? "listen" : "act",
-              confirm: $("confirm").value,
             }),
           "Switch",
         ),
@@ -550,7 +765,12 @@ function drawDrivers() {
             );
             confirmField(x);
           },
-          () => call("/admin/api/driver/remove", { id: d.id, confirm: $("confirm").value }),
+          async () => {
+            const r = await sureCall("/admin/api/driver/remove", { id: d.id });
+            // Its own address now names nothing: go to where the rest are.
+            if (r.ok && here().device === d.id) history.replaceState(null, "", "/admin/devices");
+            return r;
+          },
           "Remove",
         ));
     }
@@ -648,12 +868,11 @@ function openAccess(id) {
     const deny = $("stopAsking") && $("stopAsking").checked
       ? d.asks.map((a) => a.value).filter((v) => !allow.includes(v))
       : [];
-    return call("/admin/api/driver/allow", {
+    return sureCall("/admin/api/driver/allow", {
       id,
       allow,
       deny,
       revoke: picked("revokeBox"),
-      confirm: $("confirm").value,
     });
   }, d.asks.length ? "Allow what is ticked" : "Save");
 }
@@ -1000,11 +1219,10 @@ $("addDevice").onclick = () => {
     };
   }, async () => {
     if (!seen) return { ok: false, message: "Choose something first." };
-    const r = await call("/admin/api/module/add", {
+    const r = await sureCall("/admin/api/module/add", {
       upload: seen.upload,
       name: $("devName").value,
       screens: [...document.querySelectorAll(".useScreen:checked")].map((i) => i.value),
-      confirm: $("confirm").value,
     });
     if (r.ok) {
       say("driversMsg", r.name + " was added. Fill in its settings next.", "ok");
@@ -1048,7 +1266,7 @@ $("policy").addEventListener("submit", (e) => {
     );
     confirmField(b);
   }, async () => {
-    const r = await call("/admin/api/policy", { policy, confirm: $("confirm").value });
+    const r = await sureCall("/admin/api/policy", { policy });
     if (r.ok) say("policyMsg", "Saved.", "ok");
     return r;
   });

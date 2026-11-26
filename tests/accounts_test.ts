@@ -353,3 +353,86 @@ Deno.test("signing out, being turned off, or being signed out everywhere ends ac
   assertEquals((await hub.get("/auth/me", riley).then((r) => r.json())).person, undefined);
   await hub.stop();
 });
+
+Deno.test("one confirmation holds for a few minutes, for the one session that gave it", async () => {
+  const hub = await hubWith([{ dir: SIM }, { dir: FADER }]);
+  const mode = (to: string, more: Record<string, unknown> = {}, as = hub.owner) =>
+    hub.post("/admin/api/driver/mode", { id: "sim-console", mode: to, ...more }, as);
+  const all = async (as = hub.owner) => await (await hub.get("/admin/api/all", as)).json();
+
+  // Locked is how every session starts, and a change that hands out power says so.
+  assertEquals((await all()).unlocked, 0);
+  const locked = await mode("act");
+  assertEquals(locked.status, 400);
+  assertEquals(locked.body.locked, true);
+  assertEquals(board(hub).mode, "listen");
+
+  // A wrong secret opens nothing, and counts as a failed try like any other.
+  assertEquals((await hub.post("/admin/api/unlock", { confirm: "000000" })).status, 400);
+  assertEquals((await hub.post("/admin/api/unlock", {})).status, 400);
+  assertEquals((await mode("act")).status, 400);
+
+  // The right one does, and the change then needs nothing more.
+  const opened = await hub.post("/admin/api/unlock", { confirm: OWNER_PIN });
+  assertEquals(opened.body, { ok: true, unlocked: 300 });
+  assert((await all()).unlocked > 290);
+  assertEquals((await mode("act")).body.ok, true);
+  assertEquals(board(hub).mode, "act");
+  assertEquals(ofType(hub, "skillfully.admin.unlocked")[0].actor, hub.owner.id);
+
+  // A secret that is sent is still checked: unlocked does not mean a wrong one is waved through.
+  assertEquals((await mode("listen", { confirm: "000000" })).status, 400);
+  assertEquals(board(hub).mode, "act");
+
+  // It belongs to the session that gave it. The same person signed in on another device is still locked.
+  const elsewhere = await hub.accounts.signIn("Owner", OWNER_PIN, "test", "another device");
+  assert(elsewhere.ok);
+  const other = { id: hub.owner.id, token: elsewhere.token };
+  assertEquals((await all(other)).unlocked, 0);
+  assertEquals((await mode("listen", {}, other)).body.locked, true);
+
+  // Someone who is not a superuser cannot unlock anything, whatever they send.
+  const sam = await hub.member("Sam");
+  assertEquals((await hub.post("/admin/api/unlock", { confirm: PIN }, sam)).status, 403);
+
+  // Locking ends it at once, and so does the time running out.
+  assertEquals((await hub.post("/admin/api/lock", {})).body.unlocked, 0);
+  assertEquals((await mode("listen")).body.locked, true);
+  assertEquals(ofType(hub, "skillfully.admin.locked").length, 1);
+  hub.accounts.unlockSeconds = 0.05;
+  assert((await hub.post("/admin/api/unlock", { confirm: OWNER_PIN })).body.ok);
+  await new Promise((r) => setTimeout(r, 80));
+  assertEquals((await all()).unlocked, 0);
+  assertEquals((await mode("listen")).body.locked, true);
+  assertEquals(board(hub).mode, "act");
+  await hub.stop();
+});
+
+Deno.test("each place in the admin has its own address, for superusers only", async () => {
+  const hub = await hubWith([{ dir: SIM }, { dir: FADER }]);
+  const sam = await hub.member("Sam");
+  for (
+    const path of [
+      "/admin",
+      "/admin/devices",
+      "/admin/devices/sim-console",
+      "/admin/screens",
+      "/admin/people",
+      "/admin/hub",
+    ]
+  ) {
+    const page = await hub.get(path);
+    assertEquals(page.status, 200, path);
+    const text = await page.text();
+    assert(text.includes('id="places"') && text.includes('data-place="hub"'), path);
+    // Not for anyone else, at any of them.
+    const refused = await hub.get(path, sam);
+    await refused.body?.cancel();
+    assertEquals(refused.headers.get("location"), "/", path);
+  }
+  // The tools behind the page are not pages: an address under them that means nothing is refused, not drawn.
+  const none = await hub.get("/admin/api/nothing");
+  assertEquals(none.status, 404);
+  await none.body?.cancel();
+  await hub.stop();
+});
