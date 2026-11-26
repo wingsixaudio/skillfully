@@ -1,8 +1,9 @@
 // What a device asks for, in words a person can weigh.
 //
-// A device a superuser adds starts with no access to the network. When it tries to reach something, the
-// runtime refuses and notes what it tried. The hub turns that note into a question for a superuser: allow
-// it, or not. Nothing here grants anything. It only says what was asked and what an answer would mean.
+// A device holds only what a superuser allowed. Its manifest can ask in advance, and whatever it tries to
+// reach beyond what it holds, the runtime refuses and notes. The hub turns both into questions for a
+// superuser: allow it, or not. Nothing here grants anything. It only says what was asked and what an
+// answer would mean.
 
 /** Where on the network something is. It decides how a request is worded and how much care it deserves. */
 export type Where = "device" | "everyone" | "this-computer" | "ports" | "name" | "internet";
@@ -93,6 +94,20 @@ export function classify(value: string): Ask | null {
     words: `Reach ${host} on the internet${on}`,
     caution: "This leaves your network.",
     usual: false,
+  };
+}
+
+/** Something a plugin's manifest asks for in advance, as a request. */
+export function declared(grant: string): Ask {
+  const tried = classify(grant);
+  if (tried) return { ...tried, value: grant, grant };
+  return {
+    value: grant,
+    grant,
+    where: grant === "listen" ? "ports" : grant === "lan" ? "everyone" : "device",
+    words: grantWords(grant),
+    ...(grant === "lan" ? { caution: "That is every device on your network, not one." } : {}),
+    usual: grant !== "lan" && grant !== "listen",
   };
 }
 

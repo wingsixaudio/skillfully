@@ -53,20 +53,28 @@ Deno.test("the broken-manifest fixture is refused with a reason", async () => {
 });
 
 Deno.test("network permissions are filled from settings and cannot be widened through them", () => {
-  const m = { ...base(), permissions: { network: ["{host}:2223", "time.example.org:123"] } };
+  const m = ["{host}:2223", "time.example.org:123"];
   assertEquals(resolveNetwork(m, { host: "192.168.1.50" }), ["192.168.1.50:2223", "time.example.org:123"]);
   assertThrows(() => resolveNetwork(m, {}), Error, "is not set");
   // A setting must not be able to smuggle in a second host.
   assertThrows(() => resolveNetwork(m, { host: "192.168.1.50,evil.example.com" }), Error, "not a valid host");
   assertThrows(() => resolveNetwork(m, { host: "0.0.0.0/0" }), Error, "not a valid host");
-  const p = { ...base(), permissions: { network: ["10.0.0.5:{port}"] } };
+  const p = ["10.0.0.5:{port}"];
   assertThrows(() => resolveNetwork(p, { port: "80,1-65535" }), Error, "not a valid port");
   assertThrows(() => resolveNetwork(p, { port: 0 }), Error, "not a valid port");
 });
 
 Deno.test("a plugin's command line grants the hub link, its declared hosts and nothing else", () => {
   const m = { ...base(), permissions: { network: ["{host}:2223"] }, limits: { memoryMb: 64 } };
-  const args = denoArgs(m, "/plugins/example", { host: "192.168.1.50" }, 4567, "tok");
+  // What it holds is what the hub granted. What its manifest asks for is not on the line.
+  const held = { settings: { host: "192.168.1.50" }, granted: ["{host}:2223"] };
+  const args = denoArgs(
+    { ...m, permissions: { network: ["{host}:2223", "8.8.8.8:53"] } },
+    "/plugins/example",
+    held,
+    4567,
+    "tok",
+  );
   const allows = args.filter((a) => a.startsWith("--allow") || a === "-A");
   assertEquals(allows, ["--allow-net=127.0.0.1:4567,192.168.1.50:2223"]);
   for (const needed of ["--no-prompt", "--no-remote", "--no-npm", "--v8-flags=--max-old-space-size=32"]) {

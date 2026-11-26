@@ -36,8 +36,11 @@ export type Access = "read" | "write";
 
 export interface DriverManifest extends ManifestBase {
   kind: "driver";
-  /** deno: the entry speaks this contract. companion: the entry is a built Companion module run inside the hub's bridge. */
-  runtime: "deno" | "companion";
+  /**
+   * What runs the entry file, by name. deno: the entry is a program that speaks this contract. A hub may
+   * have others (see its runtimes folder), and refuses a plugin that names one it does not have.
+   */
+  runtime: string;
   entry: string;
   /** Capability name to the options this driver declares for it. */
   capabilities: Record<string, Record<string, unknown>>;

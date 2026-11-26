@@ -14,9 +14,17 @@ import type {
   Values,
 } from "../contract/mod.ts";
 import type { Capabilities } from "./capabilities.ts";
-import { type Ask, classify, covered } from "./asks.ts";
+import { type Ask, classify, covered, declared } from "./asks.ts";
 import { type Log, newId } from "./log.ts";
-import { type PluginGateway, PluginProcess, PluginRefused, resolveNetwork, usageOf } from "./process.ts";
+import {
+  type Held,
+  type PluginGateway,
+  PluginProcess,
+  PluginRefused,
+  resolveNetwork,
+  usageOf,
+} from "./process.ts";
+import { runtimeOf } from "./runtimes.ts";
 
 export interface SetContext {
   /** Who asked. An ID, never a name. */
@@ -42,7 +50,11 @@ export interface Tuning {
   cpuWindowMs?: number;
   /** Where the runtime notes what this plugin tries to use. With it, the hub can ask a superuser about each. */
   auditPath?: string;
-  /** Addresses a superuser has already said no to, so they are not asked about again. */
+}
+
+/** What the hub holds for one driver: what was chosen for it, what it was allowed, and what it was refused. */
+export interface HeldByHub extends Held {
+  /** What a superuser has already said no to, so they are not asked about again. */
   denied?: string[];
 }
 
@@ -85,6 +97,7 @@ export class PluginHost {
   restarts = 0;
 
   #proc?: PluginProcess;
+  #launching?: Promise<void>;
   #pending = new Map<string, Pending>();
   #inflight?: { id: string; items: Map<string, Pending>; timer: Timer };
   #ticker?: Timer;
@@ -115,13 +128,29 @@ export class PluginHost {
   constructor(
     readonly manifest: DriverManifest,
     readonly dir: string,
-    private settings: Record<string, unknown>,
-    public mode: Mode,
+    held: HeldByHub,
     private log: Log,
     private gateway: PluginGateway,
     private capabilities: Capabilities,
     private tuning: Tuning = {},
-  ) {}
+  ) {
+    this.settings = held.settings;
+    this.mode = held.mode;
+    this.granted = held.granted;
+    this.#denied = held.denied ?? [];
+    // What its manifest asks for and nobody has answered yet is a question, like anything it tries later.
+    for (const grant of manifest.permissions?.network ?? []) {
+      if (!this.granted.includes(grant) && !this.#denied.includes(grant)) {
+        this.asks.set(grant, declared(grant));
+      }
+    }
+  }
+
+  private settings: Record<string, unknown>;
+  mode: Mode;
+  /** What it may reach on the network: what a superuser allowed, never what it asked for. */
+  readonly granted: string[];
+  #denied: string[];
 
   get id(): string {
     return this.manifest.id;
@@ -166,7 +195,12 @@ export class PluginHost {
     });
   }
 
-  async #launch(): Promise<void> {
+  /** Start the plugin's process. Whoever stops the plugin waits for a start that is under way. */
+  #launch(): Promise<void> {
+    return (this.#launching = this.#launchOnce());
+  }
+
+  async #launchOnce(): Promise<void> {
     if (this.status === "stopped" || this.status === "quarantined") return;
     this.status = "starting";
     this.#cpuSamples = [];
@@ -175,7 +209,8 @@ export class PluginHost {
     this.#floodSeconds = 0;
     this.#exitBecause = undefined;
     try {
-      const network = resolveNetwork(this.manifest, this.settings);
+      // Checked before anything is started: a grant that cannot be filled in is a reason not to start.
+      const network = resolveNetwork(this.granted, this.settings, this.#how);
       if (this.tuning.auditPath) {
         await Deno.writeFile(this.tuning.auditPath, new Uint8Array());
         this.#auditAt = 0;
@@ -186,6 +221,7 @@ export class PluginHost {
         manifest: this.manifest,
         settings: this.settings,
         mode: this.mode,
+        granted: this.granted,
         gateway: this.gateway,
         events: {
           onMessage: (m) => this.#onMessage(m),
@@ -196,6 +232,8 @@ export class PluginHost {
           onExit: (info) => this.#onExit(info),
         },
       });
+      // Stopped while it was starting: stop() is waiting for this, and ends the process it now has.
+      if ((this.status as HostStatus) === "stopped") return;
       this.#lastHeard = Date.now();
       this.log.append({
         type: "skillfully.plugin.started",
@@ -204,6 +242,7 @@ export class PluginHost {
         data: { version: this.manifest.version, mode: this.mode, network, restarts: this.restarts },
       });
     } catch (err) {
+      if ((this.status as HostStatus) === "stopped") return;
       if (err instanceof PluginRefused) {
         // Refused before any of its code ran. Trying again would give the same answer.
         return this.#quarantine(
@@ -549,14 +588,18 @@ export class PluginHost {
     for (const l of this.#healthListeners) l();
   }
 
+  get #how(): { id: string; settingsComeLater?: boolean } {
+    return { id: this.id, settingsComeLater: runtimeOf(this.manifest).settingsComeLater };
+  }
+
   /** What this plugin holds on the network right now, as the grants a superuser would recognize. */
   #grants(): string[] {
     const out = [`127.0.0.1:${this.gateway.port}`];
-    for (const entry of this.manifest.permissions?.network ?? []) {
+    for (const entry of this.granted) {
       if (entry === "lan" || entry === "listen") out.push(entry);
       else {
         try {
-          out.push(...resolveNetwork({ ...this.manifest, permissions: { network: [entry] } }, this.settings));
+          out.push(...resolveNetwork([entry], this.settings, this.#how));
         } catch { /* a setting it needs is not filled in yet, so this grants nothing */ }
       }
     }
@@ -589,7 +632,7 @@ export class PluginHost {
       }
       const permission = String(note.permission ?? ""), value = String(note.value ?? "");
       if (permission === "net") {
-        if (value.includes("://") || covered(value, grants) || this.tuning.denied?.includes(value)) continue;
+        if (value.includes("://") || covered(value, grants) || this.#denied.includes(value)) continue;
         const ask = classify(value);
         if (!ask || this.asks.has(value)) continue;
         this.asks.set(value, ask);
@@ -813,6 +856,7 @@ export class PluginHost {
     clearInterval(this.#ticker);
     clearInterval(this.#watchdog);
     clearTimeout(this.#restartTimer);
+    await this.#launching;
     await this.#proc?.stop();
   }
 }

@@ -2,19 +2,21 @@
 //   deno run ... tests/compat/kasa_through_hub.ts <package.tgz> <data folder>
 // Exits 0 when the module's own readings appear and its own actions switch the plug.
 
-import { startHub } from "../../core/hub.ts";
-import { installCompanionModule, readInstall } from "../../core/install.ts";
+// It uses only what the platform offers to outside tools, the way the store's own checks do.
+import { readPackage, startHub, writePackage } from "../../mod.ts";
 
 const [pkg, dataDir] = Deno.args;
-const installed = await installCompanionModule(pkg, dataDir, {
-  // The pretend plug is on this computer, which the local-network grant leaves out on purpose.
-  network: ["{host}:9999", "listen"],
-  settings: { host: "127.0.0.1", scan: false },
-  mode: "act",
-});
+const installed = await writePackage(await readPackage(await Deno.readFile(pkg)), dataDir);
 const hub = await startHub({
   dbPath: ":memory:",
-  plugins: [{ dir: installed.dir, ...(await readInstall(installed.dir)) }],
+  dataDir,
+  plugins: [{
+    dir: installed.dir,
+    // The pretend plug is on this computer, which the local-network grant leaves out on purpose.
+    granted: ["{host}:9999", "listen"],
+    settings: { host: "127.0.0.1", scan: false },
+    mode: "act",
+  }],
 });
 const host = hub.hosts.get(installed.id)!;
 

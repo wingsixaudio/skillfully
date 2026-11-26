@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>People | Skillfully</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/_hub/hub.css">
+  </head>
+  <body>
+    <main class="wide">
+      <header
+        class="brand"><svg viewBox="0 0 48 48" aria-hidden="true"><rect class="core" x="16" y="16" width="16" height="16" rx="4.5" fill="none" stroke-width="3.6"/><g class="mod"><rect x="19" y="3.5" width="10" height="7" rx="2.5"/><rect x="19" y="37.5" width="10" height="7" rx="2.5"/><rect x="3.5" y="19" width="7" height="10" rx="2.5"/><rect x="37.5" y="19" width="7" height="10" rx="2.5"/></g></svg><b>skillfully<span>.live</span></b><nav><a href="/">Home</a><a href="/account">Account</a></nav></header>
+      <section class="card" id="setup"
+        hidden><h2>Setting up</h2><div id="steps"></div><button class="small quiet" id="hideSetup" style="margin-top:12px">Hide this</button></section>
+      <section class="card" id="secPeople">
+        <h2>People</h2>
+        <div id="people"></div>
+        <form id="add" class="row"
+          style="margin-top:14px"><input id="newName" placeholder="Name of a new person" aria-label="Name of a new person" style="flex:1;min-width:180px" required><button class="small" style="margin:0;width:auto">Add</button></form>
+        <p class="msg" id="peopleMsg" role="status"></p>
+      </section>
+      <section class="card"
+        id="secRoles"><h2>Roles</h2><p class="dim">A role is a set of abilities that plugins offer. Superuser is built in and has all of them.</p><div id="roles"></div>
+       <button class="small quiet" id="newRole" style="margin-top:14px">New role</button><p class="msg" id="rolesMsg" role="status"></p></section>
+      <section class="card" id="secScreens">
+        <h2>Screens</h2>
+        <p
+          class="dim">A screen can use only the connections you give it. Until you give it one, it reaches nothing.</p>
+        <div id="screens"></div>
+        <p class="msg" id="screensMsg" role="status"></p>
+      </section>
+      <section class="card"
+        id="secDevices"><h2>Devices</h2><p class="dim">Each device starts out listening: the hub watches it and sends it nothing until you let it act.</p><div id="drivers"></div><button class="small quiet" id="addDevice" style="margin-top:14px" hidden>Add a device</button><p class="msg" id="driversMsg" role="status"></p></section>
+      <section class="card">
+        <h2>Signing in</h2>
+        <form id="policy">
+         <label for="pk">Everyone signs in with</label><select id="pk"><option value="pin">A PIN</option><option value="password">A password</option></select>
+         <label for="pl">Shortest allowed</label><input id="pl" type="number" min="4" max="64">
+         <label class="check"><input type="checkbox" id="pm"> <span>A password must have a letter and a digit</span></label>
+         <label class="check"><input type="checkbox" id="ps"> <span>Hold superusers to a stricter rule</span></label>
+         <div id="sup" hidden>
+           <label for="sk">Superusers sign in with</label><select id="sk"><option value="pin">A PIN</option><option value="password">A password</option></select>
+           <label for="sl">Shortest allowed for superusers</label><input id="sl" type="number" min="4" max="64">
+         </div>
+         <button>Save the rule</button><p class="msg" id="policyMsg" role="status"></p>
+       </form>
+      </section>
+      <dialog id="dlg">
+        <form method="dialog" id="dlgForm">
+          <h2 id="dlgTitle"></h2>
+          <div id="dlgBody"></div>
+          <div class="row"
+            style="margin-top:16px"><button id="dlgOk" value="ok">Save</button><button class="quiet" value="cancel" formnovalidate>Cancel</button></div>
+          <p class="msg" id="dlgMsg" role="status"></p>
+        </form>
+      </dialog>
+    </main>
+    <script src="/_hub/hub.js"></script>
+    <script src="/_hub/admin.js"></script>
+  </body>
+</html>

@@ -20,8 +20,11 @@ Deno.test("a plugin that declares nothing can reach nothing but the hub", async 
   const rogue = new PluginHost(
     (await loadManifest(`${FIXTURES}/rogue`)) as DriverManifest,
     `${FIXTURES}/rogue`,
-    { hubPort: hub2.port, otherPort: (other.addr as Deno.NetAddr).port, dbPath },
-    "act",
+    {
+      settings: { hubPort: hub2.port, otherPort: (other.addr as Deno.NetAddr).port, dbPath },
+      mode: "act",
+      granted: [],
+    },
     hub2.log,
     gateway,
     hub2.capabilities,

@@ -72,8 +72,12 @@ true/false.
 
 - **capabilities**: each key must be a capability the hub has a definition for, and the value must fit that
   definition's `options`.
-- **permissions.network**: every address the driver may reach. A part in braces is filled from its settings.
-  The hub grants these and its own link, and nothing else: no files, no environment, no other programs.
+- **runtime**: what runs the entry file, by name. `deno` means the entry is a program that speaks this
+  contract. A hub can have others (see `runtimes/`), and refuses a plugin that names one it does not have.
+- **permissions.network**: every address the driver asks to reach. A part in braces is filled from its
+  settings. It is a request: what the driver holds is what a superuser allowed, kept by the hub and never
+  written back to this file. Beyond that and its own link to the hub a driver gets nothing: no files, no
+  environment, no other programs.
 - **settings**: a JSON Schema. The hub hands the settings over at start. A driver stores nothing.
 - **limits**: the driver's own ceilings. The values shown are the defaults.
 

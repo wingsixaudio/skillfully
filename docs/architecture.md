@@ -22,8 +22,14 @@ the folder.
 
 A driver's manifest names what runs it. `deno` means the entry is a program that speaks the contract.
 `companion` means the entry is a built [Bitfocus Companion](https://bitfocus.io/companion) module, unchanged,
-and the hub runs it inside its own bridge (`runtimes/companion.ts`). The bridge looks like Companion to the
+and the hub runs it inside its own bridge (`runtimes/companion/`). The bridge looks like Companion to the
 module and like an ordinary driver to the hub.
+
+A runtime is a folder in `runtimes/` and a few fields that say how its plugins differ from an ordinary one:
+what program runs the entry, whether it may read its own folder, and how to read a package of its kind. The
+hub's own code names no runtime, just as it names no kind of device. Whatever a runtime says, the hub writes
+the command line, and the permissions on it are only the network a superuser allowed and, at most, the
+plugin's own folder to read.
 
 A Companion module describes itself: it tells its host what it calls its variables and its actions. The bridge
 passes those on under the `generic` capability, so nobody has to describe a module to the hub before it works:
@@ -44,8 +50,50 @@ A device added this way starts with **no access to the network**. When it tries 
 shows a superuser exactly what, in plain words, and it gets only what they allow. It works like a phone asking
 before an app uses the camera, and it means a module needs no description written for it in advance.
 
+### What the hub holds for a driver
+
+The rule above is the rule for every driver. A manifest's `permissions.network` is what the driver **asks
+for**. What it holds is in the hub's own record of it, one per driver, in the hub's database:
+
+| In the record | Decided by                                                                      |
+| ------------- | ------------------------------------------------------------------------------- |
+| Mode          | A superuser, with their PIN. Listen until then                                  |
+| Settings      | A superuser, in the form the driver describes                                   |
+| Granted       | A superuser's answers. The store can answer in advance for what it lists        |
+| Denied        | A superuser's "do not ask again"                                                |
+| Origin        | Where an added device came from: a file or the store, with its checksum and pin |
+
+A driver is always started from its record. Nothing in a plugin's folder is ever changed by the hub: a folder
+says what the plugin is, and the record says what this hub decided about it.
+
+Whoever starts a hub with a plugin folder has chosen that plugin, so the first time the hub sees it, it holds
+what its manifest asks for. After that the record stands. A newer version that asks for more is not given it:
+the admin page shows the new request beside anything else the driver tried, and a superuser answers.
+
 An action is a **trigger**: something to do, not a value to hold. The hub cannot read a trigger back, so the
 log says `command.done`, never `command.confirmed`, and two presses in a row are both sent, in order.
+
+## The hub's own code
+
+| File               | What it holds                                                              |
+| ------------------ | -------------------------------------------------------------------------- |
+| `core/hub.ts`      | Puts the parts together and answers the door                               |
+| `core/devices.ts`  | The drivers a hub runs, each started from its record                       |
+| `core/registry.ts` | The one record per driver                                                  |
+| `core/host.ts`     | One running driver: its state, its writes, its limits, what it asks for    |
+| `core/process.ts`  | The command line a driver runs under, and the one door it connects through |
+| `core/runtimes.ts` | What a runtime may say about its plugins                                   |
+| `core/packages.ts` | Reading and unpacking a package. Runs none of it                           |
+| `core/screens.ts`  | Screens, who may use each, and the phones connected through them           |
+| `core/admin.ts`    | A superuser's tools                                                        |
+| `core/accounts.ts` | People, roles and signing in                                               |
+| `core/store.ts`    | Reading the store's list and checking what it downloads                    |
+| `core/web/`        | The hub's own pages, as ordinary HTML, CSS and JavaScript files            |
+| `mod.ts`           | The only file a tool outside this repository may import                    |
+
+The hub's own pages load their scripts from `core/web/` and run nothing else: a script written into a page
+does not run, whoever wrote it there. A page is read from its file each time it is asked for, so a change
+shows on the next reload.
 
 ## How they connect
 

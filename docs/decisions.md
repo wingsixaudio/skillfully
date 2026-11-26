@@ -105,7 +105,7 @@ cookie is hidden from scripts and never sent from other sites, and screens, whic
 it at all.
 
 **A Companion module runs unchanged, inside the same sandbox as any driver.** The bridge and the module share
-one process with the permissions on its command line: the network its manifest lists and read access to its
+one process with the permissions on its command line: the network a superuser allowed and read access to its
 own folder. No write, no environment, no subprocess. The module is shown an empty environment and its messages
 to "Companion" are answered by the bridge. A test module tries all of it and is refused each time. Where
 Companion would give a module the whole network, this hub makes the grant visible.
@@ -117,6 +117,34 @@ the exact addresses it uses. The checker and the pull request report spell both 
 
 **What a module names is kept as it named it.** Keys may now carry capitals, underscores and dots in the parts
 a driver chooses, because module authors already use them and renaming would make two names collide.
+
+**A manifest asks. The hub's record grants.** There used to be two rules: a device added from the admin page
+asked before reaching anything, and a driver in the plugins folder was simply given what its manifest listed.
+And when a superuser allowed something, the hub rewrote the device's own `plugin.json`. Now there is one rule
+and one place. Every driver is started from the hub's record of it, the manifest is only ever a request, and
+the hub never writes to a plugin's folder. A plugin the hub is started with holds what it asks for the first
+time it is seen, because whoever started the hub chose it. A later version that asks for more waits for an
+answer, so an update cannot widen its own reach.
+
+**One record per driver, in the hub's database.** Mode, settings, what it may reach, what it was refused and
+where it came from were spread over a file beside the plugin, the plugin's manifest, and a list in the code
+that put the simulators in Act. They are one record now, and the mode a superuser chooses is kept for every
+driver. The simulators are put in Act by the `hub` task's `--act` flag, which only applies the first time a
+hub sees a driver.
+
+**Runtimes are named, not built in.** The hub's core had four files that asked whether a driver was a
+Companion module. A runtime now says in a few fields how its plugins differ, and lives with its bridge and its
+package reader under `runtimes/`. The contract takes a runtime name instead of a fixed list, and a hub refuses
+a plugin that names one it does not have. A runtime cannot widen the sandbox: the hub still writes the command
+line.
+
+**The hub's own pages are files, and run only the hub's own scripts.** The admin page was nine hundred lines
+of JavaScript inside a string, which nobody could lint, format or read comfortably. The pages are ordinary
+files in `core/web/` now, and their policy no longer allows a script written into a page to run at all.
+
+**One file for outside tools.** The plugin store checks and builds packages with the platform's own code, so
+the two can never disagree. It used to import five internal files by path. `mod.ts` is now the whole of what a
+tool outside this repository may import, and everything behind it can be rearranged freely.
 
 **A dropped-in module starts in Listen mode.** It connects and reports, and the hub sends it nothing until
 someone decides it may act.

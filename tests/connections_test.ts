@@ -2,9 +2,20 @@
 // A screen's own manifest is a request. Roles come after. A screen is never more than all three.
 
 import { assert, assertEquals } from "./assert.ts";
-import { CONTROLS, FIXTURES, hubWith, LEVEL, ofType, Phone, SIM, sleep, SWITCH, until } from "./helpers.ts";
+import {
+  CONTROLS,
+  FIXTURES,
+  hubWith,
+  LEVEL,
+  ofType,
+  Phone,
+  SIM,
+  sleep,
+  SWITCH,
+  unpacked,
+  until,
+} from "./helpers.ts";
 import { Capabilities } from "../core/capabilities.ts";
-import { installCompanionModule, readInstall } from "../core/install.ts";
 
 const OUTLET = "switch/outlet/1/on";
 
@@ -142,16 +153,16 @@ Deno.test("a Companion module's actions can be used from a screen once it is giv
     }
   })();
   const dataDir = await Deno.makeTempDir({ prefix: "skillfully-data-" });
-  const installed = await installCompanionModule(
+  const installed = await unpacked(
     `${FIXTURES}/companion/skillfully-test-lamp-1.0.0.tgz`,
     dataDir,
     {
-      network: ["{host}:{port}"],
+      granted: ["{host}:{port}"],
       settings: { host: "127.0.0.1", port: (lamp.addr as Deno.NetAddr).port },
       mode: "act",
     },
   );
-  const hub = await hubWith([{ dir: installed.dir, ...(await readInstall(installed.dir)) }, {
+  const hub = await hubWith([installed.config, {
     dir: CONTROLS,
   }]);
   try {

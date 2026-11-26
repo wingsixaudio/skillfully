@@ -1,11 +1,11 @@
 // Start the hub with every plugin in the plugins folder.
 //   deno task hub            listens on 127.0.0.1:8080
 //   deno task hub --lan      listens on every address, so a phone on the same network can connect
+//   deno task hub --act=a,b  those drivers start in Act the first time this hub sees them
 //
-// Until install and settings screens exist, this file is where a hub is configured.
+// Everything else about a driver is decided on the admin page and kept in the hub's own record of it.
 
 import { type PluginConfig, startHub } from "./hub.ts";
-import { readInstall } from "./install.ts";
 import { here } from "./paths.ts";
 import { STORE_URL } from "./store.ts";
 
@@ -15,28 +15,31 @@ const portArg = Deno.args.find((a) => a.startsWith("--port="));
 // --data=<folder> keeps this hub's log and people somewhere other than ./data.
 const dataDir = Deno.args.find((a) => a.startsWith("--data="))?.slice(7) ?? `${root}/data`;
 
-// Per-plugin choices. A driver not listed here starts in Listen mode.
-const CHOICES: Record<string, Omit<PluginConfig, "dir">> = {
-  "sim-console": { mode: "act" },
-  "sim-switch": { mode: "act" },
-};
+// A driver starts in Listen unless whoever starts the hub says otherwise. The simulators that come with
+// the hub are named in the hub task, so there is something to move on a first run.
+const act = new Set(
+  (Deno.args.find((a) => a.startsWith("--act="))?.slice(6) ?? "").split(",").filter(Boolean),
+);
 
-const plugins: PluginConfig[] = [];
-for await (const entry of Deno.readDir(`${root}/plugins`)) {
-  if (entry.isDirectory) plugins.push({ dir: `${root}/plugins/${entry.name}`, ...CHOICES[entry.name] });
+async function folders(root: string): Promise<PluginConfig[]> {
+  const found: PluginConfig[] = [];
+  try {
+    for await (const entry of Deno.readDir(root)) {
+      if (entry.isDirectory) {
+        found.push({
+          dir: `${root}/${entry.name}`,
+          ...(act.has(entry.name) ? { mode: "act" as const } : {}),
+        });
+      }
+    }
+  } catch { /* no such folder: nothing has been added to this hub */ }
+  return found.sort((a, b) => a.dir.localeCompare(b.dir));
 }
-plugins.sort((a, b) => a.dir.localeCompare(b.dir));
-
-// Plugins a person added to this hub live with its data, each with the choices made when it was added.
-const added: PluginConfig[] = [];
-try {
-  for await (const entry of Deno.readDir(`${dataDir}/plugins`)) {
-    if (!entry.isDirectory) continue;
-    const dir = `${dataDir.replace(/[\\/]$/, "")}/plugins/${entry.name}`;
-    added.push({ dir, ...(await readInstall(dir)) });
-  }
-} catch { /* nothing has been added to this hub */ }
-plugins.push(...added.sort((a, b) => a.dir.localeCompare(b.dir)));
+// The plugins that come with the hub, then the devices a superuser added, which live with its data.
+const plugins = [
+  ...await folders(`${root}/plugins`),
+  ...await folders(`${dataDir.replace(/[\\/]$/, "")}/plugins`),
+];
 
 await Deno.mkdir(dataDir, { recursive: true });
 const hub = await startHub({

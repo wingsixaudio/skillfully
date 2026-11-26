@@ -2,99 +2,16 @@
 // Everything a superuser does there goes through these routes.
 
 import { assert, assertEquals } from "./assert.ts";
-import { CONTROLS, FIXTURES, OWNER_PIN, Phone, until } from "./helpers.ts";
-import { startHub } from "../core/hub.ts";
+import { addingHub, FIXTURES, OWNER_PIN, Phone, pretendLamp, until } from "./helpers.ts";
 
 const PACKAGE = `${FIXTURES}/companion/skillfully-test-lamp-1.0.0.tgz`;
 
-function pretendLamp() {
-  const server = Deno.listen({ hostname: "127.0.0.1", port: 0 });
-  const heard: string[] = [];
-  const conns = new Set<Deno.Conn>();
-  (async () => {
-    for await (const conn of server) {
-      conns.add(conn);
-      (async () => {
-        let power = "off";
-        try {
-          for await (const chunk of conn.readable) {
-            for (const line of new TextDecoder().decode(chunk).split("\n").filter(Boolean)) {
-              heard.push(line);
-              if (line === "on" || line === "off") power = line;
-              await conn.write(new TextEncoder().encode(`power=${power} level=0\n`));
-            }
-          }
-        } catch {
-          /* the module went away */
-        } finally {
-          conns.delete(conn);
-        }
-      })();
-    }
-  })();
-  return {
-    port: (server.addr as Deno.NetAddr).port,
-    heard,
-    get connections() {
-      return conns.size;
-    },
-    close() {
-      for (const c of conns) {
-        try {
-          c.close();
-        } catch { /* already closed */ }
-      }
-      server.close();
-    },
-  };
-}
-
 /** A hub with a data folder, an owner, and the Controls screen: what a team has before adding any device. */
-async function emptyHub() {
-  const dataDir = await Deno.makeTempDir({ prefix: "skillfully-data-" });
-  const hub = await startHub({ dbPath: ":memory:", plugins: [{ dir: CONTROLS }], dataDir });
-  const claimed = await hub.accounts.claim(hub.accounts.claimCode, "Owner", OWNER_PIN, "test");
-  if (!claimed.ok) throw new Error(claimed.message);
-  const base = `http://127.0.0.1:${hub.port}`;
-  const cookie = `sk_session=${claimed.token}`;
-  const post = async (path: string, body: unknown, as = cookie) => {
-    const res = await fetch(base + path, {
-      method: "POST",
-      headers: { cookie: as, "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return { status: res.status, body: await res.json() };
-  };
-  const send = async (bytes: Uint8Array, as = cookie, more: Record<string, string> = {}) => {
-    const res = await fetch(base + "/admin/api/module/inspect", {
-      method: "POST",
-      headers: { cookie: as, "content-type": "application/gzip", ...more },
-      body: bytes as BodyInit,
-    });
-    return { status: res.status, body: await res.json() };
-  };
-  const all = async () => await (await fetch(base + "/admin/api/all", { headers: { cookie } })).json();
-  const device = async (id: string) => (await all()).drivers.find((d: { id: string }) => d.id === id);
-  return {
-    hub,
-    dataDir,
-    owner: { id: claimed.person.id, token: claimed.token },
-    post,
-    send,
-    all,
-    device,
-    async close() {
-      await hub.stop();
-      await Deno.remove(dataDir, { recursive: true }).catch(() => {});
-    },
-  };
-}
-
 const exists = async (path: string) => !!(await Deno.stat(path).catch(() => null));
 
 Deno.test("a superuser adds a device, fills in its settings, and allows what it asks to reach", async () => {
   const lamp = pretendLamp();
-  const h = await emptyHub();
+  const h = await addingHub();
   try {
     // Choosing the package shows what it is and what it could do. Nothing is added by looking.
     const seen = await h.send(await Deno.readFile(PACKAGE));
@@ -145,8 +62,7 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
       settings: { host: "127.0.0.1", port: lamp.port },
     });
     assertEquals(saved.body, { ok: true, changed: ["host", "port"] });
-    const kept = JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`));
-    assertEquals(kept.settings, { host: "127.0.0.1", port: lamp.port });
+    assertEquals(h.hub.devices.record(id).settings, { host: "127.0.0.1", port: lamp.port });
     // The log says which settings changed, never what they were set to.
     assertEquals(h.hub.log.read({ type: "skillfully.plugin.settings", limit: 5 })[0].data, {
       changed: ["host", "port"],
@@ -174,10 +90,12 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
     assertEquals(yes.body, { ok: true, allowed: [wanted], denied: [], revoked: [] });
     await until("it connects to the lamp", () => host().state.get("generic/reading/power") === "off", 8000);
     assertEquals(host().health.status, "ok");
-    assertEquals(host().manifest.permissions?.network, [wanted]);
+    // What it was allowed is the hub's record. Its own manifest still asks for nothing, and is never rewritten.
+    assertEquals(host().granted, [wanted]);
+    assertEquals(h.hub.devices.record(id).granted, [wanted]);
     assertEquals(
       JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/plugin.json`)).permissions.network,
-      [wanted],
+      [],
     );
     const now = await h.device(id);
     assertEquals(now.asks, []);
@@ -189,7 +107,7 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
     // Listening, nothing is sent. Switched to Act, with the PIN, the choice is kept too.
     assert(!(await host().set("generic/action/on", true, { via: "test" })).ok);
     assert((await h.post("/admin/api/driver/mode", { id, mode: "act", confirm: OWNER_PIN })).body.ok);
-    assertEquals(JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`)).mode, "act");
+    assertEquals(h.hub.devices.record(id).mode, "act");
     const phone = await Phone.connect(h.hub as never, h.owner, "controls");
     await until(
       "the screen it was given sees it",
@@ -206,7 +124,7 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
 
 Deno.test("what a device tries is shown for what it is, and a no is remembered", async () => {
   const lamp = pretendLamp();
-  const h = await emptyHub();
+  const h = await addingHub();
   try {
     const seen = await h.send(await Deno.readFile(PACKAGE));
     const { id } =
@@ -246,10 +164,7 @@ Deno.test("what a device tries is shown for what it is, and a no is remembered",
     // Saying "do not ask again" is kept, across the restart that follows and the next start of the hub.
     const values = d.asks.map((a: { value: string }) => a.value);
     assert((await allow({ deny: values })).body.ok);
-    assertEquals(
-      JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`)).denied.sort(),
-      [...values].sort(),
-    );
+    assertEquals([...h.hub.devices.record(id).denied].sort(), [...values].sort());
     await until("it is back", () => host().state.get("generic/reading/power") === "off", 8000);
     assert((await host().set("generic/action/snoop", true, { via: "test" })).ok);
     await until(
@@ -272,7 +187,7 @@ Deno.test("what a device tries is shown for what it is, and a no is remembered",
 });
 
 Deno.test("the same module can be added again for a second device, and each is its own", async () => {
-  const h = await emptyHub();
+  const h = await addingHub();
   try {
     const bytes = await Deno.readFile(PACKAGE);
     const add = async (name: string) => {
@@ -287,7 +202,7 @@ Deno.test("the same module can be added again for a second device, and each is i
     };
     const one = await add("Left lamp"), two = await add("Right lamp");
     assertEquals([one.id, two.id], ["companion-skillfully-test-lamp", "companion-skillfully-test-lamp-2"]);
-    assertEquals(h.hub.hosts.get(two.id)!.manifest.permissions?.network, ["lan", "listen"]);
+    assertEquals(h.hub.hosts.get(two.id)!.granted, ["lan", "listen"]);
     await h.post("/admin/api/driver/settings", { id: two.id, settings: { host: "192.168.50.9" } });
     const drivers = (await h.all()).drivers;
     assertEquals(drivers.map((d: { name: string }) => d.name), ["Left lamp", "Right lamp"]);
@@ -316,7 +231,7 @@ Deno.test("the same module can be added again for a second device, and each is i
 });
 
 Deno.test("removing a device stops it, deletes it, and takes it away from every screen", async () => {
-  const h = await emptyHub();
+  const h = await addingHub();
   try {
     const seen = await h.send(await Deno.readFile(PACKAGE));
     const { id } = (await h.post("/admin/api/module/add", {
@@ -342,7 +257,7 @@ Deno.test("removing a device stops it, deletes it, and takes it away from every 
 });
 
 Deno.test("only a superuser's own page can add a device, and a bad package adds nothing", async () => {
-  const h = await emptyHub();
+  const h = await addingHub();
   try {
     const bytes = await Deno.readFile(PACKAGE);
     const sam = h.hub.accounts.addPerson(h.owner.id, "Sam");
@@ -392,7 +307,7 @@ Deno.test("only a superuser's own page can add a device, and a bad package adds 
 });
 
 Deno.test("a secret setting is kept, used, never sent back, and never logged", async () => {
-  const h = await emptyHub();
+  const h = await addingHub();
   try {
     const seen = await h.send(await Deno.readFile(PACKAGE));
     const { id } = (await h.post("/admin/api/module/add", {
@@ -424,8 +339,7 @@ Deno.test("a secret setting is kept, used, never sent back, and never logged", a
       settings: { host: "192.168.50.10", password: "" },
     });
     assertEquals(kept.body.changed, ["host"]);
-    const onDisk = JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`));
-    assertEquals(onDisk.settings.password, "hunter2-hunter2");
+    assertEquals(h.hub.devices.record(id).settings.password, "hunter2-hunter2");
   } finally {
     await h.close();
   }

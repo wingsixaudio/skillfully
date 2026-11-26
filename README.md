@@ -15,7 +15,7 @@ soundboard and a simulated switch.
 |                                                           |                                                                                                                                      |
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | **Capabilities** (`capabilities/`)                        | What a soundboard is and what a switch is, as data. Adding a kind of device is adding a file.                                        |
-| **Drivers** (`plugins/sim-console`, `plugins/sim-switch`) | Each runs as its own process, limited to the addresses its manifest declares.                                                        |
+| **Drivers** (`plugins/sim-console`, `plugins/sim-switch`) | Each runs as its own process, limited to the addresses a superuser allowed it. Its manifest only asks.                               |
 | **A screen** (`plugins/one-fader`)                        | One ear-mix fader. A web page in a sandbox that can reach the hub only by asking, and only for what the person using it was granted. |
 | **A skill** (`plugins/explain-a-change`)                  | Instructions that teach an agent to answer "why did that change?" from the log.                                                      |
 | **The hub** (`core/`)                                     | Plugin processes, the write queue, people and sign-in, roles, and the log. It names no capability.                                   |
@@ -90,9 +90,11 @@ The first run downloads one library (the JSON Schema validator). After that it r
 ```
 capabilities/  What each kind of device is, as data
 contract/      The contract: schemas (v1/), types, validators, and a plain-language guide
-core/          The hub
+core/          The hub. Its own pages are ordinary files in core/web/
+runtimes/      What can run a driver: an ordinary program, or a Companion module
 plugins/       Drivers, screens and skills. One folder each, with a plugin.json
 sdk/           An optional helper for drivers written for Deno
+mod.ts         The only file a tool outside this repository may import
 conformance/   The conformance test for drivers
 tests/         The test suite, with misbehaving test plugins
 docs/          Architecture, decisions and what is still open

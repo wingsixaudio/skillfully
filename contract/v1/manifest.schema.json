@@ -91,11 +91,9 @@
           "$ref": "#/$defs/license"
         },
         "runtime": {
-          "description": "What runs the entry file. deno: the entry is a program that speaks this contract. companion: the entry is a built Bitfocus Companion module, which the hub runs inside its own bridge.",
-          "enum": [
-            "deno",
-            "companion"
-          ]
+          "description": "What runs the entry file, by name. deno: the entry is a program that speaks this contract. A hub may have other runtimes, each of which runs a different kind of entry on the plugin's behalf, and refuses a plugin that names one it does not have.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,30}$"
         },
         "entry": {
           "description": "Program to run, relative to the plugin folder. It may not leave the folder.",

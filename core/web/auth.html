@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>{{ title }} | Skillfully</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/_hub/hub.css">
+  </head>
+  <body data-mode="{{mode}}">
+    <main>
+      <header
+        class="brand"><svg viewBox="0 0 48 48" aria-hidden="true"><rect class="core" x="16" y="16" width="16" height="16" rx="4.5" fill="none" stroke-width="3.6"/><g class="mod"><rect x="19" y="3.5" width="10" height="7" rx="2.5"/><rect x="19" y="37.5" width="10" height="7" rx="2.5"/><rect x="3.5" y="19" width="7" height="10" rx="2.5"/><rect x="37.5" y="19" width="7" height="10" rx="2.5"/></g></svg><b>skillfully<span>.live</span></b><nav id="nav"></nav></header>
+      <section class="card">
+        <h1>{{ title }}</h1>
+        <p class="dim" id="lead"></p>
+        <form id="form" autocomplete="off">
+          <div id="fields"></div>
+          <button type="submit" id="go">Continue</button>
+          <p class="msg" id="msg" role="status"></p>
+        </form>
+      </section>
+      <section class="card" id="extra" hidden></section>
+    </main>
+    <script src="/_hub/hub.js"></script>
+    <script src="/_hub/auth.js"></script>
+  </body>
+</html>

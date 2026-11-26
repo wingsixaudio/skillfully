@@ -3,8 +3,7 @@
 
 import { createHash } from "node:crypto";
 import { assert, assertEquals } from "./assert.ts";
-import { CONTROLS, FIXTURES, OWNER_PIN, until } from "./helpers.ts";
-import { startHub } from "../core/hub.ts";
+import { addingHub, FIXTURES, OWNER_PIN, pretendLamp, until } from "./helpers.ts";
 import { resolveNetwork } from "../core/process.ts";
 import { grantWords } from "../core/asks.ts";
 
@@ -39,76 +38,9 @@ function pretendStore(modules: unknown[] = [listing()], packageBytes: Uint8Array
   return { url: `http://127.0.0.1:${server.addr.port}/index.json`, asked, close: () => server.shutdown() };
 }
 
-function pretendLamp() {
-  const server = Deno.listen({ hostname: "127.0.0.1", port: 0 });
-  const conns = new Set<Deno.Conn>();
-  (async () => {
-    for await (const conn of server) {
-      conns.add(conn);
-      (async () => {
-        try {
-          for await (const _ of conn.readable) {
-            await conn.write(new TextEncoder().encode("power=off level=0\n"));
-          }
-        } catch {
-          /* the module went away */
-        } finally {
-          conns.delete(conn);
-        }
-      })();
-    }
-  })();
-  return {
-    port: (server.addr as Deno.NetAddr).port,
-    close() {
-      for (const c of conns) {
-        try {
-          c.close();
-        } catch { /* already closed */ }
-      }
-      server.close();
-    },
-  };
-}
-
-async function hubWithStore(storeUrl?: string) {
-  const dataDir = await Deno.makeTempDir({ prefix: "skillfully-data-" });
-  const hub = await startHub({
-    dbPath: ":memory:",
-    plugins: [{ dir: CONTROLS }],
-    dataDir,
-    ...(storeUrl ? { storeUrl } : {}),
-  });
-  const claimed = await hub.accounts.claim(hub.accounts.claimCode, "Owner", OWNER_PIN, "test");
-  if (!claimed.ok) throw new Error(claimed.message);
-  const base = `http://127.0.0.1:${hub.port}`;
-  const cookie = `sk_session=${claimed.token}`;
-  return {
-    hub,
-    dataDir,
-    owner: claimed.person.id,
-    get: async (path: string, as = cookie) => {
-      const res = await fetch(base + path, { headers: { cookie: as } });
-      return { status: res.status, body: await res.json() };
-    },
-    post: async (path: string, body: unknown, as = cookie) => {
-      const res = await fetch(base + path, {
-        method: "POST",
-        headers: { cookie: as, "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      return { status: res.status, body: await res.json() };
-    },
-    async close() {
-      await hub.stop();
-      await Deno.remove(dataDir, { recursive: true }).catch(() => {});
-    },
-  };
-}
-
 Deno.test("a device added from the store holds what the store allows in advance, and is not asked about it", async () => {
   const store = pretendStore(), lamp = pretendLamp();
-  const h = await hubWithStore(store.url);
+  const h = await addingHub(store.url);
   try {
     const shelf = await h.get("/admin/api/store");
     assertEquals(shelf.body.on, true);
@@ -137,10 +69,9 @@ Deno.test("a device added from the store holds what the store allows in advance,
     assert(added.body.ok, JSON.stringify(added.body));
     const id = added.body.id;
     const host = () => h.hub.hosts.get(id)!;
-    assertEquals(host().manifest.permissions?.network, ["{host}:{port}"]);
+    assertEquals(host().granted, ["{host}:{port}"]);
     assertEquals(host().mode, "listen", "being in the store does not make it act by itself");
-    const kept = JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`));
-    assertEquals(kept.store, {
+    assertEquals(h.hub.devices.record(id).origin?.store, {
       id: "skillfully-test-lamp",
       repo: "https://github.com/wingsixaudio/skillfully",
       commit: "0".repeat(40),
@@ -157,7 +88,7 @@ Deno.test("a device added from the store holds what the store allows in advance,
     // It can start before its address is known, so it can say what settings it takes.
     await until("it describes its settings", () => !!host().settingsForm, 8000);
     assertEquals(
-      resolveNetwork(host().manifest, {}),
+      resolveNetwork(host().granted, {}, { settingsComeLater: true }),
       [],
       "a grant that waits on a setting gives nothing yet",
     );
@@ -191,7 +122,7 @@ Deno.test("a package that is not what the store says it built is thrown away", a
   const tampered = PACKAGE.slice();
   tampered[tampered.length - 9] ^= 1;
   const store = pretendStore([listing()], tampered);
-  const h = await hubWithStore(store.url);
+  const h = await addingHub(store.url);
   try {
     const got = await h.post("/admin/api/store/fetch", { id: "skillfully-test-lamp" });
     assert(
@@ -222,7 +153,7 @@ Deno.test("what the store lists is data: anything malformed or reaching past the
     "not an entry",
     null,
   ]);
-  const h = await hubWithStore(store.url);
+  const h = await addingHub(store.url);
   try {
     const shelf = await h.get("/admin/api/store");
     assertEquals(shelf.body.modules.map((m: { id: string }) => m.id), ["skillfully-test-lamp"]);
@@ -240,7 +171,7 @@ Deno.test("what the store lists is data: anything malformed or reaching past the
 });
 
 Deno.test("a hub with no store, or a store it cannot reach, still works and says so plainly", async () => {
-  const none = await hubWithStore();
+  const none = await addingHub();
   try {
     assertEquals((await none.get("/admin/api/store")).body, { ok: true, on: false, modules: [] });
   } finally {
@@ -249,7 +180,7 @@ Deno.test("a hub with no store, or a store it cannot reach, still works and says
   const gone = pretendStore();
   const url = gone.url;
   await gone.close();
-  const h = await hubWithStore(url);
+  const h = await addingHub(url);
   try {
     const shelf = await h.get("/admin/api/store");
     assertEquals(shelf.body.modules, []);
