@@ -53,6 +53,8 @@ type Timer = ReturnType<typeof setTimeout>;
 
 const COMMAND_TIMEOUT_MS = 2000;
 const SILENCE_MS = 6000;
+/** Actions of the same name that may wait behind one another. */
+const TRIGGER_QUEUE_MAX = 50;
 const MB = 1024 * 1024;
 /** A plugin stopped for breaking a limit this many times is quarantined. */
 const STRIKES = 3;
@@ -86,6 +88,7 @@ export class PluginHost {
   #floodSeconds = 0;
   /** Why the plugin last failed to start or stopped, in a sentence. Shown to whoever is waiting for it. */
   #lastProblem = "";
+  #triggerQueue: { key: string; item: Pending }[] = [];
   #logTokens = LOG_BURST;
   #logRefilledAt = 0;
   #logDropped = 0;
@@ -269,7 +272,7 @@ export class PluginHost {
     for (const [key, value] of Object.entries(values)) {
       // A value the manifest never promised, or of the wrong kind, is not taken on trust.
       const found = this.capabilities.resolve(declared, key);
-      if (!found || this.capabilities.kindProblem(found, value)) {
+      if (!found || found.def.kind === "trigger" || this.capabilities.kindProblem(found, value)) {
         undeclared++;
         continue;
       }
@@ -349,7 +352,14 @@ export class PluginHost {
       return refuse("skillfully.command.rejected", "plugin_down", `${this.id} is not running`);
     }
 
-    // Newest value wins. An older value still waiting for the same key is dropped.
+    // A value: newest wins. A trigger: every one counts, so a second waits its turn behind the first.
+    if (this.#isTrigger(key) && (this.#pending.has(key) || this.#inflight?.items.has(key))) {
+      return new Promise((resolve) => {
+        if (this.#triggerQueue.length >= TRIGGER_QUEUE_MAX) {
+          resolve(refuse("skillfully.command.rejected", "busy", `${this.id} has too many actions waiting`));
+        } else this.#triggerQueue.push({ key, item: { value, ctx: full, superseded: 0, resolve } });
+      });
+    }
     const waiting = this.#pending.get(key);
     waiting?.resolve({ ok: true, superseded: true });
     return new Promise((resolve) => {
@@ -362,7 +372,20 @@ export class PluginHost {
     });
   }
 
+  #isTrigger(key: string): boolean {
+    return this.capabilities.resolve(this.manifest.capabilities, key)?.def.kind === "trigger";
+  }
+
   #flush(): void {
+    // Triggers that were waiting behind another of the same name move up once their key is free.
+    for (let i = 0; i < this.#triggerQueue.length;) {
+      const { key, item } = this.#triggerQueue[i];
+      if (this.#pending.has(key) || this.#inflight?.items.has(key)) i++;
+      else {
+        this.#pending.set(key, item);
+        this.#triggerQueue.splice(i, 1);
+      }
+    }
     if (
       this.#inflight || !this.#pending.size || this.status !== "running" || this.mode !== "act" || !this.#proc
     ) return;
@@ -416,7 +439,21 @@ export class PluginHost {
         parentid: item.sentId,
       };
       const ms = Math.round(performance.now() - (item.sentAt ?? 0));
-      if (key in values && !(key in errors)) {
+      if (key in values && !(key in errors) && this.#isTrigger(key)) {
+        // The driver says it did it. There is no value to read back, so the log says done, not confirmed.
+        this.log.append({
+          ...base,
+          type: "skillfully.command.done",
+          data: { key, requested: item.value, ms },
+        });
+        item.resolve({
+          ok: true,
+          superseded: false,
+          value: item.value,
+          requested: item.value,
+          adjusted: false,
+        });
+      } else if (key in values && !(key in errors)) {
         const value = values[key];
         const before = this.state.get(key) ?? null;
         this.state.set(key, value);
@@ -466,6 +503,12 @@ export class PluginHost {
         data: { key, requested: item.value, code, message },
       });
       item.resolve({ ok: false, error: { code, message } });
+    }
+  }
+
+  #failQueued(code: string, message: string): void {
+    for (const { key, item } of this.#triggerQueue.splice(0)) {
+      this.#failItems(new Map([[key, item]]), code, message);
     }
   }
 
@@ -627,6 +670,7 @@ export class PluginHost {
     const waiting = new Map(this.#pending);
     this.#pending.clear();
     this.#failItems(waiting, "plugin_down", `${this.id} stopped before this was sent`);
+    this.#failQueued("plugin_down", `${this.id} stopped before this was sent`);
     this.log.append({
       // Stopped on purpose (by a person, or by the hub over a limit) is not a crash.
       type: info.expected || this.#exitBecause ? "skillfully.plugin.stopped" : "skillfully.plugin.crashed",
@@ -663,6 +707,7 @@ export class PluginHost {
       const waiting = new Map(this.#pending);
       this.#pending.clear();
       this.#failItems(waiting, "listen_mode", `${this.id} was switched to Listen before this was sent`);
+      this.#failQueued("listen_mode", `${this.id} was switched to Listen before this was sent`);
     }
     this.#proc?.send({ type: "mode", mode });
   }

@@ -5,6 +5,7 @@
 // Until install and settings screens exist, this file is where a hub is configured.
 
 import { type PluginConfig, startHub } from "./hub.ts";
+import { readInstall } from "./install.ts";
 import { here } from "./paths.ts";
 
 const root = here("..", import.meta.url).replace(/\/$/, "");
@@ -24,6 +25,17 @@ for await (const entry of Deno.readDir(`${root}/plugins`)) {
   if (entry.isDirectory) plugins.push({ dir: `${root}/plugins/${entry.name}`, ...CHOICES[entry.name] });
 }
 plugins.sort((a, b) => a.dir.localeCompare(b.dir));
+
+// Plugins a person added to this hub live with its data, each with the choices made when it was added.
+const added: PluginConfig[] = [];
+try {
+  for await (const entry of Deno.readDir(`${dataDir}/plugins`)) {
+    if (!entry.isDirectory) continue;
+    const dir = `${dataDir.replace(/[\\/]$/, "")}/plugins/${entry.name}`;
+    added.push({ dir, ...(await readInstall(dir)) });
+  }
+} catch { /* nothing has been added to this hub */ }
+plugins.push(...added.sort((a, b) => a.dir.localeCompare(b.dir)));
 
 await Deno.mkdir(dataDir, { recursive: true });
 const hub = await startHub({

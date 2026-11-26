@@ -36,7 +36,8 @@ export type Access = "read" | "write";
 
 export interface DriverManifest extends ManifestBase {
   kind: "driver";
-  runtime: "deno";
+  /** deno: the entry speaks this contract. companion: the entry is a built Companion module run inside the hub's bridge. */
+  runtime: "deno" | "companion";
   entry: string;
   /** Capability name to the options this driver declares for it. */
   capabilities: Record<string, Record<string, unknown>>;
@@ -82,9 +83,12 @@ export interface ValueDef {
   key: string;
   title: string;
   description?: string;
-  kind: "number" | "text" | "boolean";
+  /** A trigger is something to do. It holds no value, so nothing is read back. */
+  kind: "number" | "text" | "boolean" | "trigger";
   unit?: string;
   writable: boolean;
+  /** Parts in braces that are names the driver chooses, not numbers. */
+  names?: string[];
   bounds?: Record<string, string>;
   min?: number | string;
   max?: number | string;

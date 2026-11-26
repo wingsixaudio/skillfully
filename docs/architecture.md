@@ -18,6 +18,28 @@ The first use is ear mixes for a band or production team. Nothing in the hub is 
 Every plugin is a folder with a `plugin.json`. The hub reads that file before it runs or serves anything from
 the folder.
 
+### Drivers the hub did not have to wait for
+
+A driver's manifest names what runs it. `deno` means the entry is a program that speaks the contract.
+`companion` means the entry is a built [Bitfocus Companion](https://bitfocus.io/companion) module, unchanged,
+and the hub runs it inside its own bridge (`runtimes/companion.ts`). The bridge looks like Companion to the
+module and like an ordinary driver to the hub.
+
+A Companion module describes itself: it tells its host what it calls its variables and its actions. The bridge
+passes those on under the `generic` capability, so nobody has to describe a module to the hub before it works:
+
+| The module has  | The hub shows                                             |
+| --------------- | --------------------------------------------------------- |
+| A variable `x`  | `generic/reading/x`, read-only text, and its title        |
+| An action `x`   | `generic/action/x`, a trigger, with its title and options |
+| A status        | The driver's health, with the module's own words          |
+| A settings form | Settings handed to it at start, over its own defaults     |
+
+`deno task add-module <package.tgz>` adds one. The package is the same file Companion installs.
+
+An action is a **trigger**: something to do, not a value to hold. The hub cannot read a trigger back, so the
+log says `command.done`, never `command.confirmed`, and two presses in a row are both sent, in order.
+
 ## How they connect
 
 ```

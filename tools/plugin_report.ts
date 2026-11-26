@@ -33,12 +33,23 @@ const abilityText = (a: Ability) =>
   }` +
   (a.caution ? `. Caution given: ${safe(a.caution)}` : "");
 
+/** A network grant in words. The two wide ones are spelled out, because their names undersell them. */
+const reach = (n: string) =>
+  n === "lan"
+    ? "**any device on the local network** (`lan`)"
+    : n === "listen"
+    ? "**ports it opens on the hub's computer** (`listen`)"
+    : code(n);
+
 export function asks(m: Manifest): string[] {
   if (m.kind === "driver") {
     const limits = m.limits ?? {};
     return [
       `Implements: ${Object.keys(m.capabilities).map(code).join(", ")}`,
-      `May reach on the network: ${(m.permissions?.network ?? []).map(code).join(", ") || "only the hub"}`,
+      `May reach on the network: ${(m.permissions?.network ?? []).map(reach).join(", ") || "only the hub"}`,
+      ...(m.runtime === "companion"
+        ? ["Runs as a Companion module inside the hub's bridge, and can read its own folder"]
+        : []),
       `Limits it sets for itself: memory ${limits.memoryMb ?? 256} MB, processor ${
         limits.cpuPercent ?? 50
       }%, ${limits.messagesPerSecond ?? 200} messages a second`,
@@ -58,7 +69,10 @@ export function more(now: Manifest, was: Manifest): string[] {
       if (!(c in was.capabilities)) out.push(`implements ${code(c)}`);
     }
     const before = new Set(was.permissions?.network ?? []);
-    for (const n of now.permissions?.network ?? []) if (!before.has(n)) out.push(`may reach ${code(n)}`);
+    for (const n of now.permissions?.network ?? []) if (!before.has(n)) out.push(`may reach ${reach(n)}`);
+    if (now.runtime !== was.runtime) {
+      out.push(`runs as ${code(now.runtime)} where it ran as ${code(was.runtime)}`);
+    }
     for (const k of ["memoryMb", "cpuPercent", "messagesPerSecond", "writesPerSecond"] as const) {
       const a = now.limits?.[k], b = was.limits?.[k];
       if (a !== undefined && a > (b ?? -Infinity) && a !== b) {

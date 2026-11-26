@@ -30,7 +30,15 @@ for (const dir of dirs) {
     console.log(`OK    ${manifest.kind} ${manifest.id} ${manifest.version}`);
     if (manifest.kind === "driver") {
       console.log(`      implements: ${Object.keys(manifest.capabilities).join(", ")}`);
-      console.log(`      may reach:  ${(manifest.permissions?.network ?? []).join(", ") || "only the hub"}`);
+      const reach = (manifest.permissions?.network ?? []).map((n) =>
+        n === "lan" ? "any device on the local network" : n === "listen" ? "ports opened on this computer" : n
+      );
+      console.log(`      may reach:  ${reach.join(", ") || "only the hub"}`);
+      if (manifest.runtime === "companion") {
+        console.log(
+          "      runs as:    a Companion module inside the hub's bridge; it can read its own folder",
+        );
+      }
     } else {
       const uses = Object.entries(manifest.uses ?? {}).map(([k, v]) => `${k} (${v})`).join(", ");
       console.log(`      uses:       ${uses || "nothing"}`);

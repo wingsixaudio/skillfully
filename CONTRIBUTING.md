@@ -57,6 +57,16 @@ Rules a driver must keep (the conformance test checks them):
 A driver in Listen mode is never sent a command, so a new driver can watch a real device safely before it is
 allowed to act.
 
+### If a Companion module already exists for the device
+
+You may not need to write anything. `deno task add-module <package.tgz>` runs a built Bitfocus Companion
+module as it is, and shows what the module calls its variables and actions under the `generic` capability. See
+`docs/architecture.md`.
+
+That is the quick way in, and it has limits a driver written for this contract does not: its actions cannot be
+confirmed by reading back, it is granted the local network unless someone narrows it, and screens written for
+`switch` or `console` cannot use it. When a device deserves better, write a driver for a shared capability.
+
 ## A screen
 
 A screen is a web page. Build it with anything; the hub serves the files in your folder.

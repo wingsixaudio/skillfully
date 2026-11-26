@@ -104,6 +104,28 @@ their open connections.
 cookie is hidden from scripts and never sent from other sites, and screens, which have no origin, cannot call
 it at all.
 
+**A Companion module runs unchanged, inside the same sandbox as any driver.** The bridge and the module share
+one process with the permissions on its command line: the network its manifest lists and read access to its
+own folder. No write, no environment, no subprocess. The module is shown an empty environment and its messages
+to "Companion" are answered by the bridge. A test module tries all of it and is refused each time. Where
+Companion would give a module the whole network, this hub makes the grant visible.
+
+**Two wide network grants exist, and both are named.** A dropped-in module cannot say in advance what it will
+reach, so it gets `lan` (any private address, plus the addresses devices use to find each other) and `listen`
+(ports on the hub's computer for devices to answer on). `lan` leaves out the internet and the hub's own
+computer. A reviewed module replaces them with the one address it needs. The checker and the pull request
+report spell both out in words.
+
+**What a module names is kept as it named it.** Keys may now carry capitals, underscores and dots in the parts
+a driver chooses, because module authors already use them and renaming would make two names collide.
+
+**A dropped-in module starts in Listen mode.** It connects and reports, and the hub sends it nothing until
+someone decides it may act.
+
+**Modules come from a file a person supplies, not from a catalog.** The hub does not call Bitfocus's store or
+copy their list. A team downloads a module's package and adds it. A list of reviewed modules, each pinned to
+its source and to the narrow permissions it needs, is the next layer and is not built.
+
 **Every change arrives as a pull request.** `main` is protected: no direct pushes, no force pushes, no
 deleting it, and nothing merges until the `checks` job passes. This applies to maintainers too. The first six
 commits were pushed straight to `main` before the rule existed.
@@ -150,7 +172,23 @@ on each system, because a test that fails one time in twenty is found by repetit
 - **Browser coverage.** The screen sandbox was proven in Chrome only. Safari on a phone matters most and has
   not been run.
 - **Record and replay.** The spec calls for recording plugin traffic and replaying it as tests. Not built.
-- **Install, update, rollback, uninstall.** Plugins are listed in `core/main.ts` for now.
+- **Install, update, rollback, uninstall.** Plugins in the repository are listed in `core/main.ts`. A
+  Companion module is added from the command line into the hub's data folder and needs a restart. There is no
+  screen for it, no way to change its settings but adding it again, and no removal but deleting its folder.
+- **Which connections a screen may use.** A screen declares the kinds of device it uses and can then reach
+  every driver of that kind. A superuser should approve, when installing a screen, the exact connections it
+  may talk to. With dropped-in drivers this matters more, and it is the next thing to build.
+- **A screen for readings and actions.** Nothing shows `generic` values to a person yet.
+- **Newer Companion modules.** The bridge runs modules built on `@companion-module/base` 1.x. Modules built on
+  2.x load differently and are refused at install with a plain reason.
+- **What Companion does on a module's behalf.** Sending OSC and sharing a UDP port are asked of the host, not
+  done by the module. The bridge refuses both and records that the module asked.
+- **A module's stored settings.** Companion keeps a module's settings and upgrades them between versions. The
+  hub hands settings over fresh at each start, so a module's upgrade scripts never run.
+- **Names under `lan`.** The grant is written as address ranges, so a module set to reach a device by name
+  rather than by address is refused.
+- **One module, one device.** Adding the same module twice for two devices is not possible yet: the driver's
+  id comes from the module's.
 - **License.** Not chosen.
 
 ## Not tested
@@ -161,5 +199,8 @@ on each system, because a test that fails one time in twenty is found by repetit
   processor use, so those limits are not enforced and their tests are skipped. Windows does not yet block a
   merge.
 - Safari on a real phone. WebKit on Linux is the same engine, not the same browser.
+- More than two Companion modules. A module written for the tests runs in every check, and the real TP-Link
+  Kasa module is built from its source and run against a pretend plug in a check that reports and does not
+  block. No module has driven real equipment through the hub.
 - More than a handful of phones at once.
 - Meters. The contract has no message for them yet.

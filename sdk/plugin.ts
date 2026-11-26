@@ -23,6 +23,8 @@ export interface PluginHandlers {
 export interface PluginLink {
   /** Report values that changed at the device. */
   changed(values: Values): void;
+  /** Report everything again, when which values exist has changed. A value left out is gone. */
+  replaced(): void;
   event(name: string, data?: Record<string, unknown>): void;
   health(status: HealthStatus, reason?: string): void;
 }
@@ -99,6 +101,9 @@ export function runPlugin(identity: { id: string; version: string }, handlers: P
   return {
     changed: (values) => {
       if (started && Object.keys(values).length) send({ type: "state", full: false, values });
+    },
+    replaced: () => {
+      if (started) send({ type: "state", full: true, values: handlers.fullState() });
     },
     event: (name, data) => send(data ? { type: "event", name, data } : { type: "event", name }),
     health: (s, r) => {
