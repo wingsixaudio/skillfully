@@ -102,6 +102,11 @@ async def main():
         check("and the back button goes back", owner.url.endswith("/admin/devices"), owner.url)
         await owner.goto(base + "/admin/devices/no-such-thing"); await owner.wait_for_selector("#drivers .item")
         check("an address for a device that is not there says so and shows the ones that are", await owner.locator("#oneDeviceGone").is_visible() and await owner.locator("#drivers .item").count() == 2)
+        # --- What is decided about each device is also a text file, and the Hub place says what the files hold ---
+        await place("Hub"); await owner.wait_for_selector("#secConfig:not([hidden]) #configList p")
+        told = await owner.locator("#secConfig").inner_text()
+        check("the Hub place says where each device's decisions are kept as text", "/config/devices" in told and "No secret is ever written there" in told, told)
+        check("and that the files say what the hub says, when nobody has edited one", "The files say the same as the hub." in told, told)
         await owner.goto(base + "/admin/people"); await owner.wait_for_selector("#people .item")
         check("an address can be opened directly", await shown() == ["people"])
         if shots: await owner.screenshot(path=f"{shots}/1c-people-place.png")

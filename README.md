@@ -93,6 +93,15 @@ nobody's word: you can add from it, and each thing asks you before it reaches an
 
 The first run downloads one library (the JSON Schema validator). After that it runs offline.
 
+### Config as text
+
+What a superuser decides about each device is also written to `data/config/devices/<id>.json`: whether people
+can control it, its settings, and what it may reach. The files are meant to be read, compared and edited, by a
+person or an agent. Their shape is `contract/v1/config.device.schema.json`. No secret is ever written to one.
+
+Editing a file changes nothing yet. Open **Hub** in the admin to see what your edit would change, and which of
+those changes would wait for a superuser's yes. Applying them from there is the next piece to be built.
+
 ## Layout
 
 ```

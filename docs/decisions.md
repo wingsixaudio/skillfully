@@ -289,6 +289,24 @@ not the person: the same superuser on another device is still locked. A secret t
 still checked, so a wrong one is refused even while unlocked. Each unlock and lock is in the log. What this
 gives up: someone who picks up a signed-in, just-unlocked laptop has up to five minutes.
 
+**What the hub decides is also kept as text.** Each device has a JSON file under `config/devices/` in the data
+folder, in one stable form (keys in order, two spaces), checked against a schema that is published with the
+contract. The database is still the one place the hub acts from; the file is how a person or an agent reads a
+decision, compares two versions of it, and proposes a change. Three rules hold for every file: a key that is
+left out means "leave that as it is", so half a file can never take something away; no secret is written, and
+a setting is written only once the device has said which of its settings are secrets; and a file is data,
+checked and never followed. This follows Ignition 8.3, which moved its gateway configuration from an internal
+database to readable files.
+
+**A file edit is a proposal.** The hub says what an edited file would change, in words, and marks each change
+as one that hands out power or one that does not. Letting people control a device and letting a device reach
+something are power. Taking either away is not, and neither is a setting, because a device pointed somewhere
+new still has to ask before it reaches it. When the hub itself changes a device, it rewrites only the part of
+the file it changed, so an edit somebody is in the middle of is not lost. This slice shows the plan and
+applies none of it. Applying, the list of changes waiting for a yes, and the switch between strict and
+trusting come next. JSON was chosen over a format with comments because the hub already checks JSON against
+schemas; every file takes a `note` instead.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins

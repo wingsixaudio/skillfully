@@ -40,8 +40,21 @@ export interface DeviceRecord {
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : []);
 
+/** Told of every change to a device's record: what it was, and what it is now. Neither when there is none. */
+export type RecordListener = (
+  id: string,
+  before: DeviceRecord | undefined,
+  after: DeviceRecord | undefined,
+) => void;
+
 export class Registry {
   #db: DatabaseSync;
+  #listeners = new Set<RecordListener>();
+
+  /** Hear about every change made here. This is the one place a record changes, so nothing is missed. */
+  onChange(l: RecordListener): void {
+    this.#listeners.add(l);
+  }
 
   constructor(db: DatabaseSync) {
     this.#db = db;
@@ -68,9 +81,11 @@ export class Registry {
   }
 
   put(id: string, record: DeviceRecord): DeviceRecord {
+    const before = this.#listeners.size ? this.get(id) : undefined;
     this.#db.prepare(
       "INSERT INTO devices (id, record) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET record = excluded.record",
     ).run(id, JSON.stringify(record));
+    for (const l of this.#listeners) l(id, before, record);
     return record;
   }
 
@@ -82,6 +97,8 @@ export class Registry {
   }
 
   delete(id: string): void {
+    const before = this.#listeners.size ? this.get(id) : undefined;
     this.#db.prepare("DELETE FROM devices WHERE id = ?").run(id);
+    for (const l of this.#listeners) l(id, before, undefined);
   }
 }

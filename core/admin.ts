@@ -7,6 +7,7 @@
 import type { Accounts, Person } from "./accounts.ts";
 import type { Approvals } from "./approvals.ts";
 import { aboutWords, advised, attemptWords, grantWords } from "./asks.ts";
+import type { Config } from "./config.ts";
 import type { Devices } from "./devices.ts";
 import { json, notOurPage, outcome, readFile, readJson, refuse, sentence } from "./http.ts";
 import { networkNotes, type Package, readPackage } from "./packages.ts";
@@ -30,6 +31,7 @@ const PROVEN: Record<string, string> = {
 export interface AdminDeps {
   accounts: Accounts;
   approvals: Approvals;
+  config: Config;
   devices: Devices;
   screens: Screens;
   store: Store;
@@ -38,7 +40,7 @@ export interface AdminDeps {
 }
 
 export function adminApi(deps: AdminDeps) {
-  const { accounts, approvals, devices, screens, store } = deps;
+  const { accounts, approvals, config, devices, screens, store } = deps;
   /** The package each superuser is looking at, checked but not yet added. One each, for a few minutes. */
   const looking = new Map<string, { pkg: Package; at: number; from?: StoreModule }>();
   const kinds = (pkg: Package) => Object.keys((pkg.manifest.capabilities ?? {}) as Record<string, unknown>);
@@ -516,6 +518,10 @@ export function adminApi(deps: AdminDeps) {
         return await shelf((new URL(req.url).searchParams.get("find") ?? "").slice(0, 80));
       }
       if (path === "all") return json(overview(me, session), 200, { "cache-control": "no-store" });
+      // What the files in the config folder would change. Reading only: nothing here applies any of it.
+      if (path === "config") {
+        return json({ ok: true, ...(await config.overview()) }, 200, { "cache-control": "no-store" });
+      }
       return refuse(404, "Not found.");
     }
     if (req.method !== "POST") return refuse(404, "Not found.");

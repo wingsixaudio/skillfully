@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { SkillManifest } from "../contract/mod.ts";
 import { Accounts } from "./accounts.ts";
 import { adminApi } from "./admin.ts";
+import { Config } from "./config.ts";
 import { Approvals } from "./approvals.ts";
 import { Capabilities, CAPABILITIES_DIR } from "./capabilities.ts";
 import { Devices, type DriverChoices } from "./devices.ts";
@@ -61,6 +62,7 @@ export interface Hub {
   /** Which connections each screen may use. */
   approvals: Approvals;
   capabilities: Capabilities;
+  config: Config;
   /** The drivers, and what the hub holds for each. */
   devices: Devices;
   /** The plugin store, as this hub reads it. */
@@ -100,15 +102,25 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     : await Deno.makeTempDir({ prefix: "skillfully-run-" }).catch(() => undefined);
   if (runDir) await Deno.mkdir(runDir, { recursive: true });
 
-  const devices = new Devices({
+  const registry = new Registry(db);
+  const devices: Devices = new Devices({
     log,
     gateway,
     capabilities,
-    registry: new Registry(db),
+    registry,
     runDir,
     dataDir,
     addedRoot: addedDir ? `${await realPath(addedDir)}/` : undefined,
   });
+  // What is decided about each device is also kept as text, for people and agents to read and propose from.
+  const config = new Config(dataDir, {
+    ids: () => [...devices.hosts.keys()],
+    record: (id) => registry.get(id),
+    known: (id) => devices.known(id),
+    failed: (id, message) =>
+      log.append({ type: "skillfully.config.unwritten", source: "core", subject: id, data: { message } }),
+  });
+  registry.onChange((id, before, after) => config.recordChanged(id, before, after));
   const screens = new Screens({ accounts, approvals, capabilities, devices, log });
   const hosts = devices.hosts;
   const taken = (id: string) => hosts.has(id) || screens.all.has(id) || skills.has(id);
@@ -131,6 +143,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     }
   }
   await devices.startAll();
+  await config.start();
 
   // The newest signed list this hub has read from this store is remembered, so an older one is refused.
   const kept = new Kept(db);
@@ -139,7 +152,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     get: () => kept.get(newest),
     set: (made) => kept.set(newest, made),
   }, opts.storeEverySeconds);
-  const admin = adminApi({ accounts, approvals, devices, screens, store, taken });
+  const admin = adminApi({ accounts, approvals, config, devices, screens, store, taken });
 
   const publicRule = (superuser: boolean) => {
     const p = accounts.policy();
@@ -364,6 +377,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     accounts,
     approvals,
     capabilities,
+    config,
     devices,
     store,
     hosts,
@@ -372,6 +386,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     async stop() {
       screens.closeAll();
       await devices.stop();
+      await config.settled();
       await server.shutdown();
       await gateway.close();
       if (!dataDir && runDir) await Deno.remove(runDir, { recursive: true }).catch(() => {});
