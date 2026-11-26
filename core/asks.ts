@@ -35,6 +35,10 @@ export function classify(value: string): Ask | null {
   const at = split(value);
   if (!at) return null;
   const { host, port } = at;
+  // A module that has not been given an address yet often tries to reach one anyway, and what it tries is
+  // the word its own code holds where an address would be. That is not somewhere to allow. It is a device
+  // whose settings are not filled in, and its status already says so.
+  if (["undefined", "null", "nan", "false", "true"].includes(host)) return null;
   const on = port === "0" ? "" : `, port ${port}`;
   if (host === "0.0.0.0" || host === "[::]") {
     return {
@@ -141,10 +145,10 @@ export function advised(ask: Ask, ...lists: Advice[][]): Advice | undefined {
 export function covered(value: string, grants: string[]): boolean {
   const at = split(value);
   if (!at) return false;
-  const ask = classify(value)!;
+  const ask = classify(value);
   for (const g of grants) {
-    if (g === "listen" && ask.where === "ports") return true;
-    if (g === "lan" && (ask.where === "device" || ask.where === "everyone")) return true;
+    if (g === "listen" && ask?.where === "ports") return true;
+    if (g === "lan" && (ask?.where === "device" || ask?.where === "everyone")) return true;
     if (g.toLowerCase() === `${at.host}:${at.port}`) return true;
   }
   return false;
