@@ -146,6 +146,21 @@ files in `core/web/` now, and their policy no longer allows a script written int
 the two can never disagree. It used to import five internal files by path. `mod.ts` is now the whole of what a
 tool outside this repository may import, and everything behind it can be rearranged freely.
 
+**Only a signed list can answer for a superuser.** The store signs the exact bytes of its list, and a hub that
+has the store's public key reads nothing from a list that was not signed with it: not unsigned, not signed by
+someone else, not changed afterwards. Every package's checksum is in the list, so the signature covers the
+packages too. A hub with no key for a store still reads its list, as nobody's word: a device can be added from
+it, because the sandbox does not depend on trusting the list, but nothing is allowed in advance and no
+recommendation to allow anything is passed on. A signature file can carry two signatures, so a key can be
+replaced without a day on which hubs with the old key or the new one are locked out.
+
+**The store advises; it does not decide.** Besides "allow this in advance", a store entry can say "we expect
+this" or "we advise against this" about a kind of place or one address, with a reason, and the store can say
+the same about everything it lists. A hub shows that beside the question when a device asks. Advice about the
+exact address comes before advice about the kind of place, and an entry's own advice before the store's
+general advice. "We expect this" starts the box ticked and "we advise against" starts it unticked. Either way
+the superuser confirms with their own PIN, and nothing is allowed by advice alone.
+
 **A dropped-in module starts in Listen mode.** It connects and reports, and the hub sends it nothing until
 someone decides it may act.
 
@@ -262,10 +277,14 @@ on each system, because a test that fails one time in twenty is found by repetit
 - **Browser coverage.** The screen sandbox was proven in Chrome only. Safari on a phone matters most and has
   not been run.
 - **Record and replay.** The spec calls for recording plugin traffic and replaying it as tests. Not built.
-- **The store's list is not signed.** A hub trusts it because it arrives over HTTPS from the address the hub
-  was given, and trusts a package because it matches the list. Someone who could change what that address
-  serves could change both. Signing the list, and "ask" and "do not allow" as advice alongside "allow", come
-  next.
+- **The store has no key yet.** Everything for a signed list is built and tested, and `STORE_KEYS` in
+  `core/store.ts` is empty until the store's key is made. Until then a hub reads the real store's list as
+  unsigned: things can be added from it, and nothing in it is allowed in advance.
+- **An old signed list is still a signed list.** Someone who could change what the store's address serves
+  could hand out last month's list with last month's signature. A hub does not yet remember the newest list it
+  has seen.
+- **Advice is about where, not what.** The store can advise on a kind of place or one address. It cannot yet
+  say "this action is the dangerous one".
 - **A hub does not notice a newer version in the store.** There is no update, only adding again.
 - **The first real download has not happened.** The tests use a stand-in store on the same computer.
 - **A question an admin cannot judge.** "Send to every device on your network, port 9999" is worded plainly

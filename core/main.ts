@@ -7,7 +7,7 @@
 
 import { type PluginConfig, startHub } from "./hub.ts";
 import { here } from "./paths.ts";
-import { STORE_URL } from "./store.ts";
+import { STORE_KEYS, STORE_URL } from "./store.ts";
 
 const root = here("..", import.meta.url).replace(/\/$/, "");
 const lan = Deno.args.includes("--lan");
@@ -41,6 +41,13 @@ const plugins = [
   ...await folders(`${dataDir.replace(/[\\/]$/, "")}/plugins`),
 ];
 
+/** The store this hub reads, and the keys its list must be signed with. Another store brings its own key. */
+function store(): { storeUrl: string; storeKeys: string[] } {
+  const other = Deno.args.find((a) => a.startsWith("--store="))?.slice(8);
+  const keys = Deno.args.filter((a) => a.startsWith("--store-key=")).map((a) => a.slice(12)).filter(Boolean);
+  return other ? { storeUrl: other, storeKeys: keys } : { storeUrl: STORE_URL, storeKeys: STORE_KEYS };
+}
+
 await Deno.mkdir(dataDir, { recursive: true });
 const hub = await startHub({
   dbPath: `${dataDir.replace(/[\\/]$/, "")}/skillfully.db`,
@@ -48,10 +55,9 @@ const hub = await startHub({
   port: portArg ? Number(portArg.slice(7)) : 8080,
   plugins,
   dataDir,
-  // --store=<address> reads another store's list. --no-store uses none: devices are then added from files.
-  ...(Deno.args.includes("--no-store")
-    ? {}
-    : { storeUrl: Deno.args.find((a) => a.startsWith("--store="))?.slice(8) ?? STORE_URL }),
+  // --store=<address> reads another store's list, and --store-key=<its public key> says who signs it.
+  // --no-store uses none: devices are then added from files.
+  ...(Deno.args.includes("--no-store") ? {} : store()),
 });
 
 await Promise.all([...hub.hosts.values()].map((h) => h.whenReady().catch(() => {})));

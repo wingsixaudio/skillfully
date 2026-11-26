@@ -527,7 +527,19 @@ function openAccess(id) {
         }),
       );
       for (const a of d.asks) {
-        const box = el("input", { type: "checkbox", value: a.value, checked: a.usual, className: "askBox" });
+        // The store's reviewers, when they have said something about this, decide what starts ticked.
+        const box = el("input", {
+          type: "checkbox",
+          value: a.value,
+          checked: a.advice ? a.advice.say === "yes" : a.usual,
+          className: "askBox",
+        });
+        const advice = !a.advice ? "" : el("span", {
+          className: a.advice.say === "no" ? "caution" : "advice",
+          textContent: (a.advice.say === "no"
+            ? "The store's reviewers advise against this. "
+            : "The store's reviewers expect this. ") + a.advice.why,
+        });
         x.append(
           el(
             "label",
@@ -538,6 +550,7 @@ function openAccess(id) {
               {},
               a.words + ".",
               a.caution ? el("span", { className: "caution", textContent: a.caution }) : "",
+              advice,
             ),
           ),
         );
@@ -738,7 +751,29 @@ $("addDevice").onclick = () => {
             }),
           );
         }
-        facts.append(el("li", { textContent: "Before it reaches anything else, you are asked first." }));
+        if (!st.signed) {
+          facts.append(
+            el("li", {
+              textContent:
+                "This hub cannot check who published the store's list, so nothing is allowed in advance.",
+            }),
+          );
+        }
+        for (const a of st.advises) {
+          facts.append(
+            el("li", {
+              textContent: (a.say === "no" ? "Its reviewers advise against " : "Its reviewers expect ") +
+                a.about + ". " + a.why,
+            }),
+          );
+        }
+        facts.append(
+          el("li", {
+            textContent: st.advance.length
+              ? "Before it reaches anything else, you are asked first."
+              : "Before it reaches anything, you are asked first.",
+          }),
+        );
         facts.append(
           el("li", { textContent: "It can read its own folder, and no other file on this computer." }),
         );
@@ -812,7 +847,16 @@ $("addDevice").onclick = () => {
         );
       }
       if (r.message) shelf.append(el("p", { className: "dim", textContent: r.message }));
-      else if (!r.modules.length) {
+      else if (!r.signed) {
+        shelf.append(
+          el("p", {
+            className: "dim",
+            id: "unsigned",
+            textContent:
+              "This hub cannot check who published this list. You can add from it, and each thing will ask you before it reaches anything.",
+          }),
+        );
+      } else if (!r.modules.length) {
         shelf.append(el("p", { className: "dim", textContent: "The store has nothing listed yet." }));
       }
       for (const m of r.modules || []) {

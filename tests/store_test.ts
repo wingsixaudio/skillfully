@@ -6,6 +6,7 @@ import { assert, assertEquals } from "./assert.ts";
 import { addingHub, FIXTURES, OWNER_PIN, pretendLamp, until } from "./helpers.ts";
 import { resolveNetwork } from "../core/process.ts";
 import { grantWords } from "../core/asks.ts";
+import { newKey, sign, verify } from "../core/signing.ts";
 
 const PACKAGE = await Deno.readFile(`${FIXTURES}/companion/skillfully-test-lamp-1.0.0.tgz`);
 const SHA = createHash("sha256").update(PACKAGE).digest("hex");
@@ -25,25 +26,49 @@ const listing = (more: Record<string, unknown> = {}) => ({
   ...more,
 });
 
-/** A store on this computer. What it lists and what it hands out can be set per test. */
-function pretendStore(modules: unknown[] = [listing()], packageBytes: Uint8Array = PACKAGE) {
+// The store's own key, and somebody else's.
+const KEY = await newKey(), STRANGER = await newKey();
+
+/**
+ * A store on this computer. What it lists, what it hands out, and who signed the list can be set per test.
+ * Unless told otherwise the list is signed with the store's own key.
+ */
+async function pretendStore(
+  o: {
+    modules?: unknown[];
+    packageBytes?: Uint8Array;
+    advise?: unknown[];
+    /** null: no signature at all. */
+    signedBy?: string | null;
+    /** Hand out a list that differs from the one that was signed. */
+    changedAfterSigning?: boolean;
+  } = {},
+) {
   const asked: string[] = [];
+  const text = (modules: unknown[]) =>
+    new TextEncoder().encode(JSON.stringify({ format: 1, modules, advise: o.advise ?? [], plugins: [] }));
+  const list = text(o.modules ?? [listing()]);
+  const signature = o.signedBy === null ? null : await sign(list, [o.signedBy ?? KEY.privateKey]);
+  const served = o.changedAfterSigning ? text([listing({ network: ["lan", "listen"] })]) : list;
   const server = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen: () => {} }, (req) => {
     const path = new URL(req.url).pathname;
     asked.push(path);
-    if (path === "/index.json") return Response.json({ format: 1, modules, plugins: [] });
-    if (path === "/packages/lamp.tgz") return new Response(packageBytes as BodyInit);
+    if (path === "/index.json") return new Response(served as BodyInit);
+    if (path === "/index.json.sig" && signature) return new Response(signature);
+    if (path === "/packages/lamp.tgz") return new Response((o.packageBytes ?? PACKAGE) as BodyInit);
     return new Response("not found", { status: 404 });
   });
   return { url: `http://127.0.0.1:${server.addr.port}/index.json`, asked, close: () => server.shutdown() };
 }
+/** A hub that knows the store's key. */
+const hubTrusting = (url: string) => addingHub(url, [KEY.publicKey]);
 
 Deno.test("a device added from the store holds what the store allows in advance, and is not asked about it", async () => {
-  const store = pretendStore(), lamp = pretendLamp();
-  const h = await addingHub(store.url);
+  const store = await pretendStore(), lamp = pretendLamp();
+  const h = await hubTrusting(store.url);
   try {
     const shelf = await h.get("/admin/api/store");
-    assertEquals(shelf.body.on, true);
+    assertEquals([shelf.body.on, shelf.body.signed], [true, true]);
     assertEquals(shelf.body.modules.length, 1);
     const listed = shelf.body.modules[0];
     assertEquals([listed.id, listed.name, listed.license], ["skillfully-test-lamp", "Test lamp", "MIT"]);
@@ -121,8 +146,8 @@ Deno.test("a device added from the store holds what the store allows in advance,
 Deno.test("a package that is not what the store says it built is thrown away", async () => {
   const tampered = PACKAGE.slice();
   tampered[tampered.length - 9] ^= 1;
-  const store = pretendStore([listing()], tampered);
-  const h = await addingHub(store.url);
+  const store = await pretendStore({ packageBytes: tampered });
+  const h = await hubTrusting(store.url);
   try {
     const got = await h.post("/admin/api/store/fetch", { id: "skillfully-test-lamp" });
     assert(
@@ -140,20 +165,22 @@ Deno.test("a package that is not what the store says it built is thrown away", a
 });
 
 Deno.test("what the store lists is data: anything malformed or reaching past the store is left out", async () => {
-  const store = pretendStore([
-    listing(),
-    listing({ id: "elsewhere", package: { path: "packages/../../secrets.tgz", sha256: SHA, bytes: 10 } }),
-    listing({ id: "absolute", package: { path: "https://example.com/x.tgz", sha256: SHA, bytes: 10 } }),
-    listing({ id: "greedy", network: ["internet"] }),
-    listing({ id: "everything", network: ["*"] }),
-    listing({ id: "not-github", source: { repo: "https://example.com/a/b", commit: "0".repeat(40) } }),
-    listing({ id: "moving", source: { repo: "https://github.com/a/b", commit: "main" } }),
-    listing({ id: "unproven", tested: "trust me" }),
-    listing({ id: "Bad Id" }),
-    "not an entry",
-    null,
-  ]);
-  const h = await addingHub(store.url);
+  const store = await pretendStore({
+    modules: [
+      listing(),
+      listing({ id: "elsewhere", package: { path: "packages/../../secrets.tgz", sha256: SHA, bytes: 10 } }),
+      listing({ id: "absolute", package: { path: "https://example.com/x.tgz", sha256: SHA, bytes: 10 } }),
+      listing({ id: "greedy", network: ["internet"] }),
+      listing({ id: "everything", network: ["*"] }),
+      listing({ id: "not-github", source: { repo: "https://example.com/a/b", commit: "0".repeat(40) } }),
+      listing({ id: "moving", source: { repo: "https://github.com/a/b", commit: "main" } }),
+      listing({ id: "unproven", tested: "trust me" }),
+      listing({ id: "Bad Id" }),
+      "not an entry",
+      null,
+    ],
+  });
+  const h = await hubTrusting(store.url);
   try {
     const shelf = await h.get("/admin/api/store");
     assertEquals(shelf.body.modules.map((m: { id: string }) => m.id), ["skillfully-test-lamp"]);
@@ -177,7 +204,7 @@ Deno.test("a hub with no store, or a store it cannot reach, still works and says
   } finally {
     await none.close();
   }
-  const gone = pretendStore();
+  const gone = await pretendStore();
   const url = gone.url;
   await gone.close();
   const h = await addingHub(url);
@@ -191,5 +218,156 @@ Deno.test("a hub with no store, or a store it cannot reach, still works and says
     assertEquals((await h.get("/admin/api/store", "sk_session=nobody")).status, 401);
   } finally {
     await h.close();
+  }
+});
+
+Deno.test("a hub that knows the store's key reads only a list the store signed", async () => {
+  const refusedFrom = async (store: Awaited<ReturnType<typeof pretendStore>>, why: string) => {
+    const h = await hubTrusting(store.url);
+    try {
+      const shelf = (await h.get("/admin/api/store")).body;
+      assertEquals(shelf.modules, [], why);
+      assert(shelf.message.includes("was not signed by the store"), `${why}: ${shelf.message}`);
+      // Nothing in it can be picked either, whatever a page asks for.
+      const got = await h.post("/admin/api/store/fetch", { id: "skillfully-test-lamp" });
+      assert(!got.body.ok && got.body.message.includes("was not signed by the store"), why);
+      assert(!store.asked.some((p) => p.startsWith("/packages/")), `${why}: no package was even asked for`);
+    } finally {
+      await h.close();
+      await store.close();
+    }
+  };
+  await refusedFrom(await pretendStore({ signedBy: null }), "a list with no signature");
+  await refusedFrom(await pretendStore({ signedBy: STRANGER.privateKey }), "a list signed by somebody else");
+  // The signature is real, and for another list: one that would have let the lamp reach the whole network.
+  await refusedFrom(await pretendStore({ changedAfterSigning: true }), "a list changed after it was signed");
+
+  // The check itself: exact bytes, the right key, and nothing malformed counts as a yes.
+  const bytes = new TextEncoder().encode("the list");
+  const good = await sign(bytes, [KEY.privateKey]);
+  assert(await verify(bytes, good, [STRANGER.publicKey, KEY.publicKey]), "any one of the hub's keys will do");
+  assert(!(await verify(new TextEncoder().encode("the list."), good, [KEY.publicKey])));
+  assert(!(await verify(bytes, good, [STRANGER.publicKey])));
+  assert(!(await verify(bytes, good, [])));
+  for (
+    const junk of ["", "not json", "{}", '{"alg":"none","signatures":[{"sig":""}]}', '{"alg":"ed25519"}']
+  ) {
+    assert(!(await verify(bytes, junk, [KEY.publicKey, "not a key"])), junk);
+  }
+  // While a key is being replaced, a list signed with both is good for hubs that have either.
+  const both = await sign(bytes, [KEY.privateKey, STRANGER.privateKey]);
+  assert(await verify(bytes, both, [KEY.publicKey]) && await verify(bytes, both, [STRANGER.publicKey]));
+});
+
+Deno.test("a list nobody signed can be added from, and answers for nobody", async () => {
+  const advise = [{ about: "ports", say: "yes", why: "Every module in this store may listen." }];
+  const store = await pretendStore({ signedBy: null, advise }), lamp = pretendLamp();
+  // This hub was given no key for the store it reads.
+  const h = await addingHub(store.url);
+  try {
+    const shelf = (await h.get("/admin/api/store")).body;
+    assertEquals([shelf.on, shelf.signed, shelf.modules.length], [true, false, 1]);
+    assertEquals(shelf.modules[0].advance, [], "nothing is allowed in advance on nobody's word");
+    const got = await h.post("/admin/api/store/fetch", { id: "skillfully-test-lamp" });
+    assert(got.body.ok, JSON.stringify(got.body));
+    const added = await h.post("/admin/api/module/add", {
+      upload: got.body.upload,
+      name: "Lamp",
+      confirm: OWNER_PIN,
+    });
+    assert(added.body.ok, JSON.stringify(added.body));
+    const host = () => h.hub.hosts.get(added.body.id)!;
+    assertEquals(host().granted, []);
+    // So it asks about the very address the list would have answered for.
+    await until("it describes its settings", () => !!host().settingsForm, 8000);
+    await h.post("/admin/api/driver/settings", {
+      id: added.body.id,
+      settings: { host: "127.0.0.1", port: lamp.port },
+    });
+    const wanted = `127.0.0.1:${lamp.port}`;
+    await until("it asks", () => host().asks.has(wanted), 8000);
+    assertEquals(lamp.connections, 0);
+  } finally {
+    await h.close();
+    await store.close();
+    lamp.close();
+  }
+});
+
+Deno.test("the store's reviewers can advise on what a device asks for, and a superuser still decides", async () => {
+  const lamp = pretendLamp();
+  const store = await pretendStore({
+    modules: [listing({
+      network: [],
+      advise: [
+        { about: "internet", say: "no", why: "A lamp has no reason to leave your network." },
+        { about: "example.com:443", say: "yes", why: "It checks for new colours there." },
+        { about: "everywhere", say: "yes", why: "Not a kind of place." },
+        { about: "{host}:1", say: "yes", why: "Advice is about what was asked, not a setting." },
+        { about: "ports", say: "maybe", why: "Not an answer." },
+        { about: "device", say: "yes", why: "" },
+      ],
+    })],
+    advise: [
+      { about: "this-computer", say: "no", why: "Nothing in this store needs other programs on your hub." },
+      { about: "internet", say: "yes", why: "The entry's own advice comes first." },
+    ],
+  });
+  const h = await hubTrusting(store.url);
+  try {
+    // Before adding, the superuser sees what the reviewers say. Malformed advice is not there.
+    const got = await h.post("/admin/api/store/fetch", { id: "skillfully-test-lamp" });
+    assertEquals(got.body.store.advises, [
+      { say: "no", about: "reaching the internet", why: "A lamp has no reason to leave your network." },
+      {
+        say: "yes",
+        about: "reach example.com on the internet, port 443",
+        why: "It checks for new colours there.",
+      },
+    ]);
+    const added = await h.post("/admin/api/module/add", {
+      upload: got.body.upload,
+      name: "Lamp",
+      confirm: OWNER_PIN,
+    });
+    const id = added.body.id;
+    const host = () => h.hub.hosts.get(id)!;
+    const allow = (body: Record<string, unknown>) =>
+      h.post("/admin/api/driver/allow", { id, confirm: OWNER_PIN, ...body });
+    const wanted = `127.0.0.1:${lamp.port}`;
+    await until("it starts", () => !!host().settingsForm, 8000);
+    await h.post("/admin/api/driver/settings", { id, settings: { host: "127.0.0.1", port: lamp.port } });
+    await until("it asks", () => host().asks.has(wanted), 8000);
+
+    // The lamp is on this computer, and the store's general advice is against that. It is advice:
+    // nothing was refused for the superuser, and allowing it works.
+    const first = (await h.device(id)).asks.find((a: { value: string }) => a.value === wanted);
+    assertEquals(first.advice, {
+      say: "no",
+      why: "Nothing in this store needs other programs on your hub.",
+    });
+    assert((await allow({ allow: [wanted] })).body.ok);
+    await h.post("/admin/api/driver/mode", { id, mode: "act", confirm: OWNER_PIN });
+    await until("it connects", () => host().state.get("generic/reading/power") === "off", 8000);
+
+    // The module's snoop action reaches for the internet. Advice about the exact address comes before
+    // advice about the kind of place, and the entry's own before the store's general advice.
+    assert((await host().set("generic/action/snoop", true, { via: "test" })).ok);
+    await until("it asks about the internet", () => host().asks.has("example.com:443"), 8000);
+    const asks = (await h.device(id)).asks as { value: string; where: string; advice?: unknown }[];
+    assertEquals(asks.find((a) => a.value === "example.com:443")!.advice, {
+      say: "yes",
+      why: "It checks for new colours there.",
+    });
+    for (const other of asks.filter((a) => a.where === "internet" && a.value !== "example.com:443")) {
+      assertEquals(other.advice, { say: "no", why: "A lamp has no reason to leave your network." });
+    }
+    // A request the reviewers said nothing about carries no advice.
+    assert(asks.filter((a) => !["internet", "this-computer"].includes(a.where)).every((a) => !a.advice));
+    assertEquals(host().granted, [wanted], "advice allowed nothing by itself");
+  } finally {
+    await h.close();
+    await store.close();
+    lamp.close();
   }
 });

@@ -14,8 +14,23 @@ store_port=${STORE_PORT:-7008}
 deno run --no-prompt --allow-net="127.0.0.1:$store_port" --allow-read tests/browser/pretend_store.ts "$store_port" >"$data/store.log" 2>&1 &
 store=$!
 
+# The pretend store signs its list with a key it makes at start. The hub is told the public half.
+store_key=""
+for _ in $(seq 1 120); do
+  store_key=$(sed -n 's/^KEY //p' "$data/store.log" | head -1)
+  [ -n "$store_key" ] && break
+  sleep 0.5
+done
+if [ -z "$store_key" ]; then
+  cat "$data/store.log"
+  echo "the pretend store did not start"
+  kill "$store" 2>/dev/null || true
+  exit 1
+fi
+
 deno run --allow-net --allow-read --allow-env=HOME,DENO_DIR,SYSTEMROOT,LOCALAPPDATA,USERPROFILE --allow-write="$data" --allow-run \
-  core/main.ts --act=sim-console,sim-switch --port="$port" --data="$data" --store="http://127.0.0.1:$store_port/index.json" >"$data/hub.log" 2>&1 &
+  core/main.ts --act=sim-console,sim-switch --port="$port" --data="$data" \
+  --store="http://127.0.0.1:$store_port/index.json" --store-key="$store_key" >"$data/hub.log" 2>&1 &
 hub=$!
 # A pretend lamp for the Companion module the test adds through the admin page.
 lamp_port=${LAMP_PORT:-7007}

@@ -111,6 +111,32 @@ export function declared(grant: string): Ask {
   };
 }
 
+/**
+ * What a store's reviewers say about one kind of request. It is advice: a superuser still decides.
+ * about: one address and port, or a kind of place ("internet", "everyone" ...).
+ */
+export interface Advice {
+  about: string;
+  say: "yes" | "no";
+  /** The reviewers' reason, shown as text. */
+  why: string;
+}
+
+export const WHERES: Where[] = ["device", "everyone", "this-computer", "ports", "name", "internet"];
+
+/**
+ * The advice that applies to a request, from these lists in order. Within a list, advice about the
+ * exact address comes before advice about the kind of place.
+ */
+export function advised(ask: Ask, ...lists: Advice[][]): Advice | undefined {
+  for (const list of lists) {
+    const hit = list.find((a) => a.about === ask.grant || a.about === ask.value) ??
+      list.find((a) => a.about === ask.where);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 /** Does what a device has been granted already cover this address? */
 export function covered(value: string, grants: string[]): boolean {
   const at = split(value);
@@ -137,6 +163,20 @@ export function grantWords(grant: string): string {
   }
   const ask = classify(grant);
   return ask ? ask.words : `Reach ${grant}`;
+}
+
+/** What a piece of advice is about, as the end of a sentence. */
+export function aboutWords(about: string): string {
+  const kinds: Record<string, string> = {
+    device: "reaching a device on your network",
+    everyone: "sending to every device on your network at once",
+    "this-computer": "reaching other programs on this computer",
+    ports: "opening ports on this computer",
+    name: "reaching a device on your network by its name",
+    internet: "reaching the internet",
+  };
+  const words = grantWords(about);
+  return kinds[about] ?? words.charAt(0).toLowerCase() + words.slice(1);
 }
 
 /** Something a device tried that the hub never allows, as a few plain words. */

@@ -44,6 +44,11 @@ export interface HubOptions {
   dataDir?: string;
   /** Where the plugin store's list is published. Without it, this hub does not use a store. */
   storeUrl?: string;
+  /**
+   * The public keys the store signs its list with. With them, only a signed list is read. Without them
+   * the list is nobody's word: things can be added from it, and it answers nothing in advance.
+   */
+  storeKeys?: string[];
 }
 
 export interface Hub {
@@ -122,7 +127,14 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   }
   await devices.startAll();
 
-  const admin = adminApi({ accounts, approvals, devices, screens, store: new Store(opts.storeUrl), taken });
+  const admin = adminApi({
+    accounts,
+    approvals,
+    devices,
+    screens,
+    store: new Store(opts.storeUrl, opts.storeKeys),
+    taken,
+  });
 
   const publicRule = (superuser: boolean) => {
     const p = accounts.policy();

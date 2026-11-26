@@ -6,7 +6,7 @@
 
 import type { Accounts, Person } from "./accounts.ts";
 import type { Approvals } from "./approvals.ts";
-import { attemptWords, grantWords } from "./asks.ts";
+import { aboutWords, advised, attemptWords, grantWords } from "./asks.ts";
 import type { Devices } from "./devices.ts";
 import { json, notOurPage, outcome, readFile, readJson, refuse, sentence } from "./http.ts";
 import { networkNotes, type Package, readPackage } from "./packages.ts";
@@ -25,18 +25,6 @@ const PROVEN: Record<string, string> = {
   "real-device": "It has been used with the real device.",
 };
 
-const fromStore = (m: StoreModule) => ({
-  id: m.id,
-  name: m.name,
-  description: m.description,
-  version: m.version,
-  license: m.license,
-  source: m.source.repo,
-  proven: PROVEN[m.tested],
-  notes: m.notes,
-  advance: m.network.map((g) => grantWords(g)),
-});
-
 export interface AdminDeps {
   accounts: Accounts;
   approvals: Approvals;
@@ -53,6 +41,26 @@ export function adminApi(deps: AdminDeps) {
   const looking = new Map<string, { pkg: Package; at: number; from?: StoreModule }>();
   const kinds = (pkg: Package) => Object.keys((pkg.manifest.capabilities ?? {}) as Record<string, unknown>);
   const couldUse = (pkg: Package) => screens.fits(kinds(pkg)).map((m) => ({ id: m.id, name: m.name }));
+  /** Only a list this hub knows the store signed can answer for a superuser in advance. */
+  const advance = (m: StoreModule) => (store.signed ? m.network : []);
+  const fromStore = (m: StoreModule) => ({
+    id: m.id,
+    name: m.name,
+    description: m.description,
+    version: m.version,
+    license: m.license,
+    source: m.source.repo,
+    proven: PROVEN[m.tested],
+    notes: m.notes,
+    signed: store.signed,
+    advance: advance(m).map((g) => grantWords(g)),
+    // What its reviewers say about things it may ask for later. Advice only: the superuser decides.
+    advises: m.advise.filter((a) => store.signed || a.say === "no").map((a) => ({
+      say: a.say,
+      about: aboutWords(a.about),
+      why: a.why,
+    })),
+  });
 
   /** Everything the admin page shows. */
   function overview(me: Person) {
@@ -81,7 +89,11 @@ export function adminApi(deps: AdminDeps) {
           settings: Object.fromEntries(Object.entries(record.settings).filter(([k]) => !secret.has(k))),
           secretsSet: Object.keys(record.settings).filter((k) => secret.has(k)),
           // What it is waiting on a superuser for, what it holds, and what it tried that is never allowed.
-          asks: [...h.asks.values()],
+          // Beside each request, what the store's reviewers say about it, if they say anything.
+          asks: [...h.asks.values()].map((a) => {
+            const advice = advised(a, ...store.advice(record.origin?.store?.id));
+            return advice ? { ...a, advice: { say: advice.say, why: advice.why } } : a;
+          }),
           grants: h.granted.map((g) => ({ grant: g, words: grantWords(g) })),
           attempts: [...h.attempts].map(([kind, times]) => ({ words: attemptWords(kind), times })),
           usedBy: screens.using(h.id).map((m) => m.name),
@@ -116,12 +128,13 @@ export function adminApi(deps: AdminDeps) {
 
   async function shelf(): Promise<Response> {
     if (!store.on) return json({ ok: true, on: false, modules: [] });
+    const signed = store.signed;
     try {
-      return json({ ok: true, on: true, modules: (await store.list()).map(fromStore) }, 200, {
+      return json({ ok: true, on: true, signed, modules: (await store.list()).map(fromStore) }, 200, {
         "cache-control": "no-store",
       });
     } catch (err) {
-      return json({ ok: true, on: true, modules: [], message: sentence(err) });
+      return json({ ok: true, on: true, signed, modules: [], message: sentence(err) });
     }
   }
 
@@ -348,13 +361,13 @@ export function adminApi(deps: AdminDeps) {
               }
               : {}),
           };
-          // From the store, it holds what the store allows in advance and starts with the store's settings.
+          // From the store, it holds what a signed list allows in advance and starts with the store's settings.
           // From a file, it holds nothing unless the superuser chose otherwise.
           const host = await devices.add(
             up.pkg,
             {
               name: String(b.name ?? ""),
-              granted: up.from ? up.from.network : reach === "ask" ? [] : [reach, "listen"],
+              granted: up.from ? advance(up.from) : reach === "ask" ? [] : [reach, "listen"],
               settings: up.from?.settings ?? {},
               origin,
             },

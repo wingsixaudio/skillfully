@@ -177,7 +177,7 @@ Deno.test("what a device tries is shown for what it is, and a no is remembered",
 
     // What was allowed can be taken away. The device then has to ask again.
     assert((await allow({ revoke: [wanted] })).body.ok);
-    assertEquals(host().manifest.permissions?.network, []);
+    assertEquals(host().granted, []);
     await until("it asks again", () => host().asks.has(wanted), 8000);
     assert(!(await allow({ revoke: ["lan"] })).body.ok, "nothing it does not hold can be taken away");
   } finally {
