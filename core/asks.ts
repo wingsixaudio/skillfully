@@ -113,6 +113,13 @@ export function covered(value: string, grants: string[]): boolean {
 export function grantWords(grant: string): string {
   if (grant === "listen") return "Open ports on this computer, so devices can answer it";
   if (grant === "lan") return "Reach any device on your local network";
+  const filled = /^\{([A-Za-z][A-Za-z0-9]*)\}:(\{[A-Za-z][A-Za-z0-9]*\}|\d+)$/.exec(grant);
+  if (filled) {
+    const port = filled[2].startsWith("{")
+      ? `the port in its "${filled[2].slice(1, -1)}" setting`
+      : `port ${filled[2]}`;
+    return `Reach the address you give it in its "${filled[1]}" setting, ${port}`;
+  }
   const ask = classify(grant);
   return ask ? ask.words : `Reach ${grant}`;
 }

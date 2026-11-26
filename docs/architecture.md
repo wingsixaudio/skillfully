@@ -35,10 +35,10 @@ passes those on under the `generic` capability, so nobody has to describe a modu
 | A status        | The driver's health, with the module's own words          |
 | A settings form | Settings handed to it at start, over its own defaults     |
 
-A superuser adds one from the admin page: choose the module's package (the same file Companion installs), see
-what it is, name the device, and decide. The hub then asks the module what settings it takes and shows them as
-a form. The same module can be added once for each device. `deno task add-module <package.tgz>` does the same
-from a command line.
+A superuser adds one from the admin page, either from the store or from the module's package file (the same
+file Companion installs): see what it is, name the device, and decide. The hub then asks the module what
+settings it takes and shows them as a form. The same module can be added once for each device.
+`deno task add-module <package.tgz>` does the same from a command line.
 
 A device added this way starts with **no access to the network**. When it tries to reach something, the hub
 shows a superuser exactly what, in plain words, and it gets only what they allow. It works like a phone asking

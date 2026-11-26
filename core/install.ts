@@ -105,6 +105,15 @@ export interface ModulePackage {
   files: TarFile[];
 }
 
+/** What the store said about something a hub added from it, kept so the hub can say where a device came from. */
+export interface StoreOrigin {
+  id: string;
+  repo: string;
+  commit: string;
+  license: string;
+  tested: string;
+}
+
 /** What a network choice means, in words a person can weigh. */
 export function networkNotes(network: string[]): string[] {
   const notes: string[] = [];
@@ -271,7 +280,13 @@ export async function installCompanionModule(
 /** Change what was chosen for an added plugin: its mode, its settings, or both. */
 export async function updateInstall(
   dir: string,
-  change: { mode?: Mode; settings?: Record<string, unknown>; denied?: string[] },
+  change: {
+    mode?: Mode;
+    settings?: Record<string, unknown>;
+    denied?: string[];
+    /** Where it came from, when it was added from the store. */
+    store?: StoreOrigin;
+  },
 ): Promise<void> {
   const raw = JSON.parse(await Deno.readTextFile(`${dir}/install.json`));
   await Deno.writeTextFile(`${dir}/install.json`, JSON.stringify({ ...raw, ...change }, null, 2) + "\n");
@@ -287,6 +302,7 @@ export async function readInstall(
     module?: { id: string; name: string; version: string };
     /** Addresses a superuser said no to. */
     denied?: string[];
+    store?: StoreOrigin;
   }
 > {
   try {
@@ -296,6 +312,7 @@ export async function readInstall(
       settings: raw.settings && typeof raw.settings === "object" ? raw.settings : {},
       ...(raw.module && typeof raw.module === "object" ? { module: raw.module } : {}),
       denied: Array.isArray(raw.denied) ? raw.denied.map(String) : [],
+      ...(raw.store && typeof raw.store === "object" ? { store: raw.store } : {}),
     };
   } catch {
     return {};

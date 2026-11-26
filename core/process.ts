@@ -64,6 +64,15 @@ export function resolveNetwork(manifest: DriverManifest, settings: Record<string
     if (entry === "lan") return LAN;
     if (entry === "listen") return LISTEN;
     const i = entry.lastIndexOf(":");
+    // A Companion module only says what settings it takes once it is running, so it has to be able to start
+    // before they are filled in. A grant that waits on a setting gives it nothing until then.
+    if (manifest.runtime === "companion") {
+      const waits = [...entry.matchAll(/\{([A-Za-z][A-Za-z0-9]*)\}/g)].some((m) => {
+        const v = settings[m[1]];
+        return v === undefined || v === null || v === "";
+      });
+      if (waits) return [];
+    }
     return [`${fill(entry.slice(0, i), "host")}:${fill(entry.slice(i + 1), "port")}`];
   });
 }
