@@ -986,6 +986,74 @@ function drawDrivers() {
   }
 }
 
+// A few live rows of what a device reports, and its plain "do this" actions. Asked for again whenever the
+// page is, so a reading that moves is seen to move.
+let tryAsked = 0;
+async function drawTry(id) {
+  const mine = ++tryAsked;
+  const typed = $("tryFind") ? $("tryFind").value.trim() : "";
+  const r = await call("/admin/api/driver/try?" + new URLSearchParams({ id, find: typed }));
+  // Something newer was asked for meanwhile, or the page has moved on to another device.
+  if (mine !== tryAsked || !$("tryList") || here().device !== id || !r.ok) return;
+  const list = $("tryList");
+  list.innerHTML = "";
+  const shown = r.readings.length + r.actions.length;
+  $("tryFind").hidden = !(typed || r.total > shown);
+  $("tryNote").textContent = !r.running
+    ? "It is not running, so there is nothing to show."
+    : !r.total
+    ? "It has reported nothing yet."
+    : r.control
+    ? "What it reports, as it changes, and what it can be told to do."
+    : "What it reports, as it changes. Its buttons work once people can control it.";
+  for (const x of r.readings) {
+    list.append(
+      el(
+        "div",
+        { className: "row reading" },
+        el("span", { style: "flex:1", textContent: x.label }),
+        el("b", { textContent: String(x.value) }),
+      ),
+    );
+  }
+  for (const a of r.actions) {
+    const b = el("button", {
+      type: "button",
+      className: "small quiet",
+      textContent: "Do it",
+      disabled: !r.control || a.options,
+    });
+    b.onclick = () =>
+      sureDo("Tell it to: " + a.label + "?", () => sureCall("/admin/api/driver/do", { id, key: a.key }));
+    list.append(
+      el(
+        "div",
+        { className: "row action" },
+        el(
+          "span",
+          { style: "flex:1" },
+          a.label,
+          a.options
+            ? el("span", { className: "advice", textContent: "It has options. Use a screen for this one." })
+            : "",
+        ),
+        b,
+      ),
+    );
+  }
+  if (typed && !shown) {
+    list.append(el("p", { className: "dim", textContent: "Nothing it has matches that." }));
+  }
+  if (r.total > shown && !typed) {
+    list.append(
+      el("p", {
+        className: "help",
+        textContent: "Showing " + shown + " of " + r.total + ". Type to find the rest.",
+      }),
+    );
+  }
+}
+
 // One device's page. Top to bottom it is the order the work happens in: is it connected, its settings, what
 // it may reach, whether people can control it, which screens use it. Nothing waits on anything else.
 function drawDevice(d, box) {
@@ -1147,6 +1215,34 @@ function drawDevice(d, box) {
       );
     }
   });
+
+  // Try it: a few of the device's own readings as they change, and what it can be told to do. It sits
+  // before the switch that lets people control it, so that what is handed over has been seen working.
+  if (!$("deviceTry")) {
+    const find = el("input", {
+      id: "tryFind",
+      type: "search",
+      placeholder: "Find a reading or an action",
+      hidden: true,
+    });
+    find.setAttribute("aria-label", "Find one of this device's readings or actions");
+    let typing;
+    find.oninput = () => {
+      clearTimeout(typing);
+      typing = setTimeout(() => drawTry(box.dataset.device), 250);
+    };
+    box.append(
+      el(
+        "div",
+        { className: "part", id: "deviceTry" },
+        el("h3", { textContent: "Try it" }),
+        el("p", { className: "dim", id: "tryNote" }),
+        find,
+        el("div", { id: "tryList" }),
+      ),
+    );
+  }
+  drawTry(d.id);
 
   part("deviceControl", "People can control it", (s) => {
     const on = d.mode === "act";

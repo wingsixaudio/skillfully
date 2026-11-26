@@ -4,6 +4,7 @@
 // Changes that hand out power, or take a device out of Listen, ask for the superuser's own PIN or
 // password again. What is wrong with a request is always said before that is asked for.
 
+import type { Value } from "../contract/types.ts";
 import type { Accounts, Person } from "./accounts.ts";
 import type { Approvals } from "./approvals.ts";
 import { aboutWords, advised, attemptWords, grantWords } from "./asks.ts";
@@ -187,6 +188,55 @@ export function adminApi(deps: AdminDeps) {
         ],
       })),
     };
+  }
+
+  /**
+   * A few rows of what a device holds right now, and the things it can be told to do: enough for a
+   * superuser to see that it works. A large device has hundreds, so this is a handful, or what was typed
+   * for, and how many there are in all. Never the whole of it, and nothing here is a setting or a secret:
+   * it is what the device itself reports, which is what any screen given the device would show.
+   */
+  function tryOut(q: URLSearchParams): Response {
+    const host = devices.hosts.get((q.get("id") ?? "").slice(0, 80));
+    if (!host) return refuse(400, "No such device.");
+    const typed = (q.get("find") ?? "").slice(0, 80).toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+    const hit = (text: string) => typed.every((w) => text.toLowerCase().includes(w));
+    const most = typed.length ? 40 : 8;
+    const cut = (v: unknown, long: number) => String(v ?? "").slice(0, long);
+    const readings: { key: string; label: string; value: Value }[] = [];
+    const actions: { key: string; label: string; options: boolean }[] = [];
+    let total = 0;
+    for (const [key, value] of host.state) {
+      const generic = /^generic\/(reading|action)\/([^/]+)(\/(title|options))?$/.exec(key);
+      if (generic && generic[1] === "action") {
+        if (generic[4] !== "title") continue;
+        total++;
+        const k = `generic/action/${generic[2]}`;
+        const options = cut(host.state.get(`${k}/options`), 3);
+        if (hit(`${value} ${k}`) && actions.length < most) {
+          actions.push({ key: k, label: cut(value, 120), options: options !== "" && options !== "[]" });
+        }
+        continue;
+      }
+      if (generic && generic[4]) continue; // a reading's title: shown as its label, not as a row
+      total++;
+      const label = generic ? cut(host.state.get(`${key}/title`) ?? generic[2], 120) : key;
+      if (hit(`${label} ${key}`) && readings.length < most) {
+        readings.push({ key, label, value: typeof value === "string" ? value.slice(0, 200) : value });
+      }
+    }
+    return json(
+      {
+        ok: true,
+        control: host.mode === "act",
+        running: host.status === "running",
+        total,
+        readings,
+        actions,
+      },
+      200,
+      { "cache-control": "no-store" },
+    );
   }
 
   /** What the store lists, a page of it at a time: the whole list is never sent to the page. */
@@ -390,6 +440,27 @@ export function adminApi(deps: AdminDeps) {
         screens.tellPlugins();
         return json({ ok: true });
       }
+      case "driver/do": {
+        // Tell a device to do one thing, from its own page. It is a superuser doing what a person with a
+        // screen could do, so it passes the same checks on the way: the device has to be one people can
+        // control, and what is asked has to be something it offers. Only a plain "do this", with nothing to
+        // fill in. The hub logs it either way, with who asked and that it came from the admin.
+        const host = devices.hosts.get(id);
+        if (!host) return refuse(400, "No such device.");
+        const key = String(b.key ?? "");
+        if (!/^generic\/action\/[^/]{1,200}$/.test(key) || !host.state.has(`${key}/title`)) {
+          return refuse(400, "That is not something this device offers to do.");
+        }
+        const no = await sure();
+        if (no) return no;
+        const done = await host.set(key, true, who);
+        return done.ok ? json({ ok: true }) : refuse(
+          400,
+          done.error.code === "listen_mode"
+            ? "People cannot control this device yet, so nothing is sent to it."
+            : done.error.message,
+        );
+      }
       case "driver/release": {
         const host = devices.hosts.get(id);
         if (!host) return refuse(400, "No such device.");
@@ -576,6 +647,7 @@ export function adminApi(deps: AdminDeps) {
         return await shelf(new URL(req.url).searchParams);
       }
       if (path === "all") return json(await overview(me, session), 200, { "cache-control": "no-store" });
+      if (path === "driver/try") return tryOut(new URL(req.url).searchParams);
       // What the files in the config folder would change. Reading only: applying is a change, made below.
       if (path === "config") {
         return json({ ok: true, ...(await config.overview()), trust: config.trust() }, 200, {

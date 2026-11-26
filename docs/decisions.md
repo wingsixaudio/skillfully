@@ -339,6 +339,14 @@ somebody is typing in or has ticked. Something that hands out power is done at o
 confirmation holds, and otherwise asks for it once. The admin now says "People can control it" and "watched
 only" where it said Act and Listen. The contract, the log and the code keep their words.
 
+**A device can be tried from its own page.** The page shows a few of what the device reports, as it changes,
+and its plain "do this" actions. A large device has hundreds, so the page asks the hub for a handful, or for
+what was typed, and is told how many there are in all. Reading needs a superuser. Telling the device to do
+something needs a superuser who has just confirmed who they are, a device people can control, and an action
+the device itself offers with nothing to fill in. It goes through the same door a screen's command does, so
+the same checks run and it is logged with who asked and that it came from the admin. Anything with options,
+and anything that sets a value, is still done from a screen.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins
