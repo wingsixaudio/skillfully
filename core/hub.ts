@@ -6,7 +6,8 @@
 
 import { DatabaseSync } from "node:sqlite";
 import type { Ability, Mode, ScreenManifest, SkillManifest, Value, Values } from "../contract/mod.ts";
-import { Access } from "./access.ts";
+import { Access, ANY } from "./access.ts";
+import { Approvals } from "./approvals.ts";
 import { Accounts, type Person } from "./accounts.ts";
 import { Capabilities, CAPABILITIES_DIR } from "./capabilities.ts";
 import { PluginHost, type Tuning } from "./host.ts";
@@ -39,6 +40,8 @@ export interface Hub {
   port: number;
   log: Log;
   accounts: Accounts;
+  /** Which connections each screen may use. */
+  approvals: Approvals;
   capabilities: Capabilities;
   /** Drivers, by id. */
   hosts: Map<string, PluginHost>;
@@ -88,6 +91,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   const db = new DatabaseSync(opts.dbPath);
   const log = new Log(db);
   const accounts = new Accounts(db, log);
+  const approvals = new Approvals(db, log);
   const capabilities = await Capabilities.load(opts.capabilitiesDir ?? CAPABILITIES_DIR);
   const gateway = new PluginGateway();
   const hosts = new Map<string, PluginHost>();
@@ -154,7 +158,9 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   function homeFor(person: Person): string | undefined {
     const mine = screensFor(person).map((m) => m.id);
     const wanted = accounts.roles().filter((r) => person.roles.includes(r.id) && r.home).map((r) => r.home!);
-    return wanted.find((id) => mine.includes(id)) ?? mine[0];
+    // A role's home screen first. Failing that, a screen that has been given something to show.
+    return wanted.find((id) => mine.includes(id)) ?? mine.find((id) => approvals.of(id).length > 0) ??
+      (accounts.isSuperuser(person) ? undefined : mine[0]);
   }
   const abilityExists = (plugin: string, ability: string) =>
     !!screens.get(plugin)?.manifest.abilities.some((a) => a.id === ability);
@@ -164,8 +170,26 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   const tell = (ws: WebSocket, m: unknown) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
   };
+  /** The connections a screen could be approved for: drivers with a kind of device the screen works with. */
+  const eligible = (screen: ScreenManifest) =>
+    [...hosts.values()].filter((h) =>
+      Object.keys(h.manifest.capabilities).some((cap) => cap in screen.uses || ANY in screen.uses)
+    );
+  // A screen reaches a connection only when a superuser approved that screen for it, and then only as far as
+  // this person's roles go.
   const visible = (c: Connection) =>
-    [...hosts.values()].filter((h) => Object.keys(h.manifest.capabilities).some((cap) => c.access.sees(cap)));
+    [...hosts.values()].filter((h) =>
+      approvals.allowed(c.screen.id, h.id) &&
+      Object.keys(h.manifest.capabilities).some((cap) => c.access.sees(cap))
+    );
+  /** The definitions of the kinds of device a screen can see, so it can draw values it was not written for. */
+  const definitionsFor = (c: Connection) =>
+    Object.fromEntries(
+      capabilities.list().filter((d) =>
+        visible(c).some((h) => d.capability in h.manifest.capabilities) &&
+        c.access.sees(d.capability)
+      ).map((d) => [d.capability, { title: d.title, values: d.values }]),
+    );
   const describe = (h: PluginHost, c?: Connection) => ({
     id: h.id,
     name: h.manifest.name,
@@ -194,6 +218,9 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   function drop(personId: string): void {
     for (const c of connections) if (c.person.id === personId) c.socket.close(4403, "access changed");
   }
+  function dropScreen(screenId: string): void {
+    for (const c of connections) if (c.screen.id === screenId) c.socket.close(4403, "access changed");
+  }
   function dropEveryone(): void {
     for (const c of connections) c.socket.close(4403, "access changed");
   }
@@ -201,6 +228,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   for (const host of hosts.values()) {
     host.onChange((values) => {
       for (const c of connections) {
+        if (!approvals.allowed(c.screen.id, host.id)) continue;
         const mine = only(c, values);
         if (Object.keys(mine).length) {
           tell(c.socket, { type: "state", plugin: host.id, full: false, values: mine });
@@ -239,7 +267,10 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       const traceid = newId();
       const host = hosts.get(m.plugin);
       let outcome;
-      if (!host || !c.access.canWrite(m.key) || !(capabilityOf(m.key) in host.manifest.capabilities)) {
+      if (
+        !host || !approvals.allowed(c.screen.id, host.id) || !c.access.canWrite(m.key) ||
+        !(capabilityOf(m.key) in host.manifest.capabilities)
+      ) {
         // What a person was not granted, they cannot do, whatever the screen sends. The attempt is on the record.
         const message = `You are not allowed to set ${m.key} on ${m.plugin} from ${c.screen.name}.`;
         log.append({
@@ -373,6 +404,21 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         }
         return json({ ok: true });
       }
+      case "screen/connections": {
+        // Handing a plugin a connection is handing out power, so it asks for the superuser's own secret.
+        const screen = screens.get(id)?.manifest;
+        if (!screen) return refuse(400, "No such screen.");
+        const wanted = Array.isArray(b.drivers) ? b.drivers.map(String) : null;
+        const can = new Set(eligible(screen).map((h) => h.id));
+        if (!wanted || wanted.some((d) => !can.has(d))) {
+          return refuse(400, "A screen can only be given connections of a kind it works with.");
+        }
+        const no = await sure();
+        if (no) return no;
+        const changed = approvals.set(me.id, screen.id, wanted);
+        if (changed.added.length || changed.removed.length) dropScreen(screen.id);
+        return json({ ok: true, ...changed });
+      }
       case "driver/release": {
         const host = hosts.get(id);
         if (!host) return refuse(400, "No such device.");
@@ -446,6 +492,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
             me: { id: me.id, name: me.name, slots: me.slots },
             abilities: access.abilities,
             plugins: mine.map((h) => describe(h, c)),
+            capabilities: definitionsFor(c),
           });
           for (const h of mine) {
             tell(socket, {
@@ -567,6 +614,10 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
                   caution: a.caution,
                 })),
                 suggested: m.roles ?? [],
+                // Which connections this screen could use, and which it has been given.
+                works: Object.keys(m.uses).filter((u) => u !== "log"),
+                eligible: eligible(m).map((h) => ({ id: h.id, name: h.manifest.name })),
+                connections: approvals.of(m.id),
                 slots: [
                   ...new Set(
                     m.abilities.flatMap((a) => Object.values(a.allows)).flatMap((al) =>
@@ -602,6 +653,8 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       if (path === "/admin") return accounts.isSuperuser(me) ? html(adminPage()) : go("/");
       if (path === "/") {
         const to = homeFor(me);
+        // A superuser with no screen that has anything to show has setting up to do.
+        if (!to && accounts.isSuperuser(me)) return go("/admin");
         return to ? go(`/s/${to}`) : html(
           notePage(
             "Nothing here yet",
@@ -650,6 +703,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     port: server.addr.port,
     log,
     accounts,
+    approvals,
     capabilities,
     hosts,
     screens,

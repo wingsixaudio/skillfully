@@ -23,10 +23,14 @@ export const safe = (text: unknown, max = 200) =>
     .replace(/[|`*_\[\]()!#~\\]/g, (c) => `\\${c}`);
 const code = (text: unknown) => "`" + String(text ?? "").replace(/[`\r\n|]/g, "").slice(0, 120) + "`";
 
+/** A kind of device by name, with the one that means all of them spelled out. */
+const kind = (name: string) =>
+  name === "any" ? "**every kind of device on the connections it is given** (`any`)" : code(name);
+
 const allowsText = (capability: string, allows: Allows) =>
   typeof allows === "string"
-    ? `${allows} all of ${code(capability)}`
-    : `${allows.access} ${code(capability)} limited to ${allows.keys.map(code).join(", ")}`;
+    ? `${allows} all of ${kind(capability)}`
+    : `${allows.access} ${kind(capability)} limited to ${allows.keys.map(code).join(", ")}`;
 const abilityText = (a: Ability) =>
   `${safe(a.title)} (${code(a.id)}): ${
     Object.entries(a.allows).map(([c, al]) => allowsText(c, al)).join("; ")
@@ -55,7 +59,7 @@ export function asks(m: Manifest): string[] {
       }%, ${limits.messagesPerSecond ?? 200} messages a second`,
     ];
   }
-  const uses = Object.entries(m.uses ?? {}).map(([k, v]) => `${code(k)} (${v})`).join(", ") || "nothing";
+  const uses = Object.entries(m.uses ?? {}).map(([k, v]) => `${kind(k)} (${v})`).join(", ") || "nothing";
   if (m.kind === "skill") return [`An agent following it would use: ${uses}`, "Runs no code."];
   return [`Uses, at most: ${uses}`, ...m.abilities.map((a) => `Offers the ability: ${abilityText(a)}`)];
 }
@@ -85,9 +89,9 @@ export function more(now: Manifest, was: Manifest): string[] {
   const nowUses = now.kind === "driver" ? {} : now.uses ?? {};
   const wasUses = was.kind === "driver" ? {} : was.uses ?? {};
   for (const [k, v] of Object.entries(nowUses)) {
-    if (!(k in wasUses)) out.push(`uses ${code(k)} (${v})`);
+    if (!(k in wasUses)) out.push(`uses ${kind(k)} (${v})`);
     else if (v === "write" && wasUses[k] === "read") {
-      out.push(`uses ${code(k)} for writing, where it only read`);
+      out.push(`uses ${kind(k)} for writing, where it only read`);
     }
   }
   if (now.kind === "screen" && was.kind === "screen") {

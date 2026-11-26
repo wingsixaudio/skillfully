@@ -1,0 +1,37 @@
+{
+  "kind": "screen",
+  "id": "controls",
+  "name": "Controls",
+  "description": "Every reading, value and action of the connections this screen is approved for, as one plain list. It is for setting equipment up and checking that it answers. It works with any kind of device, including ones nobody wrote a screen for.",
+  "version": "0.1.0",
+  "contract": "1",
+  "entry": "index.html",
+  "uses": {
+    "any": "write"
+  },
+  "abilities": [
+    {
+      "id": "watch",
+      "title": "See every value",
+      "description": "See every reading and value of the connections this screen has been given.",
+      "allows": {
+        "any": "read"
+      }
+    },
+    {
+      "id": "operate",
+      "title": "Change values and trigger actions",
+      "description": "Set any value and trigger any action on the connections this screen has been given.",
+      "caution": "This reaches everything on those connections. Give it to the people who set equipment up, not to everyone.",
+      "allows": {
+        "any": "write"
+      }
+    }
+  ],
+  "roles": [
+    {
+      "name": "Technician",
+      "abilities": ["watch", "operate"]
+    }
+  ]
+}

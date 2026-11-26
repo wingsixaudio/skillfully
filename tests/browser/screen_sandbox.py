@@ -73,8 +73,8 @@ async def main():
         await owner.fill("#code", claim); await owner.fill("#name", "Evan")
         await owner.fill("#secret", OWNER_PIN); await owner.fill("#again", OWNER_PIN)
         if shots: await owner.screenshot(path=f"{shots}/1-setup.png")
-        await owner.click("#go"); await owner.wait_for_url("**/s/one-fader")
-        check("claiming it signs the owner in and lands on a screen", True)
+        await owner.click("#go"); await owner.wait_for_url("**/admin")
+        check("claiming it signs the owner in and lands them where setting up happens", True)
 
         async def admin(path, body):
             r = await owner_ctx.request.post(base + path, data=json.dumps(body), headers={"content-type": "application/json"})
@@ -84,6 +84,21 @@ async def main():
 
         # --- The owner adds Sam, through the People page ---
         await owner.goto(base + "/admin")
+        # --- A screen reaches nothing until the owner gives it a connection ---
+        async def give(screen, *devices):
+            item = owner.locator("#screens .item", has=owner.locator("h3", has_text=screen))
+            await item.get_by_role("button", name="Choose connections").click()
+            for d in devices:
+                await owner.locator("#dlgBody label.check", has_text=d).locator("input").check()
+            await owner.fill("#confirm", OWNER_PIN); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+            return item
+        await owner.wait_for_selector("#screens .item")
+        fader_item = owner.locator("#screens .item", has=owner.locator("h3", has_text="One fader"))
+        check("a new hub has given no screen any connection", "No connections yet" in await fader_item.inner_text(), await fader_item.inner_text())
+        await give("One fader", "Simulated board")
+        await owner.wait_for_selector("#screens .chip.on:has-text('Simulated board')")
+        check("the owner gives One fader the soundboard, with their own PIN", True)
+
         await owner.fill("#newName", "Sam"); await owner.click("#add button")
         await owner.get_by_text("Add the suggested role Musician").click()
         await owner.wait_for_selector("#roles h3:has-text('Musician')")
@@ -175,6 +190,20 @@ async def main():
         check("turning a person off signs their phone out within seconds", True)
         # WebKit reports a refused attempt to leave the sandbox as a page error. That is the sandbox working.
         unexpected = [e for e in errors if "allow-top-navigation" not in e]
+        # --- A screen nobody wrote for a device: Controls, given only the switch ---
+        await owner.goto(base + "/admin"); await owner.wait_for_selector("#screens .item")
+        await give("Controls", "Simulated switch")
+        await owner.goto(base + "/s/controls"); await owner.wait_for_timeout(1200)
+        cf = next((f for f in owner.frames if "/screens/controls/" in f.url), None)
+        if check("Controls is framed like any other screen", cf is not None):
+            cards = await cf.locator(".card h2").all_text_contents()
+            check("it shows the switch it was given, and not the soundboard it was not", cards == ["Simulated switch"], str(cards))
+            outlet = cf.locator(".row", has_text="switch/outlet/2/on")
+            await outlet.get_by_role("button").click(); await owner.wait_for_timeout(700)
+            check("pressing a value it was never written for changes the device", (await state("sim-switch"))["switch/outlet/2/on"] is True)
+            check("and the screen shows what the device now holds", await outlet.get_by_role("button").inner_text() == "On")
+            if shots: await owner.screenshot(path=f"{shots}/4-controls.png", full_page=True)
+
         check("no page errors", not unexpected, "; ".join(unexpected))
         await b.close()
 

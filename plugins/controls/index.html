@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Skillfully: controls</title>
+    <style>
+    :root {
+      --chassis: #000;
+      --panel: #121214;
+      --rail: #26262b;
+      --text: #f4f4f5;
+      --dim: #a1a1aa;
+      --accent: #f7941d;
+      --ok: #4ade80;
+      --bad: #f87171;
+      --font: "Montserrat", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html,
+    body {
+      margin: 0;
+      background: var(--chassis);
+      color: var(--text);
+      font-family: var(--font);
+    }
+    body {
+      min-height: 100dvh;
+      padding: 16px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left));
+    }
+    main {
+      max-width: 620px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 4px 2px 0;
+    }
+    header .link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--dim);
+      flex: none;
+    }
+    .led {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--bad);
+    }
+    .led.on {
+      background: var(--ok);
+    }
+    input,
+    select,
+    button {
+      font: inherit;
+      color: var(--text);
+      background: var(--rail);
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 9px 12px;
+      min-height: 40px;
+    }
+    input:focus-visible,
+    select:focus-visible,
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    #find {
+      flex: 1;
+      min-width: 0;
+    }
+    button {
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.on {
+      background: var(--accent);
+      color: #000;
+    }
+    button:disabled,
+    input:disabled,
+    select:disabled {
+      opacity: .45;
+      cursor: default;
+    }
+    .card {
+      background: var(--panel);
+      border-radius: 16px;
+      padding: 18px;
+    }
+    .card h2 {
+      font-size: 17px;
+      font-weight: 600;
+      margin: 0;
+    }
+    .card .sub {
+      margin: 3px 0 12px;
+      font-size: 13px;
+      color: var(--dim);
+    }
+    .sub .bad {
+      color: var(--bad);
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid var(--rail);
+      flex-wrap: wrap;
+    }
+    .name {
+      min-width: 0;
+      flex: 1 1 180px;
+    }
+    .name b {
+      display: block;
+      font-size: 15px;
+      font-weight: 500;
+    }
+    .name code {
+      display: block;
+      font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--dim);
+      overflow-wrap: anywhere;
+    }
+    .ctl {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .ctl input[type="number"] {
+      width: 96px;
+    }
+    .ctl input[type="text"] {
+      width: 150px;
+    }
+    .value {
+      font-variant-numeric: tabular-nums;
+      overflow-wrap: anywhere;
+      text-align: right;
+      max-width: 260px;
+    }
+    .said {
+      flex-basis: 100%;
+      margin: 0;
+      font-size: 13px;
+      color: var(--ok);
+      min-height: 0;
+    }
+    .opts[hidden] {
+      display: none;
+    }
+    .said:empty {
+      display: none;
+    }
+    .said.bad {
+      color: var(--bad);
+    }
+    .opts {
+      flex-basis: 100%;
+      display: grid;
+      gap: 8px;
+      padding: 4px 0 2px;
+    }
+    .opts label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 14px;
+      color: var(--dim);
+    }
+    .empty {
+      color: var(--dim);
+      font-size: 14px;
+      margin: 0;
+    }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <input id="find" type="search" placeholder="Find a value or an action"
+          aria-label="Find a value or an action">
+        <div class="link"
+          aria-live="polite"><i class="led" id="led"></i><span id="linkText">Connecting</span></div>
+      </header>
+      <div id="list"></div>
+      <p class="empty" id="nothing" hidden></p>
+    </main>
+    <script>
+    (() => {
+      const $ = (id) => document.getElementById(id);
+      const toHub = (m) => parent.postMessage(m, "*");
+      const el = (tag, props = {}, ...kids) => {
+        const e = Object.assign(document.createElement(tag), props);
+        e.append(...kids);
+        return e;
+      };
+      const MOST = 150; // rows drawn per connection; the box above narrows the rest
+
+      let canOperate = false, defs = {}, plugins = [], ref = 0, shape = "";
+      const state = new Map(); // connection id -> Map(key -> value)
+      const rows = new Map(); // "connection|key" -> { show(value), said(text, bad) }
+      const asked = new Map(); // ref -> "connection|key"
+
+      // --- Working out what a key is, from the definitions the hub handed over ---
+
+      function defOf(key) {
+        const slash = key.indexOf("/");
+        const parts = key.slice(slash + 1).split("/");
+        for (const def of (defs[key.slice(0, slash)] || { values: [] }).values) {
+          const want = def.key.split("/");
+          if (want.length === parts.length && want.every((w, i) => w.startsWith("{") || w === parts[i])) {
+            return def;
+          }
+        }
+        return null;
+      }
+      const bound = (plugin, key, v) => {
+        if (typeof v === "number") return v;
+        if (typeof v !== "string") return undefined;
+        let at = plugin.capabilities[key.slice(0, key.indexOf("/"))];
+        for (const part of v.split(".")) at = at == null ? undefined : at[part];
+        return typeof at === "number" ? at : undefined;
+      };
+      const parse = (text) => {
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      };
+
+      /** Everything one connection has, as rows: what it is called, what it holds, and how to change it. */
+      function itemsOf(plugin) {
+        const values = state.get(plugin.id) || new Map();
+        const out = [];
+        for (const [key, value] of values) {
+          const generic = /^generic\/(reading|action)\/([^/]+)(\/(title|options))?$/.exec(key);
+          if (generic) {
+            const [, what, name, , extra] = generic;
+            if (what === "reading" && !extra) {
+              out.push({ key, label: values.get(key + "/title") || name, kind: "text", writable: false });
+            } else if (what === "action" && extra === "title") {
+              const k = "generic/action/" + name;
+              out.push({
+                key: k,
+                label: value,
+                kind: "trigger",
+                writable: true,
+                fields: parse(values.get(k + "/options") || "[]") || [],
+              });
+            }
+            continue;
+          }
+          const def = defOf(key);
+          if (!def) continue;
+          out.push({
+            key,
+            label: def.title,
+            kind: def.kind,
+            writable: def.writable,
+            unit: def.unit,
+            min: bound(plugin, key, def.min),
+            max: bound(plugin, key, def.max),
+          });
+        }
+        return out.sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+      }
+
+      const send = (plugin, key, value) => {
+        asked.set(++ref, {
+          row: plugin.id + "|" + key,
+          trigger: key.startsWith("generic/action/") || (defOf(key) || {}).kind === "trigger",
+        });
+        toHub({ type: "set", plugin: plugin.id, key, value, ref });
+      };
+
+      // --- Drawing ---
+
+      function control(plugin, item, can) {
+        const values = state.get(plugin.id);
+        const value = values.get(item.key);
+        const said = el("p", { className: "said", role: "status" });
+        const row = el(
+          "div",
+          { className: "row" },
+          el(
+            "div",
+            { className: "name" },
+            el("b", { textContent: item.label }),
+            el("code", { textContent: item.key }),
+          ),
+        );
+        const ctl = el("div", { className: "ctl" });
+        let show = () => {};
+
+        if (item.kind === "trigger") {
+          const go = el("button", {
+            type: "button",
+            textContent: item.fields.length ? "Options" : "Do it",
+            disabled: !can,
+          });
+          const form = el("div", { className: "opts", hidden: true });
+          const inputs = item.fields.map((f) => {
+            let input;
+            if (Array.isArray(f.choices)) {
+              input = el(
+                "select",
+                {},
+                ...f.choices.map((c) =>
+                  el("option", { value: String(c.id), textContent: String(c.label ?? c.id) })
+                ),
+              );
+              input.value = String(f.default ?? "");
+            } else if (f.type === "checkbox") input = el("input", { type: "checkbox", checked: !!f.default });
+            else if (f.type === "number") {
+              input = el("input", {
+                type: "number",
+                value: f.default ?? "",
+                min: f.min ?? "",
+                max: f.max ?? "",
+                step: "any",
+              });
+            } else input = el("input", { type: "text", value: f.default ?? "" });
+            form.append(el("label", {}, el("span", { textContent: f.label || f.id }), input));
+            return { f, input };
+          });
+          const fire = el("button", { type: "button", className: "on", textContent: "Do it" });
+          if (inputs.length) form.append(fire);
+          const read = () => {
+            const o = {};
+            for (const { f, input } of inputs) {
+              o[f.id] = input.type === "checkbox"
+                ? input.checked
+                : input.type === "number"
+                ? Number(input.value)
+                : Array.isArray(f.choices)
+                ? (f.choices.find((c) => String(c.id) === input.value) || {}).id ?? input.value
+                : input.value;
+            }
+            return JSON.stringify(o);
+          };
+          go.onclick = () => inputs.length ? (form.hidden = !form.hidden) : send(plugin, item.key, true);
+          fire.onclick = () => send(plugin, item.key, read());
+          ctl.append(go);
+          row.append(ctl, form, said);
+        } else if (item.kind === "boolean" && item.writable) {
+          const b = el("button", { type: "button", disabled: !can });
+          show = (v) => {
+            b.textContent = v ? "On" : "Off";
+            b.classList.toggle("on", !!v);
+            b.setAttribute("aria-pressed", String(!!v));
+            b.onclick = () => send(plugin, item.key, !v);
+          };
+          ctl.append(b);
+          row.append(ctl, said);
+        } else if (item.writable && (item.kind === "number" || item.kind === "text")) {
+          const number = item.kind === "number";
+          const input = el("input", {
+            type: number ? "number" : "text",
+            disabled: !can,
+            step: "any",
+            "aria-label": item.label,
+          });
+          if (number && item.min !== undefined) input.min = item.min;
+          if (number && item.max !== undefined) input.max = item.max;
+          const set = el("button", { type: "button", textContent: "Set", disabled: !can });
+          const commit = () =>
+            input.value !== "" && send(plugin, item.key, number ? Number(input.value) : input.value);
+          set.onclick = commit;
+          input.onkeydown = (e) => e.key === "Enter" && commit();
+          show = (v) => {
+            if (document.activeElement !== input) input.value = v ?? "";
+          };
+          ctl.append(
+            input,
+            ...(item.unit ? [el("span", { className: "value", textContent: item.unit })] : []),
+            set,
+          );
+          row.append(ctl, said);
+        } else {
+          const text = el("span", { className: "value" });
+          show = (
+            v,
+          ) => (text.textContent =
+            (typeof v === "boolean" ? (v ? "On" : "Off") : v === "" || v == null ? "—" : String(v)) +
+            (item.unit ? " " + item.unit : ""));
+          ctl.append(text);
+          row.append(ctl, said);
+        }
+        show(value);
+        rows.set(plugin.id + "|" + item.key, {
+          show,
+          said: (t, bad) => {
+            said.textContent = t;
+            said.classList.toggle("bad", !!bad);
+          },
+        });
+        return row;
+      }
+
+      function draw() {
+        const find = $("find").value.trim().toLowerCase();
+        const list = $("list");
+        list.innerHTML = "";
+        rows.clear();
+        for (const plugin of plugins) {
+          const all = itemsOf(plugin);
+          const items = find ? all.filter((i) => (i.label + " " + i.key).toLowerCase().includes(find)) : all;
+          if (find && !items.length) continue;
+          const can = canOperate && plugin.mode === "act" && plugin.status === "running";
+          const health = plugin.status !== "running"
+            ? "Not running"
+            : plugin.health.status === "ok"
+            ? "Connected"
+            : (plugin.health.reason || plugin.health.status);
+          const sub = el(
+            "p",
+            { className: "sub" },
+            el("span", {
+              className: plugin.status === "running" && plugin.health.status === "ok" ? "" : "bad",
+              textContent: health,
+            }),
+          );
+          if (plugin.mode !== "act") sub.append(" · Listen mode: nothing is sent to it");
+          else if (!canOperate) sub.append(" · You can look, not change");
+          const card = el("section", { className: "card" }, el("h2", { textContent: plugin.name }), sub);
+          for (const item of items.slice(0, MOST)) card.append(control(plugin, item, can));
+          if (items.length > MOST) {
+            card.append(
+              el("p", {
+                className: "empty",
+                textContent: "Showing " + MOST + " of " + items.length + ". Type above to narrow it.",
+              }),
+            );
+          }
+          if (!all.length) {
+            card.append(el("p", { className: "empty", textContent: "It has not reported anything yet." }));
+          }
+          list.append(card);
+        }
+        const none = $("nothing");
+        none.hidden = list.children.length > 0;
+        none.textContent = plugins.length
+          ? "Nothing matches that."
+          : "This screen has not been given any connections yet. A superuser chooses them under Screens.";
+      }
+
+      // The set of rows only changes when keys come or go. A value changing just updates its row.
+      const shapeNow = () =>
+        plugins.map((p) =>
+          p.id + ":" + p.mode + ":" + p.status + ":" + p.health.status + ":" +
+          [...(state.get(p.id) || new Map()).keys()].join(",")
+        ).join("|") + canOperate;
+      let drawing = false;
+      function refresh(changed) {
+        const now = shapeNow();
+        if (now !== shape || !changed) {
+          shape = now;
+          if (!drawing) {
+            drawing = true;
+            requestAnimationFrame(() => ((drawing = false), draw()));
+          }
+          return;
+        }
+        for (const [id, value] of changed) rows.get(id)?.show(value);
+      }
+
+      $("find").addEventListener("input", () => draw());
+
+      addEventListener("message", (ev) => {
+        if (ev.source !== parent) return;
+        const m = ev.data;
+        if (m.type === "link") {
+          $("led").classList.toggle("on", m.up);
+          $("linkText").textContent = m.up ? "Connected" : "Reconnecting";
+        }
+        if (m.type === "hello") {
+          canOperate = (m.abilities || []).includes("operate");
+          defs = m.capabilities || {};
+          state.clear();
+        }
+        if (m.type === "hello" || m.type === "plugins") {
+          plugins = m.plugins;
+          refresh();
+        }
+        if (m.type === "state") {
+          const values = m.full ? new Map() : state.get(m.plugin) || new Map();
+          const changed = [];
+          for (const [k, v] of Object.entries(m.values)) {
+            values.set(k, v);
+            changed.push([m.plugin + "|" + k, v]);
+          }
+          state.set(m.plugin, values);
+          refresh(changed);
+        }
+        if (m.type === "ack") {
+          const was = asked.get(m.ref);
+          asked.delete(m.ref);
+          const row = was && rows.get(was.row);
+          if (!row) return;
+          if (m.ok) {
+            row.said(
+              m.superseded ? "" : was.trigger ? "Done" : m.adjusted ? "The device set it to " + m.value : "Set",
+            );
+          } else row.said(m.error.message, true);
+        }
+      });
+
+      draw();
+      toHub({ type: "ready" });
+    })();
+    </script>
+  </body>
+</html>

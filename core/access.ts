@@ -11,6 +11,16 @@ import type { Person } from "./accounts.ts";
 type Pattern = string[]; // one entry per part of a key; "*" is any one part
 const ALL: Pattern[] = [["**"]];
 
+/**
+ * In `uses` and in an ability's `allows`, this name stands for every kind of device on the connections the
+ * screen has been approved for. It never covers the hub's log, which is always asked for by name.
+ */
+export const ANY = "any";
+/** Names that mean something to the hub itself, so no capability may take them. */
+export const RESERVED = ["log", ANY];
+const covers = (name: string, capability: string) =>
+  name === capability || (name === ANY && capability !== "log");
+
 export class Access {
   /** Capability to the patterns a person may read and may write. */
   #read = new Map<string, Pattern[]>();
@@ -29,7 +39,7 @@ export class Access {
     }
     for (const ability of granted) {
       for (const [capability, allows] of Object.entries(ability.allows)) {
-        const ceiling = screen.uses[capability];
+        const ceiling = screen.uses[capability] ?? (capability === "log" ? undefined : screen.uses[ANY]);
         if (!ceiling) continue; // an ability cannot reach past what the screen declared
         const access: Level = typeof allows === "string" ? allows : allows.access;
         const patterns = typeof allows === "string" ? ALL : fill(allows.keys, person);
@@ -54,7 +64,7 @@ export class Access {
 
   /** May this person see anything of this capability? */
   sees(capability: string): boolean {
-    return this.#read.has(capability);
+    return [...this.#read.keys()].some((name) => covers(name, capability));
   }
 
   canRead(key: string): boolean {
@@ -87,8 +97,9 @@ function fill(keys: string[], person: Person): Pattern[] {
 
 function matches(map: Map<string, Pattern[]>, key: string): boolean {
   const slash = key.indexOf("/");
-  const patterns = map.get(slash < 0 ? key : key.slice(0, slash));
-  if (!patterns) return false;
+  const capability = slash < 0 ? key : key.slice(0, slash);
+  const patterns = [...map].filter(([name]) => covers(name, capability)).flatMap(([, p]) => p);
+  if (!patterns.length) return false;
   const parts = slash < 0 ? [] : key.slice(slash + 1).split("/");
   return patterns.some((p) =>
     p[0] === "**" || (p.length === parts.length && p.every((want, i) => want === "*" || want === parts[i]))
@@ -102,7 +113,7 @@ export function abilitiesProblem(screen: ScreenManifest): string | null {
     if (seen.has(a.id)) return `it lists the ability "${a.id}" twice`;
     seen.add(a.id);
     for (const [capability, allows] of Object.entries(a.allows)) {
-      const ceiling = screen.uses[capability];
+      const ceiling = screen.uses[capability] ?? (capability === "log" ? undefined : screen.uses[ANY]);
       if (!ceiling) {
         return `its ability "${a.id}" allows "${capability}", which the screen does not list under uses`;
       }
