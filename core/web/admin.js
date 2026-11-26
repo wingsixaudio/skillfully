@@ -62,6 +62,7 @@ function showPlace() {
     else a.removeAttribute("aria-current");
   }
   document.title = PLACES[place] + " | Skillfully";
+  if (place === "hub") drawConfig();
 }
 // Moving between places changes the address and nothing else: no page is fetched again.
 function go(to) {
@@ -134,6 +135,8 @@ async function load() {
   drawScreens();
   drawDrivers();
   drawPolicy(r.policy);
+  // Reading every file is more work than the rest of this, so it is done less often.
+  if (here().place === "hub" && Date.now() - configDrawn > 15000) drawConfig();
 }
 
 function drawPeople() {
@@ -578,6 +581,46 @@ function drawHome() {
     );
     rows.append(a);
   }
+}
+
+// --- Config as text ---
+// What is decided about each device is also a file in the hub's data folder. This shows what the files
+// say that the hub does not: what an edit would change, and anything wrong with a file. It reads only.
+let configDrawn = 0;
+async function drawConfig() {
+  configDrawn = Date.now();
+  const r = await call("/admin/api/config");
+  $("secConfig").hidden = !r.ok || !r.on;
+  if (!r.ok || !r.on) return;
+  $("configWhere").textContent = "Everything decided about each device is also a file, one per device, in " +
+    r.where + "/devices. A person or an agent can read them, and propose a change by editing one. " +
+    "No secret is ever written there.";
+  const box = $("configList");
+  box.innerHTML = "";
+  for (const p of r.problems) {
+    box.append(el("p", { className: "status bad", textContent: p.file + " was not read: " + p.message }));
+  }
+  for (const c of r.changes) {
+    box.append(
+      el(
+        "div",
+        { className: "item" },
+        el("p", { style: "margin:0 0 6px", textContent: c.words }),
+        el("span", {
+          className: "chip" + (c.power ? " on" : ""),
+          textContent: c.power ? "Would wait for your yes" : "Would apply at once",
+        }),
+      ),
+    );
+  }
+  for (const n of r.notes) box.append(el("p", { className: "help", textContent: n.words }));
+  const any = r.problems.length + r.changes.length + r.notes.length;
+  if (!any) {
+    box.append(el("p", { className: "status ok", textContent: "The files say the same as the hub." }));
+  }
+  $("configNext").textContent = r.changes.length
+    ? "Nothing above has been done. Applying what a file says is the next thing to be built."
+    : "";
 }
 
 // --- Devices ---

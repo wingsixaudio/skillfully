@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:skillfully:config:1:device",
+  "title": "One device, as the hub's config folder holds it",
+  "description": "config/devices/<id>.json. What a superuser decided about one device. A key that is left out means: leave that as it is. No secret is ever in this file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "id"],
+  "properties": {
+    "kind": { "const": "device" },
+    "id": {
+      "description": "The device's id on this hub. It is also the file's name.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+    },
+    "name": {
+      "description": "What people call it. Written by the hub. Renaming from this file is not built yet.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "control": {
+      "description": "Whether people can control it. false: the hub only watches it and sends it nothing.",
+      "type": "boolean"
+    },
+    "settings": {
+      "description": "Its own settings, by the names it gives them. Secrets are never here: they stay in the hub.",
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "type": "string", "minLength": 1, "maxLength": 64 },
+      "additionalProperties": { "type": ["string", "number", "boolean"], "maxLength": 2000 }
+    },
+    "reach": {
+      "description": "What it may reach on the network. Each list, when given, is the whole list.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowed": { "$ref": "#/$defs/grants" },
+        "refused": { "$ref": "#/$defs/grants" }
+      }
+    },
+    "from": {
+      "description": "Where it came from. Written by the hub, for reading.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": { "enum": ["hub", "file", "store"] },
+        "store": { "type": "string", "maxLength": 80 },
+        "version": { "type": "string", "maxLength": 40 },
+        "commit": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "note": {
+      "description": "Anything worth saying about this device. The hub keeps it and never reads it.",
+      "type": "string",
+      "maxLength": 2000
+    }
+  },
+  "$defs": {
+    "grants": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+    }
+  }
+}

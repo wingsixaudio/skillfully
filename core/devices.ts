@@ -87,6 +87,18 @@ export class Devices {
     return this.deps.registry.get(id)!;
   }
 
+  /** What a device is called, and which of its settings are secrets once it has said what it takes. */
+  known(id: string): { name: string; secrets: Set<string> | null } | undefined {
+    const host = this.hosts.get(id);
+    if (!host) return undefined;
+    return {
+      name: host.manifest.name,
+      secrets: host.settingsForm
+        ? new Set(host.settingsForm.filter((f) => f.kind === "secret").map((f) => f.id))
+        : null,
+    };
+  }
+
   /** Take in a driver. The first time the hub sees it, its record is made from what was chosen at start. */
   adopt(manifest: DriverManifest, dir: string, first: DriverChoices = {}): PluginHost {
     const { registry, log } = this.deps;
