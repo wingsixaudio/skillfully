@@ -62,3 +62,13 @@ Deno.test("grants and refused attempts are said in plain words", () => {
   assertEquals(attemptWords("run"), "start another program");
   assert(attemptWords("something-new").includes("something-new"));
 });
+
+Deno.test("a module reaching for no address at all is not a question for anyone", () => {
+  // Seen from a real module with its address not yet filled in: it tried "undefined:1234".
+  for (const nowhere of ["undefined:1234", "null:80", "NaN:9999", "UNDEFINED:1"]) {
+    assertEquals(classify(nowhere), null, nowhere);
+    assert(!covered(nowhere, ["lan", "listen"]), "and nothing a device holds covers it");
+  }
+  // A device really called something like that is still a name on the network.
+  assertEquals(classify("undefined.local:80")?.where, "name");
+});
