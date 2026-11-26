@@ -4,7 +4,7 @@
 
 import { assert, assertEquals } from "./assert.ts";
 import type { DriverManifest } from "../contract/mod.ts";
-import { inspectImports, loadManifest } from "../core/process.ts";
+import { inspectImports, loadManifest, parsePs, usageViaPs } from "../core/process.ts";
 import { board, FIXTURES, hubWith, LEVEL, ofType, Phone, SIM, until } from "./helpers.ts";
 
 const MIS = `${FIXTURES}/misbehave`;
@@ -83,7 +83,7 @@ Deno.test("memory outside the script heap still counts, and three strikes means 
   const strikes = ofType(hub, "skillfully.plugin.limit");
   assertEquals(strikes.map((e) => e.data.limit), ["memory", "memory", "memory"]);
   assertEquals(strikes.map((e) => e.data.strike), [1, 2, 3]);
-  assertEquals(strikes[0].data.allowed, "64 MB");
+  assertEquals(strikes[0].data.allowed, "128 MB");
   assertEquals(ofType(hub, "skillfully.plugin.quarantined").length, 1);
   assertEquals(
     ofType(hub, "skillfully.plugin.crashed").length,
@@ -193,4 +193,18 @@ Deno.test("values a plugin never declared, and oversized messages, are ignored a
   assert(problems.some((p) => p.includes("its manifest does not declare")));
   assert(!hub.hosts.get("misbehave")!.state.has("console/input/7/bus/3/level"));
   await hub.stop();
+});
+
+Deno.test("memory and processor readings work through ps, the way macOS needs", async () => {
+  // What macOS prints: kilobytes, then minutes:seconds.hundredths.
+  assertEquals(parsePs("  52144   0:01.25\n"), { memory: 52144 * 1024, cpuMs: 1250 });
+  // What Linux prints: hours:minutes:seconds. And a long-running process with days.
+  assertEquals(parsePs("40812 00:02:03\n"), { memory: 40812 * 1024, cpuMs: 123000 });
+  assertEquals(parsePs(" 1024 1-01:00:00\n"), { memory: 1024 * 1024, cpuMs: 90000000 });
+  assertEquals(parsePs(""), null);
+  assertEquals(parsePs("52144\n"), null, "one column means the reading failed, not zero processor time");
+
+  const mine = await usageViaPs(Deno.pid);
+  assert(mine && mine.memory > 10 * 1024 * 1024, "ps can read this very process");
+  assertEquals(await usageViaPs(999999999), null);
 });

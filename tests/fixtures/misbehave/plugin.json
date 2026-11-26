@@ -21,6 +21,6 @@
     "type": "object"
   },
   "limits": {
-    "memoryMb": 64
+    "memoryMb": 128
   }
 }

@@ -176,19 +176,29 @@ export async function usageOf(pid: number): Promise<Usage | null> {
       if (!Number.isFinite(pages) || !Number.isFinite(ticks)) return null;
       return { memory: pages * 4096, cpuMs: ticks * 10 };
     }
-    const out = await new Deno.Command("ps", {
-      args: ["-o", "rss=,time=", "-p", String(pid)],
-      stdout: "piped",
-    }).output();
-    const m = /^\s*(\d+)\s+(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)/.exec(
-      new TextDecoder().decode(out.stdout),
-    );
-    if (!m) return null;
-    const seconds = Number(m[2] ?? 0) * 86400 + Number(m[3] ?? 0) * 3600 + Number(m[4]) * 60 + Number(m[5]);
-    return { memory: Number(m[1]) * 1024, cpuMs: seconds * 1000 };
+    return await usageViaPs(pid);
   } catch {
     return null;
   }
+}
+
+/** Read one line of `ps` output: memory in kilobytes, then processor time as [days-][hours:]minutes:seconds. */
+export function parsePs(text: string): Usage | null {
+  const m = /^\s*(\d+)\s+(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)\s*$/.exec(text);
+  if (!m) return null;
+  const seconds = Number(m[2] ?? 0) * 86400 + Number(m[3] ?? 0) * 3600 + Number(m[4]) * 60 + Number(m[5]);
+  return { memory: Number(m[1]) * 1024, cpuMs: Math.round(seconds * 1000) };
+}
+
+/** The same reading through `ps`, for systems without /proc (macOS, the BSDs). */
+export async function usageViaPs(pid: number): Promise<Usage | null> {
+  // Each column gets its own -o. On macOS a header given with "=" swallows the rest of the argument.
+  const out = await new Deno.Command("ps", {
+    args: ["-o", "rss=", "-o", "time=", "-p", String(pid)],
+    stdout: "piped",
+    stderr: "null",
+  }).output();
+  return out.success ? parsePs(new TextDecoder().decode(out.stdout)) : null;
 }
 
 const MAX_MESSAGE_CHARS = 8_000_000;
