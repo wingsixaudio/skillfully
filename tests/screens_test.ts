@@ -252,7 +252,13 @@ Deno.test("the hub's own pages run only the hub's own scripts", async () => {
     // What a page is filled in with is text, whatever it holds.
     const shell = await (await hub.get("/s/one-fader")).text();
     assert(
-      shell.includes('data-screen="one-fader"') && shell.includes('src="/screens/one-fader/index.html"'),
+      shell.includes('data-screen="one-fader"') && shell.includes('data-src="/screens/one-fader/index.html"'),
+    );
+    // The screen's address is handed to the frame's script, which gives it to the screen only once it is
+    // listening. A screen says "ready" once, and it must not be able to say it to nobody.
+    assert(
+      !/<iframe[^>]*\ssrc=/.test(shell),
+      "the screen cannot start loading before the frame is listening",
     );
 
     const script = await hub.get("/_hub/admin.js", null);

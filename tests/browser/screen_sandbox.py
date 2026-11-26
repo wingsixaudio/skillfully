@@ -133,6 +133,25 @@ async def main():
         fr = next((f for f in pg.frames if "/screens/one-fader/" in f.url), None)
         if not check("the screen is framed", fr is not None): await b.close(); return
         check("the screen is linked to the hub through the shell", await fr.inner_text("#linkText") == "Connected")
+
+        # The screen says "ready" once. Whichever of the frame's script and the screen's page arrives first, the
+        # screen must end up connected. Here the frame's script is held back, and then the screen's page is.
+        async def linked_when_late(what, pattern):
+            late = await sam_ctx.new_page()
+            async def hold(route):
+                await asyncio.sleep(1.5)
+                await route.continue_()
+            await late.route(pattern, hold)
+            await late.goto(f"{base}/s/one-fader")
+            ok = True
+            try:
+                await late.frame_locator("#screen").locator("#linkText", has_text="Connected").wait_for(timeout=8000)
+            except Exception:
+                ok = False
+            check(f"the screen connects when {what} arrives late", ok)
+            await late.close()
+        await linked_when_late("the frame's own script", "**/_hub/shell.js")
+        await linked_when_late("the screen's page", "**/screens/one-fader/index.html")
         check("it knows which ear mix is Sam's", "bus 1" in await fr.inner_text("#inputName"), await fr.inner_text("#inputName"))
         check("the shell shows who is signed in", await pg.inner_text("#who") == "Sam")
         links = await pg.locator("#links a").all_text_contents()

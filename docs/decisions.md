@@ -142,6 +142,12 @@ line.
 of JavaScript inside a string, which nobody could lint, format or read comfortably. The pages are ordinary
 files in `core/web/` now, and their policy no longer allows a script written into a page to run at all.
 
+**A screen is given its address only once its frame is listening.** A screen says "ready" once, and the frame
+opens its connection when it hears that. When the frame's script became a file of its own, a screen could
+finish loading first and say "ready" to nobody, and then sat on "Connecting" for good. The frame's script now
+hands the screen its address after it has started listening, so the order cannot go wrong, and a browser check
+holds each side back in turn to prove it.
+
 **One file for outside tools.** The plugin store checks and builds packages with the platform's own code, so
 the two can never disagree. It used to import five internal files by path. `mod.ts` is now the whole of what a
 tool outside this repository may import, and everything behind it can be rearranged freely.

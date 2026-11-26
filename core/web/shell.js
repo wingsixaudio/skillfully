@@ -44,6 +44,10 @@
     }
   });
 
+  // The screen says "ready" once, when it has loaded. So it is only given its address now, after the
+  // listener above exists: a screen that loads quickly can never speak before anyone is listening.
+  frame.src = frame.dataset.src;
+
   fetch("/auth/me").then((r) => r.json()).then((me) => {
     if (!me.person) return;
     document.getElementById("who").textContent = me.person.name;
