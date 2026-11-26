@@ -5,6 +5,7 @@
 import type { Manifest } from "../contract/mod.ts";
 import { abilitiesProblem } from "./access.ts";
 import type { Capabilities } from "./capabilities.ts";
+import { realPath } from "./paths.ts";
 import { inspectImports, loadManifest } from "./process.ts";
 
 export interface Inspected {
@@ -30,7 +31,7 @@ export async function inspectPlugin(
   opts: { imports?: boolean } = {},
 ): Promise<Inspected> {
   const manifest = await loadManifest(dir);
-  const real = await Deno.realPath(dir);
+  const real = await realPath(dir);
   const warnings: string[] = [];
 
   if (!(await isFile(`${real}/${manifest.entry}`))) {

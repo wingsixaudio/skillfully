@@ -6,7 +6,9 @@ export function assert(condition: unknown, message?: string): asserts condition 
 }
 
 export function assertEquals<T>(actual: T, expected: T, message?: string): void {
-  nodeAssert.deepStrictEqual(actual, expected, message);
+  // Passed only when there is one. An explicit undefined hides the real difference behind a type error.
+  if (message === undefined) nodeAssert.deepStrictEqual(actual, expected);
+  else nodeAssert.deepStrictEqual(actual, expected, message);
 }
 
 /** Passes when fn throws an error whose message contains `includes`. */

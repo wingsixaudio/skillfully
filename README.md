@@ -55,6 +55,7 @@ invitation it shows.
 deno task test                             # every test
 deno task check-plugin plugins/one-fader   # what the hub would say about a plugin
 deno task conformance plugins/sim-switch   # prove a driver keeps the contract
+tests/browser/run.sh chromium              # the real-browser test (needs Python and Playwright)
 ```
 
 The first run downloads one library (the JSON Schema validator). After that it runs offline.

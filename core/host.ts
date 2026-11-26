@@ -84,9 +84,12 @@ export class PluginHost {
   #messages = 0;
   #messagesSince = 0;
   #floodSeconds = 0;
+  /** Why the plugin last failed to start or stopped, in a sentence. Shown to whoever is waiting for it. */
+  #lastProblem = "";
   #logTokens = LOG_BURST;
   #logRefilledAt = 0;
   #logDropped = 0;
+  #mutedAt = 0;
   #checking = false;
   #readyWaiters: (() => void)[] = [];
   #changeListeners = new Set<(values: Values) => void>();
@@ -130,7 +133,13 @@ export class PluginHost {
     if (this.status === "running") return Promise.resolve();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
-        () => reject(new Error(`${this.id} was not ready in ${timeoutMs} ms`)),
+        () =>
+          reject(
+            new Error(
+              `${this.id} was not ready in ${timeoutMs} ms` +
+                (this.#lastProblem ? `: ${this.#lastProblem}` : ""),
+            ),
+          ),
         timeoutMs,
       );
       this.#readyWaiters.push(() => {
@@ -183,6 +192,7 @@ export class PluginHost {
       }
       this.status = "down";
       this.#setHealth("down", "failed to start");
+      this.#lastProblem = String((err as Error).message).slice(0, 800);
       this.log.append({
         type: "skillfully.plugin.failed",
         source: "core",
@@ -476,7 +486,12 @@ export class PluginHost {
   async #watch(): Promise<void> {
     const now = Date.now();
 
-    if (this.#logDropped && this.#logTokens + ((now - this.#logRefilledAt) / 1000) * LOG_PER_SECOND >= 1) {
+    // One summary a second at most, however long the flood lasts.
+    if (
+      this.#logDropped && now - this.#mutedAt >= 1000 &&
+      this.#logTokens + ((now - this.#logRefilledAt) / 1000) * LOG_PER_SECOND >= 1
+    ) {
+      this.#mutedAt = now;
       this.log.append({
         type: "skillfully.plugin.muted",
         source: "core",
@@ -576,6 +591,7 @@ export class PluginHost {
   #quarantine(type: string, data: Record<string, unknown>, reason: string): void {
     this.status = "quarantined";
     this.log.append({ type, source: "core", subject: this.id, data });
+    this.#lastProblem = typeof data.message === "string" ? data.message : reason;
     this.#exitBecause = reason;
     this.#proc?.kill();
     this.#setHealth("down", reason);
@@ -622,6 +638,9 @@ export class PluginHost {
         ...(info.expected || this.#exitBecause ? {} : { lastWords: info.stderr.trim().slice(-600) }),
       },
     });
+    if (!info.expected && !this.#exitBecause) {
+      this.#lastProblem = `it stopped with exit code ${info.code}: ${info.stderr.trim().slice(-600)}`;
+    }
     if (!held) this.#setHealth("down", info.expected ? "stopped" : this.#exitBecause ?? "crashed");
     if (!info.expected && !held) this.#scheduleRestart();
   }

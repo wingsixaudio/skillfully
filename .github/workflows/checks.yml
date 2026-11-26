@@ -1,5 +1,7 @@
-# Every pull request gets the same checks a maintainer would run by hand.
-# Nothing here has access to secrets, and the token it runs with can only read.
+# Every pull request gets the same checks a maintainer would run by hand, on
+# machines the author does not control. Nothing here has access to secrets, and
+# the token it runs with can only read. That is what makes it safe to run on a
+# pull request from someone the project has never met.
 name: Checks
 
 on:
@@ -10,25 +12,129 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  checks:
+  style:
+    name: Formatting and lint
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Formatting
-        run: deno fmt --check
-      - name: Lint
-        run: deno lint
+      - run: deno fmt --check
+      - run: deno lint
+
+  test:
+    name: Tests on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
       - name: Every plugin in the repository is one the hub would accept
-        run: deno task check-plugin plugins/*
+        run: deno task check-plugin --all plugins
       - name: Tests
         run: deno task test
       - name: Every driver in the repository keeps the contract
+        run: deno task conformance --all plugins
+
+  # Windows is run and reported, but does not yet decide whether a change can merge.
+  windows:
+    name: Tests on Windows (reported, not yet required)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Every plugin in the repository is one the hub would accept
+        run: deno task check-plugin --all plugins
+      - name: Tests
+        run: deno task test
+      - name: Every driver in the repository keeps the contract
+        run: deno task conformance --all plugins
+
+  # Sets up a hub from nothing, adds a person, and has their screen try to break out, in a real browser.
+  browser:
+    name: Real browser (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the browser
         run: |
-          for dir in plugins/*/; do
-            if grep -q '"kind": "driver"' "$dir/plugin.json"; then deno task conformance "$dir"; fi
+          pip install --quiet playwright
+          python -m playwright install --with-deps ${{ matrix.browser }}
+      - name: Fetch what the hub needs before it starts
+        run: deno cache core/main.ts
+      - name: The whole first hour, then every way out of the sandbox
+        run: |
+          mkdir -p shots
+          tests/browser/run.sh ${{ matrix.browser }} shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screens-${{ matrix.browser }}
+          path: shots
+          if-no-files-found: ignore
+
+  # Plain words on what each changed plugin asks for, shown on the pull request's checks page.
+  plugin-report:
+    name: What changed plugins ask for
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Write the report
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: deno task plugin-report "$BASE" | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # The one check the branch rule requires. It passes only when every job above did.
+  checks:
+    name: checks
+    if: always()
+    needs: [style, test, browser, plugin-report]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every required job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "a required job did not pass"; exit 1 ;;
+            esac
           done

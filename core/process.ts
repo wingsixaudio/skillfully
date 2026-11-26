@@ -13,6 +13,7 @@ import {
   TO_PLUGIN,
   type ToPlugin,
 } from "../contract/mod.ts";
+import { fromFileUrl, here, realPath, toFileUrl } from "./paths.ts";
 
 export async function loadManifest(dir: string): Promise<Manifest> {
   let raw: unknown;
@@ -71,15 +72,22 @@ export function denoArgs(
     `--v8-flags=--max-old-space-size=${Math.max(16, Math.floor((manifest.limits?.memoryMb ?? 256) / 2))}`,
     `--allow-net=${net.join(",")}`,
     // No file, environment, subprocess, system or FFI permission is ever granted.
-    `${dir}/${manifest.entry}`,
+    toFileUrl(`${dir}/${manifest.entry}`),
     `--hub=ws://127.0.0.1:${gatewayPort}/plugin`,
     `--token=${token}`,
   ];
 }
 
+// A plugin's process starts with an empty environment, plus the few names the runtime itself needs to
+// start. The plugin's own code cannot read any of them: it is never given permission to read the environment.
+// Windows will not open a network connection for a process that does not know where Windows is.
+const RUNTIME_NEEDS = Deno.build.os === "windows"
+  ? ["DENO_DIR", "SYSTEMROOT", "LOCALAPPDATA", "USERPROFILE"]
+  : ["HOME", "DENO_DIR"];
+
 function childEnv(): Record<string, string> {
   const env: Record<string, string> = { NO_COLOR: "1" };
-  for (const k of ["HOME", "DENO_DIR"]) {
+  for (const k of RUNTIME_NEEDS) {
     const v = Deno.env.get(k);
     if (v) env[k] = v;
   }
@@ -88,8 +96,8 @@ function childEnv(): Record<string, string> {
 
 // Code the hub itself offers to plugins. A plugin may import these and its own folder, nothing else.
 const HUB_PROVIDED = [
-  new URL("../sdk/", import.meta.url).pathname,
-  new URL("../contract/types.ts", import.meta.url).pathname,
+  here("../sdk/", import.meta.url),
+  here("../contract/types.ts", import.meta.url),
 ];
 let hubProvidedReal: string[] | undefined;
 
@@ -100,9 +108,9 @@ let hubProvidedReal: string[] | undefined;
  * file on the computer just by importing it. Links that point outside count as outside.
  */
 export async function inspectImports(dir: string, manifest: DriverManifest): Promise<void> {
-  const root = (await Deno.realPath(dir)) + "/";
+  const root = (await realPath(dir)) + "/";
   hubProvidedReal ??= await Promise.all(
-    HUB_PROVIDED.map(async (p) => (await Deno.realPath(p)) + (p.endsWith("/") ? "/" : "")),
+    HUB_PROVIDED.map(async (p) => (await realPath(p)) + (p.endsWith("/") ? "/" : "")),
   );
   const out = await new Deno.Command(Deno.execPath(), {
     args: [
@@ -112,7 +120,7 @@ export async function inspectImports(dir: string, manifest: DriverManifest): Pro
       "--no-lock",
       "--no-remote",
       "--no-npm",
-      `${dir}/${manifest.entry}`,
+      toFileUrl(`${dir}/${manifest.entry}`),
     ],
     clearEnv: true,
     env: childEnv(),
@@ -133,10 +141,10 @@ export async function inspectImports(dir: string, manifest: DriverManifest): Pro
         `${manifest.id} imports ${m.specifier}. A plugin may only import files in its own folder`,
       );
     }
-    const path = decodeURIComponent(new URL(m.specifier).pathname);
+    const path = fromFileUrl(m.specifier);
     let real: string;
     try {
-      real = await Deno.realPath(path);
+      real = await realPath(path);
     } catch {
       throw new Error(`${manifest.id} imports ${path}, which does not exist`);
     }

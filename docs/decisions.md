@@ -108,6 +108,12 @@ it at all.
 deleting it, and nothing merges until the `checks` job passes. This applies to maintainers too. The first six
 commits were pushed straight to `main` before the rule existed.
 
+**The checks run where the author has no say.** Every pull request is tested on Linux and macOS, driven
+through a real browser in Chrome and WebKit, and summarized in plain words: what each changed plugin asks for,
+and what it asks for that it did not before. They run with no secrets and a token that can only read, which is
+what makes it safe to run them on a pull request from a stranger. A nightly run repeats the suite five times
+on each system, because a test that fails one time in twenty is found by repetition and by nothing else.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins
@@ -150,6 +156,10 @@ commits were pushed straight to `main` before the rule existed.
 ## Not tested
 
 - Any real soundboard. Everything here runs against the simulated board.
-- Windows and macOS. The tests ran on Linux.
+- Windows, on a real machine. The tests pass on Linux, macOS and Windows on GitHub's machines, and the
+  real-browser test passes in Chrome and WebKit there. On Windows the hub cannot yet read a plugin's memory or
+  processor use, so those limits are not enforced and their tests are skipped. Windows does not yet block a
+  merge.
+- Safari on a real phone. WebKit on Linux is the same engine, not the same browser.
 - More than a handful of phones at once.
 - Meters. The contract has no message for them yet.
