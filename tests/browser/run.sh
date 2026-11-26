@@ -12,7 +12,11 @@ data=$(mktemp -d)
 deno run --allow-net --allow-read --allow-env=HOME,DENO_DIR,SYSTEMROOT,LOCALAPPDATA,USERPROFILE --allow-write="$data" --allow-run \
   core/main.ts --port="$port" --data="$data" >"$data/hub.log" 2>&1 &
 hub=$!
-trap 'kill "$hub" 2>/dev/null || true; rm -rf "$data"' EXIT
+# A pretend lamp for the Companion module the test adds through the admin page.
+lamp_port=${LAMP_PORT:-7007}
+deno run --no-prompt --allow-net="127.0.0.1:$lamp_port" tests/browser/pretend_lamp.ts "$lamp_port" >"$data/lamp.log" 2>&1 &
+lamp=$!
+trap 'kill "$hub" "$lamp" 2>/dev/null || true; rm -rf "$data"' EXIT
 
 # A new hub prints the code that claims it. Wait for it.
 code=""
@@ -27,4 +31,4 @@ if [ -z "$code" ]; then
   exit 1
 fi
 
-BROWSER="$browser" python3 tests/browser/screen_sandbox.py "http://127.0.0.1:$port" "$code" ${2:+"$2"}
+BROWSER="$browser" LAMP_PORT="$lamp_port" python3 tests/browser/screen_sandbox.py "http://127.0.0.1:$port" "$code" ${2:+"$2"}

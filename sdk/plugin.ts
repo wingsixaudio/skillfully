@@ -2,7 +2,15 @@
 // so a plugin only has to say what its device knows and how to set values.
 // Using it is optional: anything that speaks the contract's messages is a plugin.
 
-import type { CommandError, FromPlugin, HealthStatus, Mode, ToPlugin, Values } from "../contract/types.ts";
+import type {
+  CommandError,
+  FromPlugin,
+  HealthStatus,
+  Mode,
+  SettingsField,
+  ToPlugin,
+  Values,
+} from "../contract/types.ts";
 
 export interface CommandOutcome {
   values: Values;
@@ -25,6 +33,8 @@ export interface PluginLink {
   changed(values: Values): void;
   /** Report everything again, when which values exist has changed. A value left out is gone. */
   replaced(): void;
+  /** Say what settings this driver takes, when that is only known once it is running. */
+  settings(fields: SettingsField[]): void;
   event(name: string, data?: Record<string, unknown>): void;
   health(status: HealthStatus, reason?: string): void;
 }
@@ -105,6 +115,7 @@ export function runPlugin(identity: { id: string; version: string }, handlers: P
     replaced: () => {
       if (started) send({ type: "state", full: true, values: handlers.fullState() });
     },
+    settings: (fields) => send({ type: "settings", fields }),
     event: (name, data) => send(data ? { type: "event", name, data } : { type: "event", name }),
     health: (s, r) => {
       status = s;

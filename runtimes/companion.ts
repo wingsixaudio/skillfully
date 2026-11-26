@@ -15,7 +15,7 @@
 import process from "node:process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import type { CommandError, HealthStatus, Values } from "../contract/types.ts";
+import type { CommandError, HealthStatus, SettingsField, Values } from "../contract/types.ts";
 import { type CommandOutcome, type PluginLink, runPlugin } from "../sdk/plugin.ts";
 
 const arg = (name: string): string => {
@@ -141,6 +141,17 @@ const HEALTH: Record<string, HealthStatus> = {
   connecting: "degraded",
   unknown_warning: "degraded",
 };
+/** A module's status, as a person would say it. */
+const IN_WORDS: Record<string, string> = {
+  connecting: "Connecting to the device",
+  disconnected: "Not connected to the device",
+  connection_failure: "It cannot reach the device",
+  bad_config: "Its settings need filling in",
+  authentication_failure: "The device refused its sign-in",
+  insufficient_permissions: "The device will not let it do what it needs",
+  unknown_error: "It reports a problem",
+  unknown_warning: "It reports a warning",
+};
 
 function fromModule(m: Wire): void {
   if (m.direction === "response") {
@@ -169,7 +180,9 @@ function fromModule(m: Wire): void {
       const health = HEALTH[status] ?? "down";
       link?.health(
         health,
-        health === "ok" ? undefined : `the module reports ${status.replaceAll("_", " ")}${said}`,
+        health === "ok"
+          ? undefined
+          : `${IN_WORDS[status] ?? `It reports ${status.replaceAll("_", " ")}`}${said}`,
       );
       break;
     }
@@ -251,7 +264,9 @@ function registered(m: Wire, data: any): void {
     return;
   }
   answer(m);
-  // First start with the module's own defaults, then hand it the settings a person chose.
+  // First start with the module's own defaults. Then ask what settings it takes, tell the hub so a person
+  // can fill them in, and hand the module what was chosen.
+  let defaults: Record<string, unknown> = {};
   call("init", {
     label: identity.id,
     isFirstInit: true,
@@ -261,12 +276,58 @@ function registered(m: Wire, data: any): void {
     actions: {},
   })
     .then((r: any) => {
-      const config = { ...(r?.updatedConfig ?? {}), ...settings };
+      defaults = r?.updatedConfig ?? {};
+      return call("getConfigFields", {}).catch(() => ({ fields: [] }));
+    })
+    .then((r: any) => {
+      const theirs: any[] = Array.isArray(r?.fields) ? r.fields : [];
+      link?.settings(theirs.map(asField).filter((f): f is SettingsField => f !== null).slice(0, 100));
+      // What the module calls a secret travels apart from the rest of its settings.
+      const secretIds = new Set(
+        theirs.filter((f) => String(f?.type).startsWith("secret")).map((f) => String(f.id)),
+      );
+      const config: Record<string, unknown> = { ...defaults }, secrets: Record<string, unknown> = {};
+      for (const f of theirs) {
+        if (secretIds.has(String(f?.id)) && "default" in f) secrets[f.id] = f.default;
+      }
+      for (const [k, v] of Object.entries(settings)) (secretIds.has(k) ? secrets : config)[k] = v;
       return minor >= 2
-        ? call("updateConfigAndLabel", { label: identity.id, config, secrets: {} })
+        ? call("updateConfigAndLabel", { label: identity.id, config, secrets })
         : call("updateConfig", config);
     })
     .then(() => ready?.(), (e) => failed?.(e as Error));
+}
+
+/** One of the module's settings, as the hub's form understands it. Null for what the form cannot show. */
+function asField(f: any): SettingsField | null {
+  if (!f || typeof f.id !== "string" || !f.id) return null;
+  const type = String(f.type ?? "");
+  const label = asText(f.label).slice(0, 200) || f.id;
+  const help = asText(f.tooltip ?? f.description ?? "").slice(0, 1000);
+  const base = { id: f.id.slice(0, 64), label, ...(help ? { help } : {}) };
+  const plain = (v: unknown) => typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+  const withDefault = plain(f.default) ? { default: f.default } : {};
+  if (type === "static-text") return { ...base, kind: "note", help: asText(f.value).slice(0, 1000) };
+  if (type === "checkbox") return { ...base, kind: "toggle", ...withDefault };
+  if (type === "number") {
+    return {
+      ...base,
+      kind: "number",
+      ...withDefault,
+      ...(typeof f.min === "number" ? { min: f.min } : {}),
+      ...(typeof f.max === "number" ? { max: f.max } : {}),
+    };
+  }
+  if (type === "dropdown" && Array.isArray(f.choices)) {
+    const choices = f.choices.filter((c: any) => c && plain(c.id)).slice(0, 300)
+      .map((c: any) => ({ id: c.id, label: asText(c.label).slice(0, 200) || String(c.id) }));
+    return { ...base, kind: "choice", choices, ...withDefault };
+  }
+  if (type.startsWith("secret")) return { ...base, kind: "secret" };
+  if (type === "textinput" || type === "bonjour-device" || type === "colorpicker") {
+    return { ...base, kind: "text", ...withDefault };
+  }
+  return { ...base, kind: "note", help: "This setting cannot be shown here yet." };
 }
 
 function installHost(): void {

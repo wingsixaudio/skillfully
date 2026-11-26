@@ -191,7 +191,7 @@ Deno.test("dropped in with no narrower grant, a module gets the local network an
   try {
     assertEquals(installed.manifest.permissions?.network, ["lan", "listen"]);
     assert(installed.notes.some((n) => n.includes("local network")));
-    assert(installed.notes.some((n) => n.includes("nobody has reviewed")));
+    assert(installed.notes.some((n) => n.includes("Nobody has reviewed")));
     const reach = resolveNetwork(installed.manifest, {});
     assert(reach.includes("192.168.0.0/16") && reach.includes("10.0.0.0/8") && reach.includes("0.0.0.0"));
     assert(!reach.some((r) => r.startsWith("127.")), "this computer is not part of the local network grant");

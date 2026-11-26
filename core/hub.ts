@@ -12,6 +12,14 @@ import { Accounts, type Person } from "./accounts.ts";
 import { Capabilities, CAPABILITIES_DIR } from "./capabilities.ts";
 import { PluginHost, type Tuning } from "./host.ts";
 import { Log, type LogEntry, newId } from "./log.ts";
+import {
+  type ModulePackage,
+  networkNotes,
+  readInstall,
+  readModulePackage,
+  updateInstall,
+  writeModule,
+} from "./install.ts";
 import { adminPage, authPage, notePage, PAGE_POLICY, shellPage } from "./pages.ts";
 import { realPath } from "./paths.ts";
 import { inspectPlugin } from "./plugins.ts";
@@ -34,6 +42,8 @@ export interface HubOptions {
   hostname?: string;
   port?: number;
   capabilitiesDir?: string;
+  /** Where this hub keeps the devices a superuser adds. Without it, none can be added while it runs. */
+  dataDir?: string;
 }
 
 export interface Hub {
@@ -108,29 +118,56 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     },
   });
 
+  // What was chosen for each driver, and whether a superuser added it to this hub.
+  interface Chosen {
+    dir: string;
+    settings: Record<string, unknown>;
+    added: boolean;
+    module?: { id: string; name: string; version: string };
+    tuning?: Tuning;
+  }
+  const chosen = new Map<string, Chosen>();
+  const addedRoot = opts.dataDir ? `${opts.dataDir.replace(/[\\/]$/, "")}/plugins` : undefined;
+  if (addedRoot) await Deno.mkdir(addedRoot, { recursive: true });
+  const addedReal = addedRoot ? `${await realPath(addedRoot)}/` : undefined;
+
+  /** Read and check one plugin folder and take it in. Throws with a plain reason when it cannot be. */
+  async function load(cfg: PluginConfig): Promise<PluginHost | undefined> {
+    const { manifest, dir } = await inspectPlugin(cfg.dir, capabilities);
+    if (hosts.has(manifest.id) || screens.has(manifest.id) || skills.has(manifest.id)) {
+      throw new Error(`a plugin called ${manifest.id} is already loaded`);
+    }
+    if (manifest.kind === "screen") screens.set(manifest.id, { manifest, dir });
+    else if (manifest.kind === "skill") skills.set(manifest.id, { manifest, dir });
+    else {
+      const added = !!addedReal && dir.startsWith(addedReal);
+      const install = added ? await readInstall(dir) : {};
+      chosen.set(manifest.id, {
+        dir,
+        settings: cfg.settings ?? {},
+        added,
+        ...(install.module ? { module: install.module } : {}),
+        ...(cfg.tuning ? { tuning: cfg.tuning } : {}),
+      });
+      const host = new PluginHost(
+        manifest,
+        dir,
+        cfg.settings ?? {},
+        cfg.mode ?? "listen",
+        log,
+        gateway,
+        capabilities,
+        cfg.tuning,
+      );
+      hosts.set(manifest.id, host);
+      return host;
+    }
+  }
+
   // A plugin that cannot be loaded is logged and left out. It never stops the hub.
   for (const cfg of opts.plugins) {
     try {
-      const { manifest, dir } = await inspectPlugin(cfg.dir, capabilities);
-      if (hosts.has(manifest.id) || screens.has(manifest.id) || skills.has(manifest.id)) {
-        throw new Error(`a plugin called ${manifest.id} is already loaded`);
-      }
-      if (manifest.kind === "driver") {
-        hosts.set(
-          manifest.id,
-          new PluginHost(
-            manifest,
-            dir,
-            cfg.settings ?? {},
-            cfg.mode ?? "listen",
-            log,
-            gateway,
-            capabilities,
-            cfg.tuning,
-          ),
-        );
-      } else if (manifest.kind === "screen") screens.set(manifest.id, { manifest, dir });
-      else skills.set(manifest.id, { manifest, dir });
+      await load(cfg);
     } catch (err) {
       log.append({
         type: "skillfully.plugin.refused",
@@ -225,7 +262,8 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     for (const c of connections) c.socket.close(4403, "access changed");
   }
 
-  for (const host of hosts.values()) {
+  /** Pass a driver's news on to the screens that may hear it. */
+  function attach(host: PluginHost): void {
     host.onChange((values) => {
       for (const c of connections) {
         if (!approvals.allowed(c.screen.id, host.id)) continue;
@@ -244,8 +282,80 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       }
     });
   }
+  for (const host of hosts.values()) attach(host);
 
   await Promise.all([...hosts.values()].map((h) => h.start()));
+
+  // --- Devices a superuser adds while the hub is running ---
+
+  const UPLOAD_MAX = 64 * 1024 * 1024;
+  const UPLOAD_KEPT_MS = 10 * 60 * 1000;
+  /** The package each superuser is looking at, checked but not yet added. One each, for a few minutes. */
+  const uploads = new Map<string, { pkg: ModulePackage; at: number }>();
+  /** The screens that could be given a device of these kinds. */
+  const fits = (kinds: string[]) =>
+    [...screens.values()].map((s) => s.manifest).filter((m) =>
+      ANY in m.uses || kinds.some((k) => k in m.uses)
+    );
+  const sentence = (err: unknown) => {
+    const text = String((err as Error).message ?? err);
+    return text.charAt(0).toUpperCase() + text.slice(1) + (text.endsWith(".") ? "" : ".");
+  };
+
+  /** Read a file sent by the hub's own page, stopping at the size limit however large it claims to be. */
+  async function upload(req: Request, me: Person): Promise<Response> {
+    if (!opts.dataDir) return refuse(400, "This hub was started without a place to keep added devices.");
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for await (const chunk of req.body ?? []) {
+      total += chunk.length;
+      if (total > UPLOAD_MAX) return refuse(413, "That file is larger than this hub accepts.");
+      chunks.push(chunk);
+    }
+    const bytes = new Uint8Array(total);
+    let at = 0;
+    for (const c of chunks) {
+      bytes.set(c, at);
+      at += c.length;
+    }
+    try {
+      const pkg = await readModulePackage(bytes);
+      uploads.set(me.id, { pkg, at: Date.now() });
+      return json({
+        ok: true,
+        upload: pkg.sha256,
+        module: pkg.module,
+        // What each choice of reach would let it do, in words, before anything is decided.
+        notes: { lan: networkNotes(["lan", "listen"]), one: networkNotes(["that one address", "listen"]) },
+        screens: fits(["generic"]).map((m) => ({ id: m.id, name: m.name })),
+      });
+    } catch (err) {
+      return refuse(400, sentence(err));
+    }
+  }
+
+  /** Stop a driver and start it again with other settings. Its permissions can depend on them. */
+  async function restart(id: string, settings: Record<string, unknown>): Promise<void> {
+    const old = hosts.get(id)!;
+    const was = chosen.get(id)!;
+    await old.stop();
+    chosen.set(id, { ...was, settings });
+    const host = new PluginHost(
+      old.manifest,
+      old.dir,
+      settings,
+      old.mode,
+      log,
+      gateway,
+      capabilities,
+      was.tuning,
+    );
+    hosts.set(id, host);
+    attach(host);
+    await host.start();
+    // Screens that were shown the old one start again and are shown the new one.
+    for (const m of screens.values()) if (approvals.allowed(m.manifest.id, id)) dropScreen(m.manifest.id);
+  }
 
   async function onScreenMessage(c: Connection, raw: string): Promise<void> {
     let m: {
@@ -396,6 +506,9 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         const no = await sure();
         if (no) return no;
         host.setMode(b.mode, { actor: me.id, via: "admin" });
+        // A device a superuser added keeps the choice across restarts.
+        const mine = chosen.get(id);
+        if (mine?.added) await updateInstall(mine.dir, { mode: b.mode });
         for (const c of connections) {
           tell(c.socket, {
             type: "plugins",
@@ -418,6 +531,115 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         const changed = approvals.set(me.id, screen.id, wanted);
         if (changed.added.length || changed.removed.length) dropScreen(screen.id);
         return json({ ok: true, ...changed });
+      }
+      case "module/add": {
+        const up = uploads.get(me.id);
+        if (!up || up.pkg.sha256 !== b.upload || Date.now() - up.at > UPLOAD_KEPT_MS) {
+          return refuse(400, "Choose the package again.");
+        }
+        const reach = String(b.reach ?? "lan").trim();
+        const one = /^[A-Za-z0-9.-]{1,253}:[0-9]{1,5}$/.test(reach);
+        if (reach !== "lan" && !one) {
+          return refuse(400, "Write the address with its port, like 192.168.1.50:9999.");
+        }
+        const wanted = Array.isArray(b.screens) ? b.screens.map(String) : [];
+        const can = new Set(fits(["generic"]).map((m) => m.id));
+        if (wanted.some((sc) => !can.has(sc))) {
+          return refuse(400, "One of those screens cannot use this device.");
+        }
+        const no = await sure();
+        if (no) return no;
+        try {
+          const installed = await writeModule(up.pkg, opts.dataDir!, {
+            name: String(b.name ?? ""),
+            network: [reach, "listen"],
+            mode: "listen",
+            taken: (taken) => hosts.has(taken) || screens.has(taken) || skills.has(taken),
+          });
+          uploads.delete(me.id);
+          const host = (await load({ dir: installed.dir, mode: "listen", settings: {} }))!;
+          attach(host);
+          await host.start();
+          log.append({
+            type: "skillfully.plugin.added",
+            source: "core",
+            subject: host.id,
+            actor: me.id,
+            via: "admin",
+            data: {
+              name: host.manifest.name,
+              module: up.pkg.module.id,
+              version: up.pkg.module.version,
+              sha256: up.pkg.sha256,
+              network: host.manifest.permissions?.network ?? [],
+            },
+          });
+          for (const sc of wanted) {
+            approvals.set(me.id, sc, [...approvals.of(sc), host.id]);
+            dropScreen(sc);
+          }
+          return json({ ok: true, id: host.id, name: host.manifest.name });
+        } catch (err) {
+          return refuse(400, sentence(err));
+        }
+      }
+      case "driver/settings": {
+        const host = hosts.get(id);
+        const mine = chosen.get(id);
+        if (!host || !mine?.added) return refuse(400, "This device's settings cannot be changed here.");
+        const given = b.settings;
+        if (!given || typeof given !== "object" || Array.isArray(given)) {
+          return refuse(400, "Expected settings.");
+        }
+        const next: Record<string, unknown> = { ...mine.settings };
+        for (const [name, value] of Object.entries(given)) {
+          if (!["string", "number", "boolean"].includes(typeof value) || name.length > 64) {
+            return refuse(400, `The setting ${name.slice(0, 64)} is not something this hub can keep.`);
+          }
+          // A secret left blank means "keep what is there". It is never sent back to be re-entered.
+          if (value === "" && host.settingsForm?.find((f) => f.id === name)?.kind === "secret") continue;
+          next[name] = value;
+        }
+        const changed = Object.keys(next).filter((k) => next[k] !== mine.settings[k]).sort();
+        if (!changed.length) return json({ ok: true, changed });
+        await updateInstall(mine.dir, { settings: next });
+        // The log says which settings changed and who changed them. It never holds what they were set to.
+        log.append({
+          type: "skillfully.plugin.settings",
+          source: "core",
+          subject: id,
+          actor: me.id,
+          via: "admin",
+          data: { changed },
+        });
+        await restart(id, next);
+        return json({ ok: true, changed });
+      }
+      case "driver/remove": {
+        const host = hosts.get(id);
+        const mine = chosen.get(id);
+        if (!host || !mine?.added) return refuse(400, "This device cannot be removed here.");
+        const no = await sure();
+        if (no) return no;
+        await host.stop();
+        hosts.delete(id);
+        chosen.delete(id);
+        await Deno.remove(mine.dir, { recursive: true }).catch(() => {});
+        for (const m of screens.values()) {
+          const had = approvals.of(m.manifest.id);
+          if (!had.includes(id)) continue;
+          approvals.set(me.id, m.manifest.id, had.filter((d) => d !== id));
+          dropScreen(m.manifest.id);
+        }
+        log.append({
+          type: "skillfully.plugin.removed",
+          source: "core",
+          subject: id,
+          actor: me.id,
+          via: "admin",
+          data: { name: host.manifest.name },
+        });
+        return json({ ok: true });
       }
       case "driver/release": {
         const host = hosts.get(id);
@@ -599,10 +821,28 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
               people: accounts.people().map((p) => ({ ...p, devices: accounts.sessions(p.id).length })),
               roles: accounts.roles(),
               policy: accounts.policy(),
-              drivers: [...hosts.values()].map((h) => ({
-                ...describe(h),
-                permissions: h.manifest.permissions ?? {},
-              })),
+              canAdd: !!opts.dataDir,
+              drivers: [...hosts.values()].map((h) => {
+                const mine = chosen.get(h.id);
+                const secret = new Set(
+                  (h.settingsForm ?? []).filter((f) => f.kind === "secret").map((f) => f.id),
+                );
+                return {
+                  ...describe(h),
+                  permissions: h.manifest.permissions ?? {},
+                  reach: networkNotes(h.manifest.permissions?.network ?? []).slice(0, mine?.added ? 4 : 1),
+                  added: !!mine?.added,
+                  module: mine?.module ?? null,
+                  form: mine?.added ? h.settingsForm ?? null : null,
+                  // What is set now, so the form opens filled in. A secret is never sent back, only whether it is set.
+                  settings: mine?.added
+                    ? Object.fromEntries(Object.entries(mine.settings).filter(([k]) => !secret.has(k)))
+                    : {},
+                  secretsSet: mine?.added ? Object.keys(mine.settings).filter((k) => secret.has(k)) : [],
+                  usedBy: [...screens.values()].filter((sc) => approvals.allowed(sc.manifest.id, h.id))
+                    .map((sc) => sc.manifest.name),
+                };
+              }),
               // What each screen offers a role, and which per-person slots its abilities refer to.
               offered: [...screens.values()].map(({ manifest: m }) => ({
                 plugin: m.id,
@@ -633,6 +873,14 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
           );
         }
         if (req.method !== "POST") return refuse(404, "Not found.");
+        if (path === "/admin/api/module/inspect") {
+          // A file, not JSON. Still only from the hub's own page.
+          const from = req.headers.get("origin");
+          if (from !== null && from !== origin) {
+            return refuse(403, "That request did not come from this hub's own pages.");
+          }
+          return await upload(req, me);
+        }
         const b = await body(req, origin);
         return b instanceof Response ? b : await admin(path.slice("/admin/api/".length), b, me);
       }

@@ -99,6 +99,49 @@
       }
     },
 
+    "settings": {
+      "description": "Plugin to hub. The settings this driver takes, for a driver that can only say so once it is running. The hub shows them to a superuser as a form. They are data for a person to read, never instructions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "fields"],
+      "properties": {
+        "type": { "const": "settings" },
+        "fields": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label", "kind"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "label": { "type": "string", "maxLength": 200 },
+              "kind": {
+                "description": "text, number, toggle and choice are things to fill in. secret is text that is never shown again. note is words to read, with nothing to fill in.",
+                "enum": ["text", "number", "toggle", "choice", "secret", "note"]
+              },
+              "default": { "type": ["number", "string", "boolean"] },
+              "choices": {
+                "type": "array",
+                "maxItems": 300,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "label"],
+                  "properties": {
+                    "id": { "type": ["number", "string", "boolean"] },
+                    "label": { "type": "string", "maxLength": 200 }
+                  }
+                }
+              },
+              "min": { "type": "number" },
+              "max": { "type": "number" },
+              "help": { "type": "string", "maxLength": 1000 }
+            }
+          }
+        }
+      }
+    },
     "welcome": {
       "description": "Hub to plugin. The answer to hello. Carries the plugin's settings, because a plugin stores nothing.",
       "type": "object",

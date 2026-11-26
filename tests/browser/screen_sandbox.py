@@ -75,6 +75,10 @@ async def main():
         if shots: await owner.screenshot(path=f"{shots}/1-setup.png")
         await owner.click("#go"); await owner.wait_for_url("**/admin")
         check("claiming it signs the owner in and lands them where setting up happens", True)
+        await owner.wait_for_selector("#setup:not([hidden]) .step")
+        todo = await owner.locator("#setup .step:not(.done)").all_inner_texts()
+        check("a new owner is shown what is left to do, in order", [t.split("\n")[0] for t in todo] == ["Give a screen a device", "Add your people"], str(todo))
+        if shots: await owner.screenshot(path=f"{shots}/1b-first-look.png")
 
         async def admin(path, body):
             r = await owner_ctx.request.post(base + path, data=json.dumps(body), headers={"content-type": "application/json"})
@@ -143,7 +147,10 @@ async def main():
         for x in xs[1:]:
             await pg.mouse.move(x, y); await pg.wait_for_timeout(12)
         await pg.mouse.up()
-        # What the screen believes the finger chose, read before the hub has had time to answer.
+        # What the screen believes the finger chose. A screen's frame can run in its own process, so the last
+        # moves may land a moment after the call above returns: give them that moment. The screen ignores the
+        # hub's answers for longer than this after a move, so what is read here is still the finger's choice.
+        await pg.wait_for_timeout(150)
         chosen = float(await fr.get_attribute("#fader", "aria-valuenow"))
         await pg.wait_for_timeout(900)
         held = (await state("sim-console"))[LEVEL]
@@ -203,6 +210,49 @@ async def main():
             check("pressing a value it was never written for changes the device", (await state("sim-switch"))["switch/outlet/2/on"] is True)
             check("and the screen shows what the device now holds", await outlet.get_by_role("button").inner_text() == "On")
             if shots: await owner.screenshot(path=f"{shots}/4-controls.png", full_page=True)
+
+        # --- Adding a device nobody wrote a driver for, without leaving the admin page ---
+        lamp_port = os.environ.get("LAMP_PORT", "7007")
+        await owner.goto(base + "/admin"); await owner.wait_for_selector("#addDevice:not([hidden])")
+        await owner.click("#addDevice")
+        check("nothing can be added before a package is chosen", await owner.locator("#dlgOk").is_disabled())
+        await owner.set_input_files("#pkg", os.path.join(os.path.dirname(__file__), "..", "fixtures", "companion", "skillfully-test-lamp-1.0.0.tgz"))
+        await owner.wait_for_selector("#pkgRest:not([hidden])")
+        about = await owner.locator("#pkgRest .about").inner_text()
+        check("choosing a package shows what it is before anything is added", "skillfully-test-lamp" in about and "1.0.0" in about, about)
+        facts = await owner.locator("#pkgRest .facts").inner_text()
+        check("and what it would be able to do", "any device on your local network" in facts and "Nobody has reviewed" in facts, facts)
+        await owner.fill("#devName", "Stage lamp")
+        await owner.select_option("#reachPick", "one"); await owner.fill("#reachOne", f"127.0.0.1:{lamp_port}")
+        check("narrowing what it may reach changes what the page says it can do", "nothing else on the network" in await owner.locator("#pkgRest .facts").inner_text())
+        await owner.locator("#pkgRest label.check", has_text="Controls").locator("input").check()
+        await owner.fill("#confirm", OWNER_PIN)
+        if shots: await owner.screenshot(path=f"{shots}/5-add-device.png", full_page=True)
+        await owner.click("#dlgOk")
+        # Its settings open by themselves, drawn from what the module says it takes.
+        await owner.wait_for_selector("#set_host", timeout=15000)
+        check("its own settings form opens next, with the module's own labels", "Lamp address" in await owner.locator("#dlgBody").inner_text())
+        check("and its own defaults", await owner.input_value("#set_port") == "7000")
+        await owner.fill("#set_host", "127.0.0.1"); await owner.fill("#set_port", lamp_port)
+        if shots: await owner.screenshot(path=f"{shots}/6-settings.png", full_page=True)
+        await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        lamp_item = owner.locator("#drivers .item", has=owner.locator("h3", has_text="Stage lamp"))
+        await lamp_item.locator(".status.ok").wait_for(timeout=15000)
+        check("the page says in plain words that it is connected", "Connected to its device" in await lamp_item.inner_text(), await lamp_item.inner_text())
+        check("it arrives listening, and the page says what that means", "Listen" in await lamp_item.inner_text() and "nothing is sent to it" in await lamp_item.inner_text())
+        await lamp_item.get_by_role("button", name="Switch to Act").click()
+        await owner.fill("#confirm", OWNER_PIN); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        if shots: await lamp_item.scroll_into_view_if_needed(); await owner.screenshot(path=f"{shots}/7-device.png")
+        await owner.goto(base + "/s/controls"); await owner.wait_for_timeout(1500)
+        cf = next((f for f in owner.frames if "/screens/controls/" in f.url), None)
+        on = cf.locator(".row", has_text="generic/action/on")
+        await on.get_by_role("button", name="Do it").click()
+        reading = cf.locator(".row", has_text="generic/reading/power").locator(".value")
+        for _ in range(40):
+            if (await reading.inner_text()).strip() == "on": break
+            await owner.wait_for_timeout(100)
+        check("the device added a minute ago can be used from Controls", (await reading.inner_text()).strip() == "on", await reading.inner_text())
+        if shots: await owner.screenshot(path=f"{shots}/8-controls-lamp.png", full_page=True)
 
         check("no page errors", not unexpected, "; ".join(unexpected))
         await b.close()

@@ -35,7 +35,11 @@ passes those on under the `generic` capability, so nobody has to describe a modu
 | A status        | The driver's health, with the module's own words          |
 | A settings form | Settings handed to it at start, over its own defaults     |
 
-`deno task add-module <package.tgz>` adds one. The package is the same file Companion installs.
+A superuser adds one from the admin page: choose the module's package (the same file Companion installs), see
+what it is and what it could reach, name the device, and decide. The hub then asks the module what settings it
+takes and shows them as a form. The same module can be added once for each device.
+`deno task add-module
+<package.tgz>` does the same from a command line.
 
 An action is a **trigger**: something to do, not a value to hold. The hub cannot read a trigger back, so the
 log says `command.done`, never `command.confirmed`, and two presses in a row are both sent, in order.
