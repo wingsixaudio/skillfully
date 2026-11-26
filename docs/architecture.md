@@ -87,6 +87,22 @@ by an agent.
 **One log.** Every request, confirmation, refusal, crash and device-side change is one append-only record,
 with people as IDs. Undo, audit, habits, reports and anything an agent does later all read from it.
 
+## Connections
+
+Every driver the hub runs is a **connection**. Screens never talk to a device or to a driver. They ask the
+hub, and the hub decides. Three things have to agree before a request goes anywhere:
+
+1. **The screen's manifest** says what kinds of device it works with. That is a request, not a grant.
+2. **A superuser** gives the screen specific connections. A screen that has been given none reaches none.
+3. **The person's roles** switch on some of the screen's abilities.
+
+A screen is never more than all three. A screen may ask to work with `any` kind of device, which is how one
+screen can show devices nobody wrote a screen for. It still reaches only the connections it was given, and
+`any` never includes the hub's log.
+
+The **Controls** screen is that screen: every reading, value and action of its connections as one plain list,
+drawn from the definitions the hub hands it. It is for setting equipment up, not for running a service.
+
 ## People, roles and abilities
 
 The hub owns one list of people. Every plugin that needs to know who someone is reads that list; none keeps

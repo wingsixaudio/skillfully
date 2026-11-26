@@ -171,6 +171,7 @@ export function adminPage(): string {
        <p class="msg" id="peopleMsg" role="status"></p></section>
      <section class="card"><h2>Roles</h2><p class="dim">A role is a set of abilities that plugins offer. Superuser is built in and has all of them.</p><div id="roles"></div>
        <button class="small quiet" id="newRole" style="margin-top:14px">New role</button><p class="msg" id="rolesMsg" role="status"></p></section>
+     <section class="card"><h2>Screens</h2><p class="dim">A screen can use only the connections you give it. Until you give it one, it reaches nothing.</p><div id="screens"></div><p class="msg" id="screensMsg" role="status"></p></section>
      <section class="card"><h2>Devices</h2><p class="dim">Listen means the hub watches a device and sends it nothing. Act means changes are sent.</p><div id="drivers"></div><p class="msg" id="driversMsg" role="status"></p></section>
      <section class="card"><h2>Signing in</h2>
        <form id="policy">
@@ -211,7 +212,7 @@ export function adminPage(): string {
     const r = await call("/admin/api/all");
     if (!r.ok) return location.replace("/");
     ({ people, roles, offered, drivers } = r); meId = r.me;
-    drawPeople(); drawRoles(); drawDrivers(); drawPolicy(r.policy);
+    drawPeople(); drawRoles(); drawScreens(); drawDrivers(); drawPolicy(r.policy);
   }
 
   function drawPeople() {
@@ -315,6 +316,31 @@ export function adminPage(): string {
     }
   }
   $("newRole").onclick = () => editRole({});
+
+  function drawScreens() {
+    const box = $("screens"); box.innerHTML = "";
+    for (const o of offered) {
+      const item = el("div", { className: "item" }, el("h3", { textContent: o.name }));
+      const names = o.connections.map((id) => (o.eligible.find((d) => d.id === id) || { name: id }).name);
+      const chips = el("div", {});
+      if (names.length) for (const n of names) chips.append(el("span", { className: "chip on", textContent: n }));
+      else chips.append(el("span", { className: "chip", textContent: o.eligible.length ? "No connections yet" : "Nothing installed that it works with" }));
+      if (o.works.includes("any")) chips.append(el("span", { className: "chip", textContent: "Works with any kind of device" }));
+      item.append(chips);
+      if (o.eligible.length) {
+        const b = el("button", { className: "small quiet", type: "button", textContent: "Choose connections", style: "margin-top:8px" });
+        b.onclick = () => ask("What " + o.name + " may use", (x) => {
+          for (const d of o.eligible) {
+            const box = el("input", { type: "checkbox", value: d.id, checked: o.connections.includes(d.id), className: "conn" });
+            x.append(el("label", { className: "check" }, box, el("span", { textContent: " " + d.name })));
+          }
+          confirmField(x);
+        }, () => call("/admin/api/screen/connections", { id: o.plugin, drivers: [...document.querySelectorAll(".conn:checked")].map((i) => i.value), confirm: $("confirm").value }));
+        item.append(b);
+      }
+      box.append(item);
+    }
+  }
 
   function drawDrivers() {
     const box = $("drivers"); box.innerHTML = "";

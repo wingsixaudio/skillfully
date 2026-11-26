@@ -135,3 +135,16 @@ Deno.test("the report spells out the two wide network grants and a change of run
   assert(more(bridged, driver()).some((line) => line.includes("runs as")));
   assert(asks(bridged).some((line) => line.includes("Companion module")));
 });
+
+Deno.test("the report spells out a screen that asks for every kind of device", () => {
+  const wide = screen({
+    uses: { any: "write" },
+    abilities: [{ id: "operate", title: "Operate", allows: { any: "write" } }],
+  });
+  const asked = more(wide, screen());
+  assert(
+    asked.some((line) => line.includes("every kind of device on the connections it is given")),
+    asked.join(" | "),
+  );
+  assert(asks(wide).join(" ").includes("every kind of device on the connections it is given"));
+});

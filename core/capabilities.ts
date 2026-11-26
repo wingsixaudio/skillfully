@@ -128,6 +128,11 @@ export class Capabilities {
       if (!checked.ok) {
         throw new Error(`${dir}/${name} is not a valid capability definition: ${checked.problem}`);
       }
+      if (["log", "any"].includes(checked.value.capability)) {
+        throw new Error(
+          `${dir}/${name}: "${checked.value.capability}" means something to the hub and cannot name a capability`,
+        );
+      }
       if (`${checked.value.capability}.json` !== name) {
         throw new Error(`${dir}/${name} defines ${checked.value.capability}; the file name must match`);
       }

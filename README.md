@@ -48,8 +48,9 @@ deno task hub --lan    # lets a phone on the same network connect
 ```
 
 The first time, the hub prints a short code. Open the address, enter the code, and you become its first
-superuser. From the People page you add everyone else: add a name, give them a role, and hand them the
-invitation it shows.
+superuser. Under Screens, give each screen the connections it may use: until you do, a screen reaches nothing.
+From the People page you add everyone else: add a name, give them a role, and hand them the invitation it
+shows.
 
 ```sh
 deno task test                             # every test

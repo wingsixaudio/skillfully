@@ -3,7 +3,7 @@
 // exactly what the hub would say.
 
 import type { Manifest } from "../contract/mod.ts";
-import { abilitiesProblem } from "./access.ts";
+import { abilitiesProblem, ANY, RESERVED } from "./access.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { realPath } from "./paths.ts";
 import { inspectImports, loadManifest } from "./process.ts";
@@ -50,7 +50,7 @@ export async function inspectPlugin(
   }
 
   for (const name of Object.keys(manifest.uses ?? {})) {
-    if (name !== "log" && !capabilities.get(name)) {
+    if (!RESERVED.includes(name) && !capabilities.get(name)) {
       throw new Error(`${manifest.id} uses "${name}", which this hub has no definition for`);
     }
   }
@@ -61,6 +61,11 @@ export async function inspectPlugin(
     const used = new Set(manifest.abilities.flatMap((a) => Object.keys(a.allows)));
     for (const name of Object.keys(manifest.uses)) {
       if (!used.has(name)) warnings.push(`it lists "${name}" under uses, but no ability needs it`);
+    }
+    if (ANY in manifest.uses) {
+      warnings.push(
+        `it asks for every kind of device on the connections it is approved for (${manifest.uses[ANY]})`,
+      );
     }
     // A screen has no network. Anything it tries to load from elsewhere will silently fail, so say so now.
     const page = await Deno.readTextFile(`${real}/${manifest.entry}`);

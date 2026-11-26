@@ -7,6 +7,7 @@ export const ROOT = here("..", import.meta.url).replace(/\/$/, "");
 export const SIM = `${ROOT}/plugins/sim-console`;
 export const SWITCH = `${ROOT}/plugins/sim-switch`;
 export const FADER = `${ROOT}/plugins/one-fader`;
+export const CONTROLS = `${ROOT}/plugins/controls`;
 export const FIXTURES = `${ROOT}/tests/fixtures`;
 export const LEVEL = "console/input/1/bus/1/level";
 export const OWNER_PIN = "482915";
@@ -41,6 +42,13 @@ export async function hubWith(plugins: PluginConfig[], dbPath = ":memory:"): Pro
   const claimed = await hub.accounts.claim(hub.accounts.claimCode, "Owner", OWNER_PIN, "test");
   if (!claimed.ok) throw new Error(claimed.message);
   const owner = { id: claimed.person.id, token: claimed.token };
+  // What a superuser does once after setting up: let each screen use the connections it is there for.
+  for (const { manifest } of hub.screens.values()) {
+    const fits = [...hub.hosts.values()].filter((h) =>
+      Object.keys(h.manifest.capabilities).some((cap) => cap in manifest.uses || "any" in manifest.uses)
+    );
+    hub.approvals.set(owner.id, manifest.id, fits.map((h) => h.id));
+  }
   const role = hub.accounts.saveRole(owner.id, {
     name: "Musician",
     home: "one-fader",

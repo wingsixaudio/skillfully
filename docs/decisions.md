@@ -126,6 +126,21 @@ someone decides it may act.
 copy their list. A team downloads a module's package and adds it. A list of reviewed modules, each pinned to
 its source and to the narrow permissions it needs, is the next layer and is not built.
 
+**A screen reaches only the connections a superuser gives it.** A screen's manifest says what kinds of device
+it works with; a superuser then chooses the exact drivers, confirming with their own PIN or password. Nothing
+is given by default, so a new hub's screens reach nothing until someone decides. Changing the choice closes
+that screen's open connections so they start again under it. The decision is in the log with who made it.
+
+**A screen may ask for any kind of device, and the request is loud.** `any` in `uses` and in an ability stands
+for every kind of device on the connections the screen is given. The checker and the pull request report spell
+it out. It never covers the log, and no capability may be named `any` or `log`.
+
+**A screen is handed the definitions of what it can see.** With them a screen can draw a value it was never
+written for: a switch, a number with its range, an action with its options.
+
+**A new owner lands where the setting up is.** A superuser with no screen that has anything to show is sent to
+the admin page. Everyone else lands on their role's home screen.
+
 **Every change arrives as a pull request.** `main` is protected: no direct pushes, no force pushes, no
 deleting it, and nothing merges until the `checks` job passes. This applies to maintainers too. The first six
 commits were pushed straight to `main` before the rule existed.
@@ -175,10 +190,14 @@ on each system, because a test that fails one time in twenty is found by repetit
 - **Install, update, rollback, uninstall.** Plugins in the repository are listed in `core/main.ts`. A
   Companion module is added from the command line into the hub's data folder and needs a restart. There is no
   screen for it, no way to change its settings but adding it again, and no removal but deleting its folder.
-- **Which connections a screen may use.** A screen declares the kinds of device it uses and can then reach
-  every driver of that kind. A superuser should approve, when installing a screen, the exact connections it
-  may talk to. With dropped-in drivers this matters more, and it is the next thing to build.
-- **A screen for readings and actions.** Nothing shows `generic` values to a person yet.
+- **Roles cannot name a connection.** A person allowed to operate Controls can operate every connection
+  Controls was given. An ability can be limited to certain values, but not to one device among several of the
+  same kind.
+- **Controls shows the first 150 values of a connection.** A soundboard has thousands. The search box narrows
+  them, and that is all the organizing there is.
+- **Automations.** "When this reading becomes that, do this action" needs something that watches and acts with
+  nobody at a screen. It would be a new kind of plugin with its own approved connections. Not designed yet.
+- **Packages of several plugins.** A screen and the driver it was written for cannot ship as one thing yet.
 - **Newer Companion modules.** The bridge runs modules built on `@companion-module/base` 1.x. Modules built on
   2.x load differently and are refused at install with a plain reason.
 - **What Companion does on a module's behalf.** Sending OSC and sharing a UDP port are asked of the host, not

@@ -105,7 +105,7 @@ addEventListener("message", (e) => {
   const m = e.data;
   if (m.type === "hello") {
     /* m.me: who is signed in and their slots. m.abilities: what they were granted.
-                                m.plugins: the drivers they may see */
+                                m.plugins: the connections this screen was given */
   }
   if (m.type === "state") { /* m.plugin, m.values, m.full. Only values this person may see */ }
   if (m.type === "ack") { /* the answer to a set: m.ok, m.value or m.error */ }
@@ -125,6 +125,14 @@ parent.postMessage({
 Design the screen around `m.abilities`: show a fader only to someone who can move it. But do not rely on that
 for safety. The hub decides, and refuses and logs anything the person was not granted, whatever your page
 sends.
+
+A screen reaches only the connections a superuser gives it, so `m.plugins` may be empty on a new hub. Say so
+plainly when it is, as `plugins/controls` does.
+
+To work with devices you did not write for, ask for `"any"` under `uses` and in an ability. The hub then hands
+you, in `m.capabilities`, the definition of every kind of device you can see: each value's title, kind, range
+and whether it can be set. `plugins/controls` draws its whole page from that. Asking for `any` is a large
+request and is flagged as one on your pull request, so use it only for a screen that is truly general.
 
 What a screen cannot do, by design: reach the network, load code from elsewhere, read the hub's pages or
 storage, see a PIN or session, say who the person is, or change anything the person was not granted. Put your
