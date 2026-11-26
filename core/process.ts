@@ -13,7 +13,7 @@ import {
   TO_PLUGIN,
   type ToPlugin,
 } from "../contract/mod.ts";
-import { fromFileUrl, here, realPath } from "./paths.ts";
+import { fromFileUrl, here, realPath, toFileUrl } from "./paths.ts";
 
 export async function loadManifest(dir: string): Promise<Manifest> {
   let raw: unknown;
@@ -72,7 +72,7 @@ export function denoArgs(
     `--v8-flags=--max-old-space-size=${Math.max(16, Math.floor((manifest.limits?.memoryMb ?? 256) / 2))}`,
     `--allow-net=${net.join(",")}`,
     // No file, environment, subprocess, system or FFI permission is ever granted.
-    `${dir}/${manifest.entry}`,
+    toFileUrl(`${dir}/${manifest.entry}`),
     `--hub=ws://127.0.0.1:${gatewayPort}/plugin`,
     `--token=${token}`,
   ];
@@ -113,7 +113,7 @@ export async function inspectImports(dir: string, manifest: DriverManifest): Pro
       "--no-lock",
       "--no-remote",
       "--no-npm",
-      `${dir}/${manifest.entry}`,
+      toFileUrl(`${dir}/${manifest.entry}`),
     ],
     clearEnv: true,
     env: childEnv(),

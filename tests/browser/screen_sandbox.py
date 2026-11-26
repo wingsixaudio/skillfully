@@ -123,13 +123,15 @@ async def main():
         box = await (await fr.query_selector("#fader")).bounding_box()
         y = box["y"] + box["height"] / 2
         xs = [box["x"] + box["width"] * (0.05 + 0.01 * k) for k in range(70)]
+        before = (await state("sim-console"))[LEVEL]
         await pg.mouse.move(xs[0], y); await pg.mouse.down()
         for x in xs[1:]:
             await pg.mouse.move(x, y); await pg.wait_for_timeout(12)
         await pg.mouse.up(); await pg.wait_for_timeout(900)
         held = (await state("sim-console"))[LEVEL]
         shown = (await fr.inner_text("#db")).replace("\n", "").replace("dB", "")
-        check("a drag reaches the board", held == -10, f"board holds {held}")
+        # Engines round the fader's width differently, so the last position may land one half-dB step either side.
+        check("a drag reaches the board", held != before and abs(held - -10) <= 0.5, f"board held {before}, now holds {held}")
         check("the screen shows what the board holds", float(shown) == held, shown)
         log_text = await fr.inner_text("#log")
         check("the screen's history is filled through the bridge, as Sam's own", "You set the level" in log_text, log_text[:80])
@@ -165,7 +167,9 @@ async def main():
         await admin("/admin/api/person/disabled", {"id": sam_id, "disabled": True})
         await pg.wait_for_url("**/signin", timeout=5000)
         check("turning a person off signs their phone out within seconds", True)
-        check("no page errors", not errors, "; ".join(errors))
+        # WebKit reports a refused attempt to leave the sandbox as a page error. That is the sandbox working.
+        unexpected = [e for e in errors if "allow-top-navigation" not in e]
+        check("no page errors", not unexpected, "; ".join(unexpected))
         await b.close()
 
 asyncio.run(main())
