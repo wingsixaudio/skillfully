@@ -89,6 +89,7 @@ export class PluginHost {
   #logTokens = LOG_BURST;
   #logRefilledAt = 0;
   #logDropped = 0;
+  #mutedAt = 0;
   #checking = false;
   #readyWaiters: (() => void)[] = [];
   #changeListeners = new Set<(values: Values) => void>();
@@ -485,7 +486,12 @@ export class PluginHost {
   async #watch(): Promise<void> {
     const now = Date.now();
 
-    if (this.#logDropped && this.#logTokens + ((now - this.#logRefilledAt) / 1000) * LOG_PER_SECOND >= 1) {
+    // One summary a second at most, however long the flood lasts.
+    if (
+      this.#logDropped && now - this.#mutedAt >= 1000 &&
+      this.#logTokens + ((now - this.#logRefilledAt) / 1000) * LOG_PER_SECOND >= 1
+    ) {
+      this.#mutedAt = now;
       this.log.append({
         type: "skillfully.plugin.muted",
         source: "core",

@@ -161,11 +161,12 @@ Deno.test("a plugin that floods the hub cannot fill the log, and is stopped", as
   assertEquals(hit.data.limit, "messages");
 
   const kept = ofType(hub, "skillfully.plugin.event").filter((e) => e.source === "plugin/misbehave").length;
-  const muted = ofType(hub, "skillfully.plugin.muted");
-  const leftOut = muted.reduce((n, e) => n + (e.data.leftOut as number), 0);
   assert(kept <= 250, `the log kept ${kept} of the plugin's entries`);
-  assert(leftOut > 5000, `the log says how many were left out: ${leftOut}`);
-  assert(muted.length <= 10, "and says so in a handful of entries, not thousands");
+  // The count of what was left out arrives in summaries, one a second at most, the last one after the stop.
+  const muted = () => ofType(hub, "skillfully.plugin.muted");
+  const leftOut = () => muted().reduce((n, e) => n + (e.data.leftOut as number), 0);
+  await until("the log says how many were left out", () => leftOut() > 5000, 5000);
+  assert(muted().length <= 10, `and says so in a handful of entries, not thousands: ${muted().length}`);
   assert((await board(hub).set(LEVEL, -8, { via: "test" })).ok);
   await hub.stop();
 });
