@@ -181,28 +181,25 @@ Deno.test("a Companion module is held to the same sandbox as any driver", async 
   }
 });
 
-Deno.test("dropped in with no narrower grant, a module gets the local network and not this computer", async () => {
+Deno.test("dropped in with nothing said about the network, a module can reach nothing on it", async () => {
   const lamp = pretendLamp();
-  // No network list: the default for a module nobody has reviewed.
-  const { hub, host, installed, close } = await dropIn({
+  const { host, installed, close } = await dropIn({
     settings: { host: "127.0.0.1", port: lamp.port },
     mode: "act",
   });
   try {
-    assertEquals(installed.manifest.permissions?.network, ["lan", "listen"]);
-    assert(installed.notes.some((n) => n.includes("local network")));
+    assertEquals(installed.manifest.permissions?.network, []);
+    assert(installed.notes.some((n) => n.includes("no access to your network")));
     assert(installed.notes.some((n) => n.includes("Nobody has reviewed")));
-    const reach = resolveNetwork(installed.manifest, {});
-    assert(reach.includes("192.168.0.0/16") && reach.includes("10.0.0.0/8") && reach.includes("0.0.0.0"));
-    assert(!reach.some((r) => r.startsWith("127.")), "this computer is not part of the local network grant");
-
-    // The pretend lamp is on this computer, so the module must not get through to it.
+    assertEquals(resolveNetwork(installed.manifest, {}), []);
+    // It starts, describes itself, and says in its own way that it cannot get to its device.
     await until("the module reports trouble", () => host.health.status === "down", 8000);
+    assert(host.health.reason?.includes("it is not allowed to reach 127.0.0.1"), host.health.reason);
     assertEquals(lamp.connections, 0);
-    assert(
-      ofType(hub, "skillfully.plugin.health").some((e) => String(e.data.reason ?? "").length > 0),
-      "the log says why",
-    );
+    // The wide grant still exists for whoever chooses it, and still leaves this computer out.
+    const wide = resolveNetwork({ ...installed.manifest, permissions: { network: ["lan", "listen"] } }, {});
+    assert(wide.includes("192.168.0.0/16") && wide.includes("10.0.0.0/8") && wide.includes("0.0.0.0"));
+    assert(!wide.some((r) => r.startsWith("127.")), "this computer is not part of the local network grant");
   } finally {
     await close();
     lamp.close();

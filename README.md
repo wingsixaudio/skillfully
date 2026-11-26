@@ -62,9 +62,12 @@ tests/compat/kasa.sh                       # a real Companion module against a p
 
 Many devices already have a [Bitfocus Companion](https://bitfocus.io/companion) module. To use one, download
 the module's package (the `.tgz` file Companion itself installs), open the admin page, and choose **Add a
-device**. The page shows what the module is and what it could reach before anything is added, then asks for
-the settings the module itself declares. A device starts out listening: the hub watches it and sends it
-nothing until you switch it to Act.
+device**. The page shows what the module is before anything is added, then asks for the settings the module
+itself declares.
+
+A device starts with no access to your network. When it tries to reach something, the page asks you first, in
+plain words, the way a phone asks before an app uses the camera. It also starts out listening: the hub watches
+it and sends it nothing until you switch it to Act.
 
 The same thing from a command line, for a hub with no screen:
 `deno task add-module module.tgz --set

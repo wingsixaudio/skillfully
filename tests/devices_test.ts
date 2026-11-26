@@ -35,6 +35,9 @@ function pretendLamp() {
   return {
     port: (server.addr as Deno.NetAddr).port,
     heard,
+    get connections() {
+      return conns.size;
+    },
     close() {
       for (const c of conns) {
         try {
@@ -89,7 +92,7 @@ async function emptyHub() {
 
 const exists = async (path: string) => !!(await Deno.stat(path).catch(() => null));
 
-Deno.test("a superuser adds a device from a package, fills in its own settings form, and uses it", async () => {
+Deno.test("a superuser adds a device, fills in its settings, and allows what it asks to reach", async () => {
   const lamp = pretendLamp();
   const h = await emptyHub();
   try {
@@ -98,19 +101,13 @@ Deno.test("a superuser adds a device from a package, fills in its own settings f
     assert(seen.body.ok, JSON.stringify(seen.body));
     assertEquals(seen.body.module.name, "skillfully-test-lamp");
     assertEquals(seen.body.module.version, "1.0.0");
-    assert(seen.body.notes.lan[0].includes("any device on your local network"));
-    assert(seen.body.notes.one[0].includes("nothing else on the network"));
+    assert(seen.body.notes[0].includes("no access to your network"), seen.body.notes[0]);
     assertEquals(seen.body.screens, [{ id: "controls", name: "Controls" }]);
     assertEquals(h.hub.hosts.size, 0);
     assert(!(await exists(`${h.dataDir}/plugins/companion-skillfully-test-lamp`)));
 
-    // Adding asks for the superuser's own PIN, and the device arrives listening.
-    const add = {
-      upload: seen.body.upload,
-      name: "Stage lamp",
-      reach: `127.0.0.1:${lamp.port}`,
-      screens: ["controls"],
-    };
+    // Adding asks for the superuser's own PIN. The device arrives listening, with no access to the network.
+    const add = { upload: seen.body.upload, name: "Stage lamp", screens: ["controls"] };
     assert(!(await h.post("/admin/api/module/add", add)).body.ok, "not without the PIN");
     const added = await h.post("/admin/api/module/add", { ...add, confirm: OWNER_PIN });
     assert(added.body.ok, JSON.stringify(added.body));
@@ -119,6 +116,7 @@ Deno.test("a superuser adds a device from a package, fills in its own settings f
     const host = () => h.hub.hosts.get(id)!;
     assertEquals(host().mode, "listen");
     assertEquals(host().manifest.name, "Stage lamp");
+    assertEquals(host().manifest.permissions?.network, []);
     assertEquals(h.hub.approvals.of("controls"), [id]);
     const logged = h.hub.log.read({ type: "skillfully.plugin.added", limit: 5 })[0];
     assertEquals(logged.actor, h.owner.id);
@@ -135,6 +133,7 @@ Deno.test("a superuser adds a device from a package, fills in its own settings f
     assertEquals(d.form[1].default, 7000);
     assertEquals(d.module, { id: "skillfully-test-lamp", name: "skillfully-test-lamp", version: "1.0.0" });
     assertEquals(d.usedBy, ["Controls"]);
+    assertEquals(d.asks, [], "with no address to go to, it has asked for nothing");
     await until(
       "it says its settings need filling in",
       () => host().health.reason?.startsWith("Its settings need filling in") ?? false,
@@ -146,14 +145,46 @@ Deno.test("a superuser adds a device from a package, fills in its own settings f
       settings: { host: "127.0.0.1", port: lamp.port },
     });
     assertEquals(saved.body, { ok: true, changed: ["host", "port"] });
-    await until("it connects to the lamp", () => host().state.get("generic/reading/power") === "off", 8000);
-    assertEquals(host().health.status, "ok");
-    assertEquals((await h.device(id)).settings, { host: "127.0.0.1", port: lamp.port });
     const kept = JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`));
     assertEquals(kept.settings, { host: "127.0.0.1", port: lamp.port });
     // The log says which settings changed, never what they were set to.
-    const change = h.hub.log.read({ type: "skillfully.plugin.settings", limit: 5 })[0];
-    assertEquals(change.data, { changed: ["host", "port"] });
+    assertEquals(h.hub.log.read({ type: "skillfully.plugin.settings", limit: 5 })[0].data, {
+      changed: ["host", "port"],
+    });
+
+    // Now it knows where its device is, and tries. It is refused, and the hub turns that into a question.
+    const wanted = `127.0.0.1:${lamp.port}`;
+    await until("it asks to reach its device", () => host().asks.has(wanted), 8000);
+    assertEquals(lamp.connections, 0, "nothing got through before anyone said yes");
+    const ask = (await h.device(id)).asks[0];
+    assertEquals(ask.value, wanted);
+    assertEquals(ask.words, `Reach another program on this computer, port ${lamp.port}`);
+    assert(ask.caution && !ask.usual, "an address on the hub's own computer is not the ordinary case");
+    assertEquals(h.hub.log.read({ type: "skillfully.plugin.asked", limit: 5 })[0].data.value, wanted);
+
+    // Only what it asked for can be allowed, and only with the superuser's own PIN.
+    const allow = (body: Record<string, unknown>) => h.post("/admin/api/driver/allow", { id, ...body });
+    assert(!(await allow({ allow: [wanted] })).body.ok, "not without the PIN");
+    assert(
+      !(await allow({ allow: ["10.0.0.1:22"], confirm: OWNER_PIN })).body.ok,
+      "not something it never asked for",
+    );
+    assertEquals(lamp.connections, 0);
+    const yes = await allow({ allow: [wanted], confirm: OWNER_PIN });
+    assertEquals(yes.body, { ok: true, allowed: [wanted], denied: [], revoked: [] });
+    await until("it connects to the lamp", () => host().state.get("generic/reading/power") === "off", 8000);
+    assertEquals(host().health.status, "ok");
+    assertEquals(host().manifest.permissions?.network, [wanted]);
+    assertEquals(
+      JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/plugin.json`)).permissions.network,
+      [wanted],
+    );
+    const now = await h.device(id);
+    assertEquals(now.asks, []);
+    assertEquals(now.grants.map((g: { grant: string }) => g.grant), [wanted]);
+    const allowed = h.hub.log.read({ type: "skillfully.plugin.allowed", limit: 5 })[0];
+    assertEquals(allowed.actor, h.owner.id);
+    assertEquals(allowed.data.allowed, [wanted]);
 
     // Listening, nothing is sent. Switched to Act, with the PIN, the choice is kept too.
     assert(!(await host().set("generic/action/on", true, { via: "test" })).ok);
@@ -167,6 +198,73 @@ Deno.test("a superuser adds a device from a package, fills in its own settings f
     assert((await phone.set("generic/action/on", true, id)).ok);
     await until("the lamp turns on", () => lamp.heard.includes("on"));
     await phone.close();
+  } finally {
+    await h.close();
+    lamp.close();
+  }
+});
+
+Deno.test("what a device tries is shown for what it is, and a no is remembered", async () => {
+  const lamp = pretendLamp();
+  const h = await emptyHub();
+  try {
+    const seen = await h.send(await Deno.readFile(PACKAGE));
+    const { id } =
+      (await h.post("/admin/api/module/add", { upload: seen.body.upload, name: "Lamp", confirm: OWNER_PIN }))
+        .body;
+    const host = () => h.hub.hosts.get(id)!;
+    const allow = (body: Record<string, unknown>) =>
+      h.post("/admin/api/driver/allow", { id, confirm: OWNER_PIN, ...body });
+    const wanted = `127.0.0.1:${lamp.port}`;
+    await until("it starts", () => !!host().settingsForm);
+    await h.post("/admin/api/driver/settings", { id, settings: { host: "127.0.0.1", port: lamp.port } });
+    await until("it asks", () => host().asks.has(wanted), 8000);
+    assert((await allow({ allow: [wanted] })).body.ok);
+    await h.post("/admin/api/driver/mode", { id, mode: "act", confirm: OWNER_PIN });
+    await until("it connects", () => host().state.get("generic/reading/power") === "off", 8000);
+
+    // The module has an action that tries everything a module should not do. Each attempt is named plainly.
+    assert((await host().set("generic/action/snoop", true, { via: "test" })).ok);
+    await until("the attempts are noted", () => host().asks.size >= 2 && host().attempts.size >= 3, 8000);
+    const d = await h.device(id);
+    const tried = d.attempts.map((t: { words: string }) => t.words).sort();
+    // Starting another program is stopped one step earlier, when it reaches for the environment to hand on,
+    // so that is what the runtime notes.
+    assertEquals(tried, [
+      "read a file outside its own folder",
+      "read this computer's environment",
+      "write a file",
+    ]);
+    // Reaching the internet is a question, not a quiet refusal, and it comes with a warning.
+    const web = d.asks.find((a: { value: string }) => a.value === "example.com:443");
+    assert(
+      web && web.where === "internet" && web.caution === "This leaves your network.",
+      JSON.stringify(d.asks),
+    );
+    assert(!web.usual);
+
+    // Saying "do not ask again" is kept, across the restart that follows and the next start of the hub.
+    const values = d.asks.map((a: { value: string }) => a.value);
+    assert((await allow({ deny: values })).body.ok);
+    assertEquals(
+      JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`)).denied.sort(),
+      [...values].sort(),
+    );
+    await until("it is back", () => host().state.get("generic/reading/power") === "off", 8000);
+    assert((await host().set("generic/action/snoop", true, { via: "test" })).ok);
+    await until(
+      "it has tried again",
+      () => String(host().state.get("generic/reading/snoop") ?? "").startsWith("{"),
+      8000,
+    );
+    await new Promise((r) => setTimeout(r, 1500));
+    assertEquals([...host().asks.keys()], [], "it is not asked about again");
+
+    // What was allowed can be taken away. The device then has to ask again.
+    assert((await allow({ revoke: [wanted] })).body.ok);
+    assertEquals(host().manifest.permissions?.network, []);
+    await until("it asks again", () => host().asks.has(wanted), 8000);
+    assert(!(await allow({ revoke: ["lan"] })).body.ok, "nothing it does not hold can be taken away");
   } finally {
     await h.close();
     lamp.close();

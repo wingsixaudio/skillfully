@@ -115,8 +115,8 @@ const RUNTIME_NEEDS = Deno.build.os === "windows"
   ? ["DENO_DIR", "SYSTEMROOT", "LOCALAPPDATA", "USERPROFILE"]
   : ["HOME", "DENO_DIR"];
 
-function childEnv(): Record<string, string> {
-  const env: Record<string, string> = { NO_COLOR: "1" };
+function childEnv(more: Record<string, string> = {}): Record<string, string> {
+  const env: Record<string, string> = { NO_COLOR: "1", ...more };
   for (const k of RUNTIME_NEEDS) {
     const v = Deno.env.get(k);
     if (v) env[k] = v;
@@ -355,6 +355,8 @@ export class PluginProcess {
     gateway: PluginGateway;
     events: ProcessEvents;
     helloTimeoutMs?: number;
+    /** A file the runtime writes every permission the plugin uses or is refused to. The plugin cannot read it. */
+    audit?: string;
   }): Promise<PluginProcess> {
     const { manifest, gateway } = opts;
     try {
@@ -367,7 +369,7 @@ export class PluginProcess {
     const child = new Deno.Command(Deno.execPath(), {
       args,
       clearEnv: true, // the plugin inherits nothing from the hub's environment
-      env: childEnv(),
+      env: childEnv(opts.audit ? { DENO_AUDIT_PERMISSIONS: opts.audit } : {}),
       stdin: "null",
       stdout: "null",
       stderr: "piped",
