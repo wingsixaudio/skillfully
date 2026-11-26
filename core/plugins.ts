@@ -7,6 +7,7 @@ import { abilitiesProblem, ANY, RESERVED } from "./access.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { realPath } from "./paths.ts";
 import { inspectImports, loadManifest } from "./process.ts";
+import { runtimeOf } from "./runtimes.ts";
 
 export interface Inspected {
   manifest: Manifest;
@@ -43,6 +44,7 @@ export async function inspectPlugin(
   if (!manifest.license) warnings.push("it names no license");
 
   if (manifest.kind === "driver") {
+    runtimeOf(manifest); // throws when this hub has nothing that runs it
     const problem = capabilities.declaredProblem(manifest.capabilities);
     if (problem) throw new Error(`${manifest.id}: ${problem}`);
     if (opts.imports) await inspectImports(real, manifest);

@@ -137,10 +137,9 @@ Deno.test("a device added from the store holds what the store allows in advance,
     assert(added.body.ok, JSON.stringify(added.body));
     const id = added.body.id;
     const host = () => h.hub.hosts.get(id)!;
-    assertEquals(host().manifest.permissions?.network, ["{host}:{port}"]);
+    assertEquals(host().granted, ["{host}:{port}"]);
     assertEquals(host().mode, "listen", "being in the store does not make it act by itself");
-    const kept = JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`));
-    assertEquals(kept.store, {
+    assertEquals(h.hub.devices.record(id).origin?.store, {
       id: "skillfully-test-lamp",
       repo: "https://github.com/wingsixaudio/skillfully",
       commit: "0".repeat(40),
@@ -157,7 +156,7 @@ Deno.test("a device added from the store holds what the store allows in advance,
     // It can start before its address is known, so it can say what settings it takes.
     await until("it describes its settings", () => !!host().settingsForm, 8000);
     assertEquals(
-      resolveNetwork(host().manifest, {}),
+      resolveNetwork(host().granted, {}, { settingsComeLater: true }),
       [],
       "a grant that waits on a setting gives nothing yet",
     );

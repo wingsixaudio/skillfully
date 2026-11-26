@@ -390,14 +390,14 @@ export function adminPage(): string {
       item.append(el("div", {}, el("span", { className: "chip", textContent: STATE[d.status] || d.status }), el("span", { className: "chip" + (d.mode === "act" ? " on" : ""), textContent: d.mode === "act" ? "Act" : "Listen" })));
       const [words, kind] = statusOf(d);
       item.append(el("p", { className: "status " + kind, textContent: words }));
-      const reachNow = d.added ? (d.grants.length ? "It may: " + d.grants.map((g) => g.words.charAt(0).toLowerCase() + g.words.slice(1)).join("; ") + "." : "It has no access to your network.") : d.reach[0];
+      const reachNow = d.grants.length ? "It may: " + d.grants.map((g) => g.words.charAt(0).toLowerCase() + g.words.slice(1)).join("; ") + "." : "It has no access to your network.";
       item.append(el("p", { className: "help", textContent: reachNow + (d.mode === "act" ? "" : " In Listen, nothing is sent to it.") }));
       item.append(el("p", { className: "help", textContent: d.usedBy.length ? "Used by: " + d.usedBy.join(", ") + "." : "No screen can use it yet. Choose which under Screens." }));
       const row = el("div", { className: "row", style: "margin-top:10px" });
       const btn = (text, fn) => { const b = el("button", { className: "small quiet", type: "button", textContent: text }); b.onclick = fn; row.append(b); return b; };
       if (d.asks.length) { const b = btn("See what it asks for", () => openAccess(d.id)); b.className = "small"; }
-      if (d.added) btn("Settings", () => openSettings(d.id));
-      if (d.added && !d.asks.length && d.grants.length) btn("Network access", () => openAccess(d.id));
+      if (d.added || d.form) btn("Settings", () => openSettings(d.id));
+      if (!d.asks.length && d.grants.length) btn("Network access", () => openAccess(d.id));
       btn(d.mode === "act" ? "Switch to Listen" : "Switch to Act", () => ask((d.mode === "act" ? "Stop sending changes to " : "Start sending changes to ") + d.name, (x) => confirmField(x),
         () => call("/admin/api/driver/mode", { id: d.id, mode: d.mode === "act" ? "listen" : "act", confirm: $("confirm").value }), "Switch"));
       if (d.status === "quarantined") btn("Release", async () => { await call("/admin/api/driver/release", { id: d.id }); load(); });

@@ -3,52 +3,38 @@
 // The hub's own code knows about plugins, capabilities, values, commands,
 // people, roles and the log. It does not know what any device is or what any
 // screen is for: those arrive as capability definitions, drivers and screens.
+//
+// This file puts the parts together and answers the door:
+//   devices.ts   the drivers a hub runs, each started from the hub's one record of it
+//   screens.ts   the screens, who may use each, and the phones connected through them
+//   admin.ts     a superuser's tools
+//   accounts.ts  people, roles and signing in
 
 import { DatabaseSync } from "node:sqlite";
-import { checkManifest } from "../contract/mod.ts";
-import type {
-  Ability,
-  DriverManifest,
-  Mode,
-  ScreenManifest,
-  SkillManifest,
-  Value,
-  Values,
-} from "../contract/mod.ts";
-import { Access, ANY } from "./access.ts";
+import type { SkillManifest } from "../contract/mod.ts";
+import { Accounts } from "./accounts.ts";
+import { adminApi } from "./admin.ts";
 import { Approvals } from "./approvals.ts";
-import { attemptWords, grantWords } from "./asks.ts";
-import { Accounts, type Person } from "./accounts.ts";
 import { Capabilities, CAPABILITIES_DIR } from "./capabilities.ts";
-import { PluginHost, type Tuning } from "./host.ts";
-import { Log, type LogEntry, newId } from "./log.ts";
-import {
-  type ModulePackage,
-  networkNotes,
-  readInstall,
-  readModulePackage,
-  type StoreOrigin,
-  updateInstall,
-  writeModule,
-} from "./install.ts";
-import { Store, type StoreModule } from "./store.ts";
+import { Devices, type DriverChoices } from "./devices.ts";
+import type { PluginHost } from "./host.ts";
+import { cookieOf, go, json, outcome, readJson, refuse, setCookie, TYPES } from "./http.ts";
+import { Log } from "./log.ts";
 import { adminPage, authPage, notePage, PAGE_POLICY, shellPage } from "./pages.ts";
 import { realPath } from "./paths.ts";
 import { inspectPlugin } from "./plugins.ts";
 import { PluginGateway } from "./process.ts";
+import { Registry } from "./registry.ts";
+import { type Screen, Screens } from "./screens.ts";
+import { Store } from "./store.ts";
 
-export interface PluginConfig {
+/** One plugin folder to start the hub with. What is chosen here for a driver is used the first time the hub sees it. */
+export interface PluginConfig extends DriverChoices {
   dir: string;
-  /** Drivers only: handed to the driver at start. */
-  settings?: Record<string, unknown>;
-  /** Drivers only. Listen unless told otherwise. */
-  mode?: Mode;
-  /** Timings a test may shorten. */
-  tuning?: Tuning;
 }
 
 export interface HubOptions {
-  /** SQLite file for the log and the people list. */
+  /** SQLite file for the log, the people list and what the hub holds for each driver. */
   dbPath: string;
   plugins: PluginConfig[];
   hostname?: string;
@@ -67,36 +53,15 @@ export interface Hub {
   /** Which connections each screen may use. */
   approvals: Approvals;
   capabilities: Capabilities;
+  /** The drivers, and what the hub holds for each. */
+  devices: Devices;
   /** Drivers, by id. */
   hosts: Map<string, PluginHost>;
-  screens: Map<string, { manifest: ScreenManifest; dir: string }>;
+  screens: Map<string, Screen>;
   skills: Map<string, { manifest: SkillManifest; dir: string }>;
   stop(): Promise<void>;
 }
 
-interface Connection {
-  socket: WebSocket;
-  screen: ScreenManifest;
-  person: Person;
-  access: Access;
-}
-
-const TYPES: Record<string, string> = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".json": "application/json",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".webp": "image/webp",
-  ".woff2": "font/woff2",
-};
-const COOKIE = "sk_session";
-
-const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
 const html = (body: string, status = 200) =>
   new Response(body, {
     status,
@@ -106,10 +71,6 @@ const html = (body: string, status = 200) =>
       "cache-control": "no-store",
     },
   });
-const go = (to: string) => new Response(null, { status: 302, headers: { location: to } });
-const refuse = (status: number, message: string) => json({ ok: false, code: "refused", message }, status);
-
-const capabilityOf = (key: string) => key.slice(0, key.indexOf("/"));
 
 export async function startHub(opts: HubOptions): Promise<Hub> {
   const db = new DatabaseSync(opts.dbPath);
@@ -118,10 +79,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   const approvals = new Approvals(db, log);
   const capabilities = await Capabilities.load(opts.capabilitiesDir ?? CAPABILITIES_DIR);
   const gateway = new PluginGateway();
-  const hosts = new Map<string, PluginHost>();
-  const screens = new Map<string, { manifest: ScreenManifest; dir: string }>();
   const skills = new Map<string, { manifest: SkillManifest; dir: string }>();
-  const connections = new Set<Connection>();
 
   log.append({
     type: "skillfully.hub.started",
@@ -132,67 +90,34 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     },
   });
 
-  // What was chosen for each driver, and whether a superuser added it to this hub.
-  interface Chosen {
-    dir: string;
-    settings: Record<string, unknown>;
-    added: boolean;
-    module?: { id: string; name: string; version: string };
-    store?: StoreOrigin;
-    tuning?: Tuning;
-  }
-  const chosen = new Map<string, Chosen>();
-  const store = new Store(opts.storeUrl);
-  const addedRoot = opts.dataDir ? `${opts.dataDir.replace(/[\\/]$/, "")}/plugins` : undefined;
-  if (addedRoot) await Deno.mkdir(addedRoot, { recursive: true });
-  const addedReal = addedRoot ? `${await realPath(addedRoot)}/` : undefined;
+  const dataDir = opts.dataDir?.replace(/[\\/]$/, "");
+  const addedDir = dataDir ? `${dataDir}/plugins` : undefined;
+  if (addedDir) await Deno.mkdir(addedDir, { recursive: true });
   // Scratch files the runtime writes for the hub to read. Nothing in here is kept.
-  const runDir = opts.dataDir ? `${opts.dataDir.replace(/[\\/]$/, "")}/run` : "";
-  if (runDir) await Deno.mkdir(runDir, { recursive: true });
+  const runDir = dataDir ? `${dataDir}/run` : await Deno.makeTempDir({ prefix: "skillfully-run-" });
+  await Deno.mkdir(runDir, { recursive: true });
 
-  /** Read and check one plugin folder and take it in. Throws with a plain reason when it cannot be. */
-  async function load(cfg: PluginConfig): Promise<PluginHost | undefined> {
-    const { manifest, dir } = await inspectPlugin(cfg.dir, capabilities);
-    if (hosts.has(manifest.id) || screens.has(manifest.id) || skills.has(manifest.id)) {
-      throw new Error(`a plugin called ${manifest.id} is already loaded`);
-    }
-    if (manifest.kind === "screen") screens.set(manifest.id, { manifest, dir });
-    else if (manifest.kind === "skill") skills.set(manifest.id, { manifest, dir });
-    else {
-      const added = !!addedReal && dir.startsWith(addedReal);
-      const install = added ? await readInstall(dir) : {};
-      // For a device a superuser added, the runtime notes what it tries, so the hub can ask about each thing.
-      const tuning: Tuning = {
-        ...cfg.tuning,
-        ...(added ? { auditPath: `${runDir}/${manifest.id}.jsonl`, denied: install.denied ?? [] } : {}),
-      };
-      chosen.set(manifest.id, {
-        dir,
-        settings: cfg.settings ?? {},
-        added,
-        ...(install.module ? { module: install.module } : {}),
-        ...(install.store ? { store: install.store } : {}),
-        tuning,
-      });
-      const host = new PluginHost(
-        manifest,
-        dir,
-        cfg.settings ?? {},
-        cfg.mode ?? "listen",
-        log,
-        gateway,
-        capabilities,
-        tuning,
-      );
-      hosts.set(manifest.id, host);
-      return host;
-    }
-  }
+  const devices = new Devices({
+    log,
+    gateway,
+    capabilities,
+    registry: new Registry(db),
+    runDir,
+    dataDir,
+    addedRoot: addedDir ? `${await realPath(addedDir)}/` : undefined,
+  });
+  const screens = new Screens({ accounts, approvals, capabilities, devices, log });
+  const hosts = devices.hosts;
+  const taken = (id: string) => hosts.has(id) || screens.all.has(id) || skills.has(id);
 
   // A plugin that cannot be loaded is logged and left out. It never stops the hub.
   for (const cfg of opts.plugins) {
     try {
-      await load(cfg);
+      const { manifest, dir } = await inspectPlugin(cfg.dir, capabilities);
+      if (taken(manifest.id)) throw new Error(`a plugin called ${manifest.id} is already loaded`);
+      if (manifest.kind === "screen") screens.all.set(manifest.id, { manifest, dir });
+      else if (manifest.kind === "skill") skills.set(manifest.id, { manifest, dir });
+      else devices.adopt(manifest, dir, cfg);
     } catch (err) {
       log.append({
         type: "skillfully.plugin.refused",
@@ -202,599 +127,22 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       });
     }
   }
+  await devices.startAll();
 
-  // --- Who may do what ---
-
-  /** The abilities of one screen that this person's roles switch on. A superuser has them all. */
-  function granted(person: Person, screen: ScreenManifest): Ability[] {
-    if (accounts.isSuperuser(person)) return screen.abilities;
-    const ids = new Set(
-      accounts.roles().filter((r) => person.roles.includes(r.id)).flatMap((r) => r.grants[screen.id] ?? []),
-    );
-    return screen.abilities.filter((a) => ids.has(a.id));
-  }
-  const accessFor = (person: Person, screen: ScreenManifest) =>
-    new Access(screen, granted(person, screen), person, accounts.isSuperuser(person));
-  const screensFor = (person: Person) =>
-    [...screens.values()].map((s) => s.manifest).filter((m) => granted(person, m).length > 0);
-  function homeFor(person: Person): string | undefined {
-    const mine = screensFor(person).map((m) => m.id);
-    const wanted = accounts.roles().filter((r) => person.roles.includes(r.id) && r.home).map((r) => r.home!);
-    // A role's home screen first. Failing that, a screen that has been given something to show.
-    return wanted.find((id) => mine.includes(id)) ?? mine.find((id) => approvals.of(id).length > 0) ??
-      (accounts.isSuperuser(person) ? undefined : mine[0]);
-  }
-  const abilityExists = (plugin: string, ability: string) =>
-    !!screens.get(plugin)?.manifest.abilities.some((a) => a.id === ability);
-
-  // --- What a connected screen is told ---
-
-  const tell = (ws: WebSocket, m: unknown) => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
-  };
-  /** The connections a screen could be approved for: drivers with a kind of device the screen works with. */
-  const eligible = (screen: ScreenManifest) =>
-    [...hosts.values()].filter((h) =>
-      Object.keys(h.manifest.capabilities).some((cap) => cap in screen.uses || ANY in screen.uses)
-    );
-  // A screen reaches a connection only when a superuser approved that screen for it, and then only as far as
-  // this person's roles go.
-  const visible = (c: Connection) =>
-    [...hosts.values()].filter((h) =>
-      approvals.allowed(c.screen.id, h.id) &&
-      Object.keys(h.manifest.capabilities).some((cap) => c.access.sees(cap))
-    );
-  /** The definitions of the kinds of device a screen can see, so it can draw values it was not written for. */
-  const definitionsFor = (c: Connection) =>
-    Object.fromEntries(
-      capabilities.list().filter((d) =>
-        visible(c).some((h) => d.capability in h.manifest.capabilities) &&
-        c.access.sees(d.capability)
-      ).map((d) => [d.capability, { title: d.title, values: d.values }]),
-    );
-  const describe = (h: PluginHost, c?: Connection) => ({
-    id: h.id,
-    name: h.manifest.name,
-    capabilities: c
-      ? Object.fromEntries(Object.entries(h.manifest.capabilities).filter(([cap]) => c.access.sees(cap)))
-      : h.manifest.capabilities,
-    mode: h.mode,
-    status: h.status,
-    health: h.health,
-  });
-  const only = (c: Connection, values: Values): Values =>
-    Object.fromEntries(Object.entries(values).filter(([k]) => c.access.canRead(k)));
-  /** The log as one person may see it through one screen: entries about values and drivers they can already see. */
-  function logFor(c: Connection, entries: LogEntry[]): LogEntry[] {
-    if (accounts.isSuperuser(c.person)) return entries;
-    const mine = new Set(visible(c).map((h) => h.id));
-    return entries.filter((e) => {
-      const subject = e.subject ?? "";
-      const colon = subject.indexOf(":");
-      if (colon > 0) return mine.has(subject.slice(0, colon)) && c.access.canRead(subject.slice(colon + 1));
-      return mine.has(subject) && e.type.startsWith("skillfully.plugin.");
-    });
-  }
-
-  /** Close every connection a person has, so the next one is opened under their new roles or not at all. */
-  function drop(personId: string): void {
-    for (const c of connections) if (c.person.id === personId) c.socket.close(4403, "access changed");
-  }
-  function dropScreen(screenId: string): void {
-    for (const c of connections) if (c.screen.id === screenId) c.socket.close(4403, "access changed");
-  }
-  function dropEveryone(): void {
-    for (const c of connections) c.socket.close(4403, "access changed");
-  }
-
-  /** Pass a driver's news on to the screens that may hear it. */
-  function attach(host: PluginHost): void {
-    host.onChange((values) => {
-      for (const c of connections) {
-        if (!approvals.allowed(c.screen.id, host.id)) continue;
-        const mine = only(c, values);
-        if (Object.keys(mine).length) {
-          tell(c.socket, { type: "state", plugin: host.id, full: false, values: mine });
-        }
-      }
-    });
-    host.onHealth(() => {
-      for (const c of connections) {
-        tell(c.socket, {
-          type: "plugins",
-          plugins: visible(c).map((h) => describe(h, c)),
-        });
-      }
-    });
-  }
-  for (const host of hosts.values()) attach(host);
-
-  await Promise.all([...hosts.values()].map((h) => h.start()));
-
-  // --- Devices a superuser adds while the hub is running ---
-
-  const UPLOAD_MAX = 64 * 1024 * 1024;
-  const UPLOAD_KEPT_MS = 10 * 60 * 1000;
-  /** The package each superuser is looking at, checked but not yet added. One each, for a few minutes. */
-  const uploads = new Map<string, { pkg: ModulePackage; at: number; from?: StoreModule }>();
-  /** What a hub allows a store module in advance, and how far it has been proven, in words. */
-  const PROVEN: Record<string, string> = {
-    starts: "It starts and describes itself. Nobody has reported using it with a device.",
-    "pretend-device": "It has been proven against a stand-in for the device, not the real thing.",
-    "real-device": "It has been used with the real device.",
-  };
-  const fromStore = (m: StoreModule) => ({
-    id: m.id,
-    name: m.name,
-    description: m.description,
-    version: m.version,
-    license: m.license,
-    source: m.source.repo,
-    proven: PROVEN[m.tested],
-    notes: m.notes,
-    advance: m.network.map((g) => grantWords(g)),
-  });
-  /** The screens that could be given a device of these kinds. */
-  const fits = (kinds: string[]) =>
-    [...screens.values()].map((s) => s.manifest).filter((m) =>
-      ANY in m.uses || kinds.some((k) => k in m.uses)
-    );
-  const sentence = (err: unknown) => {
-    const text = String((err as Error).message ?? err);
-    return text.charAt(0).toUpperCase() + text.slice(1) + (text.endsWith(".") ? "" : ".");
-  };
-
-  /** Read a file sent by the hub's own page, stopping at the size limit however large it claims to be. */
-  async function upload(req: Request, me: Person): Promise<Response> {
-    if (!opts.dataDir) return refuse(400, "This hub was started without a place to keep added devices.");
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for await (const chunk of req.body ?? []) {
-      total += chunk.length;
-      if (total > UPLOAD_MAX) return refuse(413, "That file is larger than this hub accepts.");
-      chunks.push(chunk);
-    }
-    const bytes = new Uint8Array(total);
-    let at = 0;
-    for (const c of chunks) {
-      bytes.set(c, at);
-      at += c.length;
-    }
-    try {
-      const pkg = await readModulePackage(bytes);
-      uploads.set(me.id, { pkg, at: Date.now() });
-      return json({
-        ok: true,
-        upload: pkg.sha256,
-        module: pkg.module,
-        // What it will and will not be able to do, in words, before anything is decided.
-        notes: networkNotes([]),
-        screens: fits(["generic"]).map((m) => ({ id: m.id, name: m.name })),
-      });
-    } catch (err) {
-      return refuse(400, sentence(err));
-    }
-  }
-
-  /** Stop a driver and start it again with other settings. Its permissions can depend on them. */
-  async function restart(
-    id: string,
-    settings: Record<string, unknown>,
-    change: { manifest?: DriverManifest; denied?: string[] } = {},
-  ): Promise<void> {
-    const old = hosts.get(id)!;
-    const was = chosen.get(id)!;
-    await old.stop();
-    const tuning = { ...was.tuning, ...(change.denied ? { denied: change.denied } : {}) };
-    chosen.set(id, { ...was, settings, tuning });
-    const host = new PluginHost(
-      change.manifest ?? old.manifest,
-      old.dir,
-      settings,
-      old.mode,
-      log,
-      gateway,
-      capabilities,
-      tuning,
-    );
-    hosts.set(id, host);
-    attach(host);
-    await host.start();
-    // Screens that were shown the old one start again and are shown the new one.
-    for (const m of screens.values()) if (approvals.allowed(m.manifest.id, id)) dropScreen(m.manifest.id);
-  }
-
-  async function onScreenMessage(c: Connection, raw: string): Promise<void> {
-    let m: {
-      type?: string;
-      plugin?: unknown;
-      key?: unknown;
-      value?: unknown;
-      ref?: unknown;
-      limit?: unknown;
-      traceid?: unknown;
-    };
-    try {
-      m = JSON.parse(raw);
-    } catch {
-      return;
-    }
-    const via = `screen/${c.screen.id}`;
-    if (m.type === "set" && typeof m.key === "string" && typeof m.plugin === "string") {
-      const traceid = newId();
-      const host = hosts.get(m.plugin);
-      let outcome;
-      if (
-        !host || !approvals.allowed(c.screen.id, host.id) || !c.access.canWrite(m.key) ||
-        !(capabilityOf(m.key) in host.manifest.capabilities)
-      ) {
-        // What a person was not granted, they cannot do, whatever the screen sends. The attempt is on the record.
-        const message = `You are not allowed to set ${m.key} on ${m.plugin} from ${c.screen.name}.`;
-        log.append({
-          type: "skillfully.command.rejected",
-          source: "core",
-          subject: `${m.plugin}:${m.key}`,
-          actor: c.person.id,
-          via,
-          traceid,
-          data: { key: m.key, requested: m.value ?? null, code: "not_allowed", message },
-        });
-        outcome = { ok: false as const, error: { code: "not_allowed", message } };
-      } else {
-        outcome = await host.set(m.key, m.value as Value, { actor: c.person.id, via, traceid });
-      }
-      tell(c.socket, { type: "ack", ref: m.ref ?? null, plugin: m.plugin, key: m.key, traceid, ...outcome });
-    } else if (m.type === "log" && c.access.sees("log")) {
-      const entries = log.read({
-        limit: 1000,
-        traceid: typeof m.traceid === "string" ? m.traceid : undefined,
-        newest: true,
-      });
-      tell(c.socket, {
-        type: "log",
-        ref: m.ref ?? null,
-        entries: logFor(c, entries).slice(-Math.min(Number(m.limit) || 50, 200)),
-      });
-    }
-  }
-
-  // --- The hub's own HTTP API. Only its own pages use it. ---
+  const admin = adminApi({ accounts, approvals, devices, screens, store: new Store(opts.storeUrl), taken });
 
   const publicRule = (superuser: boolean) => {
     const p = accounts.policy();
     const r = (superuser && p.superuser) || p;
     return { kind: r.kind, minLength: r.minLength, mixed: r.mixed };
   };
-  const cookieOf = (req: Request) =>
-    (req.headers.get("cookie") ?? "").split(/;\s*/).find((c) => c.startsWith(COOKIE + "="))?.slice(
-      COOKIE.length + 1,
-    );
-  const setCookie = (token: string, secure: boolean, clear = false) => ({
-    "set-cookie": `${COOKIE}=${clear ? "" : token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${
-      clear ? 0 : 31536000
-    }${secure ? "; Secure" : ""}`,
-  });
-  /** Read a JSON request made by one of the hub's own pages. Anything else is turned away. */
-  async function body(req: Request, origin: string): Promise<Record<string, unknown> | Response> {
-    const from = req.headers.get("origin");
-    if (from !== null && from !== origin) {
-      return refuse(403, "That request did not come from this hub's own pages.");
-    }
-    if (!(req.headers.get("content-type") ?? "").startsWith("application/json")) {
-      return refuse(415, "Expected JSON.");
-    }
-    const text = await req.text();
-    if (text.length > 20_000) return refuse(413, "Too large.");
-    try {
-      const parsed = JSON.parse(text);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed
-        : refuse(400, "Expected an object.");
-    } catch {
-      return refuse(400, "That was not JSON.");
-    }
-  }
-  const outcome = (r: { ok: boolean }, headers: Record<string, string> = {}) =>
-    json(r, r.ok ? 200 : 400, headers);
-
-  async function admin(path: string, b: Record<string, unknown>, me: Person): Promise<Response> {
-    const id = String(b.id ?? "");
-    // Changes that hand out power, or take a device out of Listen, ask for the superuser's own PIN or password again.
-    const sure = async () =>
-      (await accounts.confirm(me.id, b.confirm))
-        ? null
-        : refuse(400, "Your own PIN or password is not right.");
-    switch (path) {
-      case "person":
-        return outcome(accounts.addPerson(me.id, b.name));
-      case "person/invite":
-        return outcome(await accounts.invite(me.id, id));
-      case "person/reset": {
-        const r = (await sure()) ?? outcome(await accounts.resetSecret(me.id, id, b.temporary));
-        if (r.ok) drop(id);
-        return r;
-      }
-      case "person/roles": {
-        const r = (await sure()) ?? outcome(accounts.setRoles(me.id, id, b.roles));
-        if (r.ok) drop(id);
-        return r;
-      }
-      case "person/slots": {
-        const r = outcome(accounts.setSlots(me.id, id, b.slots));
-        if (r.ok) drop(id);
-        return r;
-      }
-      case "person/disabled": {
-        const r = outcome(accounts.setDisabled(me.id, id, b.disabled === true));
-        if (r.ok) drop(id);
-        return r;
-      }
-      case "person/revoke":
-        accounts.revoke(me.id, id);
-        drop(id);
-        return json({ ok: true });
-      case "role": {
-        const r = outcome(accounts.saveRole(me.id, b.role, abilityExists));
-        if (r.ok) dropEveryone();
-        return r;
-      }
-      case "role/delete": {
-        const r = outcome(accounts.deleteRole(me.id, id));
-        if (r.ok) dropEveryone();
-        return r;
-      }
-      case "policy":
-        return (await sure()) ?? outcome(accounts.setPolicy(me.id, b.policy));
-      case "driver/mode": {
-        const host = hosts.get(id);
-        if (!host || (b.mode !== "listen" && b.mode !== "act")) {
-          return refuse(400, "No such device, or no such mode.");
-        }
-        const no = await sure();
-        if (no) return no;
-        host.setMode(b.mode, { actor: me.id, via: "admin" });
-        // A device a superuser added keeps the choice across restarts.
-        const mine = chosen.get(id);
-        if (mine?.added) await updateInstall(mine.dir, { mode: b.mode });
-        for (const c of connections) {
-          tell(c.socket, {
-            type: "plugins",
-            plugins: visible(c).map((h) => describe(h, c)),
-          });
-        }
-        return json({ ok: true });
-      }
-      case "screen/connections": {
-        // Handing a plugin a connection is handing out power, so it asks for the superuser's own secret.
-        const screen = screens.get(id)?.manifest;
-        if (!screen) return refuse(400, "No such screen.");
-        const wanted = Array.isArray(b.drivers) ? b.drivers.map(String) : null;
-        const can = new Set(eligible(screen).map((h) => h.id));
-        if (!wanted || wanted.some((d) => !can.has(d))) {
-          return refuse(400, "A screen can only be given connections of a kind it works with.");
-        }
-        const no = await sure();
-        if (no) return no;
-        const changed = approvals.set(me.id, screen.id, wanted);
-        if (changed.added.length || changed.removed.length) dropScreen(screen.id);
-        return json({ ok: true, ...changed });
-      }
-      case "store/fetch": {
-        // Download one package from the store and check it against the list. Nothing is added by this.
-        if (!opts.dataDir) return refuse(400, "This hub was started without a place to keep added devices.");
-        try {
-          const got = await store.download(id);
-          const pkg = await readModulePackage(got.bytes);
-          if (pkg.module.id !== got.module.id) {
-            throw new Error("the package is not the module the store lists");
-          }
-          uploads.set(me.id, { pkg, at: Date.now(), from: got.module });
-          return json({
-            ok: true,
-            upload: pkg.sha256,
-            module: pkg.module,
-            store: fromStore(got.module),
-            screens: fits(["generic"]).map((m) => ({ id: m.id, name: m.name })),
-          });
-        } catch (err) {
-          return refuse(400, sentence(err));
-        }
-      }
-      case "module/add": {
-        const up = uploads.get(me.id);
-        if (!up || up.pkg.sha256 !== b.upload || Date.now() - up.at > UPLOAD_KEPT_MS) {
-          return refuse(400, "Choose the package again.");
-        }
-        // Unless told otherwise a device starts with no access to the network and asks as it goes.
-        const reach = String(b.reach ?? "ask").trim();
-        const one = /^[A-Za-z0-9.-]{1,253}:[0-9]{1,5}$/.test(reach);
-        if (reach !== "ask" && reach !== "lan" && !one) {
-          return refuse(400, "Write the address with its port, like 192.168.1.50:9999.");
-        }
-        const wanted = Array.isArray(b.screens) ? b.screens.map(String) : [];
-        const can = new Set(fits(["generic"]).map((m) => m.id));
-        if (wanted.some((sc) => !can.has(sc))) {
-          return refuse(400, "One of those screens cannot use this device.");
-        }
-        const no = await sure();
-        if (no) return no;
-        try {
-          // From the store, it holds what the store allows in advance and starts with the store's settings.
-          // From a file, it holds nothing unless a caller chose otherwise.
-          const settings = up.from?.settings ?? {};
-          const installed = await writeModule(up.pkg, opts.dataDir!, {
-            name: String(b.name ?? ""),
-            network: up.from ? up.from.network : reach === "ask" ? [] : [reach, "listen"],
-            settings,
-            mode: "listen",
-            taken: (taken) => hosts.has(taken) || screens.has(taken) || skills.has(taken),
-          });
-          if (up.from) {
-            await updateInstall(installed.dir, {
-              store: {
-                id: up.from.id,
-                repo: up.from.source.repo,
-                commit: up.from.source.commit,
-                license: up.from.license,
-                tested: up.from.tested,
-              },
-            });
-          }
-          uploads.delete(me.id);
-          const host = (await load({ dir: installed.dir, mode: "listen", settings }))!;
-          attach(host);
-          await host.start();
-          log.append({
-            type: "skillfully.plugin.added",
-            source: "core",
-            subject: host.id,
-            actor: me.id,
-            via: "admin",
-            data: {
-              name: host.manifest.name,
-              module: up.pkg.module.id,
-              version: up.pkg.module.version,
-              sha256: up.pkg.sha256,
-              network: host.manifest.permissions?.network ?? [],
-              from: up.from
-                ? `the store, built from ${up.from.source.repo} at ${up.from.source.commit}`
-                : "a package file",
-            },
-          });
-          for (const sc of wanted) {
-            approvals.set(me.id, sc, [...approvals.of(sc), host.id]);
-            dropScreen(sc);
-          }
-          return json({ ok: true, id: host.id, name: host.manifest.name });
-        } catch (err) {
-          return refuse(400, sentence(err));
-        }
-      }
-      case "driver/settings": {
-        const host = hosts.get(id);
-        const mine = chosen.get(id);
-        if (!host || !mine?.added) return refuse(400, "This device's settings cannot be changed here.");
-        const given = b.settings;
-        if (!given || typeof given !== "object" || Array.isArray(given)) {
-          return refuse(400, "Expected settings.");
-        }
-        const next: Record<string, unknown> = { ...mine.settings };
-        for (const [name, value] of Object.entries(given)) {
-          if (!["string", "number", "boolean"].includes(typeof value) || name.length > 64) {
-            return refuse(400, `The setting ${name.slice(0, 64)} is not something this hub can keep.`);
-          }
-          // A secret left blank means "keep what is there". It is never sent back to be re-entered.
-          if (value === "" && host.settingsForm?.find((f) => f.id === name)?.kind === "secret") continue;
-          next[name] = value;
-        }
-        const changed = Object.keys(next).filter((k) => next[k] !== mine.settings[k]).sort();
-        if (!changed.length) return json({ ok: true, changed });
-        await updateInstall(mine.dir, { settings: next });
-        // The log says which settings changed and who changed them. It never holds what they were set to.
-        log.append({
-          type: "skillfully.plugin.settings",
-          source: "core",
-          subject: id,
-          actor: me.id,
-          via: "admin",
-          data: { changed },
-        });
-        await restart(id, next);
-        return json({ ok: true, changed });
-      }
-      case "driver/allow": {
-        // A superuser's answers to what a device asked for, and anything they take back. It restarts with them.
-        const host = hosts.get(id);
-        const mine = chosen.get(id);
-        if (!host || !mine?.added) return refuse(400, "This device does not ask before reaching things.");
-        const list = (v: unknown) => (Array.isArray(v) ? [...new Set(v.map(String))] : []);
-        const allow = list(b.allow), deny = list(b.deny), revoke = list(b.revoke);
-        if (allow.some((v) => !host.asks.has(v)) || deny.some((v) => !host.asks.has(v))) {
-          return refuse(400, "It is no longer asking for one of those. Look again.");
-        }
-        const held = host.manifest.permissions?.network ?? [];
-        if (revoke.some((g) => !held.includes(g))) return refuse(400, "It does not hold one of those.");
-        if (!allow.length && !deny.length && !revoke.length) {
-          return json({ ok: true, allowed: [], denied: [], revoked: [] });
-        }
-        const no = await sure();
-        if (no) return no;
-        const network = [
-          ...new Set([
-            ...held.filter((g) => !revoke.includes(g)),
-            ...allow.map((v) => host.asks.get(v)!.grant),
-          ]),
-        ];
-        const checked = checkManifest({
-          ...host.manifest,
-          permissions: { ...host.manifest.permissions, network },
-        });
-        if (!checked.ok || checked.value.kind !== "driver") {
-          return refuse(400, "That is more than one device can be given.");
-        }
-        await Deno.writeTextFile(`${mine.dir}/plugin.json`, JSON.stringify(checked.value, null, 2) + "\n");
-        const denied = [...new Set([...(mine.tuning?.denied ?? []), ...deny])].filter((v) =>
-          !allow.includes(v)
-        );
-        await updateInstall(mine.dir, { denied });
-        log.append({
-          type: "skillfully.plugin.allowed",
-          source: "core",
-          subject: id,
-          actor: me.id,
-          via: "admin",
-          data: {
-            allowed: allow.map((v) => host.asks.get(v)!.grant),
-            denied: deny,
-            revoked: revoke,
-            now: network,
-          },
-        });
-        await restart(id, mine.settings, { manifest: checked.value, denied });
-        return json({ ok: true, allowed: allow, denied: deny, revoked: revoke });
-      }
-      case "driver/remove": {
-        const host = hosts.get(id);
-        const mine = chosen.get(id);
-        if (!host || !mine?.added) return refuse(400, "This device cannot be removed here.");
-        const no = await sure();
-        if (no) return no;
-        await host.stop();
-        hosts.delete(id);
-        chosen.delete(id);
-        await Deno.remove(mine.dir, { recursive: true }).catch(() => {});
-        for (const m of screens.values()) {
-          const had = approvals.of(m.manifest.id);
-          if (!had.includes(id)) continue;
-          approvals.set(me.id, m.manifest.id, had.filter((d) => d !== id));
-          dropScreen(m.manifest.id);
-        }
-        log.append({
-          type: "skillfully.plugin.removed",
-          source: "core",
-          subject: id,
-          actor: me.id,
-          via: "admin",
-          data: { name: host.manifest.name },
-        });
-        return json({ ok: true });
-      }
-      case "driver/release": {
-        const host = hosts.get(id);
-        if (!host) return refuse(400, "No such device.");
-        host.release({ actor: me.id, via: "admin" });
-        return json({ ok: true });
-      }
-    }
-    return refuse(404, "Not found.");
-  }
 
   const catalog = () => ({
     capabilities: capabilities.list(),
     plugins: [
       ...[...hosts.values()].map((h) => ({
         kind: "driver",
-        ...describe(h),
+        ...screens.describe(h),
         description: h.manifest.description ?? "",
         version: h.manifest.version,
         license: h.manifest.license ?? null,
@@ -802,7 +150,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         limits: h.manifest.limits ?? {},
         restarts: h.restarts,
       })),
-      ...[...screens.values(), ...skills.values()].map(({ manifest: m }) => ({
+      ...[...screens.all.values(), ...skills.values()].map(({ manifest: m }) => ({
         kind: m.kind,
         id: m.id,
         name: m.name,
@@ -837,37 +185,9 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         const pageOrigin = req.headers.get("origin");
         if (pageOrigin !== null && pageOrigin !== origin) return new Response("refused", { status: 403 });
         if (!me) return new Response("sign in first", { status: 401 });
-        const screen = screens.get(url.searchParams.get("screen") ?? "")?.manifest;
+        const screen = screens.all.get(url.searchParams.get("screen") ?? "")?.manifest;
         if (!screen) return new Response("unknown screen", { status: 404 });
-        const access = accessFor(me, screen);
-        if (access.empty) return new Response("this screen is not one of yours", { status: 403 });
-        const { socket, response } = Deno.upgradeWebSocket(req);
-        const c: Connection = { socket, screen, person: me, access };
-        socket.onopen = () => {
-          connections.add(c);
-          const mine = visible(c);
-          tell(socket, {
-            type: "hello",
-            screen: screen.id,
-            me: { id: me.id, name: me.name, slots: me.slots },
-            abilities: access.abilities,
-            plugins: mine.map((h) => describe(h, c)),
-            capabilities: definitionsFor(c),
-          });
-          for (const h of mine) {
-            tell(socket, {
-              type: "state",
-              plugin: h.id,
-              full: true,
-              values: only(c, Object.fromEntries(h.state)),
-            });
-          }
-        };
-        socket.onclose = () => connections.delete(c);
-        socket.onmessage = (e) => {
-          if (typeof e.data === "string" && e.data.length < 100_000) onScreenMessage(c, e.data);
-        };
-        return response;
+        return screens.connect(req, me, screen);
       }
 
       // --- A screen's own files. Code, not secrets: served to anyone, locked down by policy. ---
@@ -875,7 +195,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       // connection or touch the page around it. connect-src 'none' closes the network.
       const file = /^\/screens\/([a-z0-9][a-z0-9-]{1,62})\/([A-Za-z0-9_./-]+)$/.exec(path);
       if (req.method === "GET" && file) {
-        const found = screens.get(file[1]);
+        const found = screens.all.get(file[1]);
         const ext = file[2].slice(file[2].lastIndexOf("."));
         if (found && TYPES[ext] && !file[2].includes("..")) {
           try {
@@ -911,8 +231,8 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
                   superuser: accounts.isSuperuser(me),
                   mustChange: me.mustChange,
                 },
-                screens: screensFor(me).map((m) => ({ id: m.id, name: m.name })),
-                home: homeFor(me) ?? null,
+                screens: screens.of(me).map((m) => ({ id: m.id, name: m.name })),
+                home: screens.homeFor(me) ?? null,
               }
               : {}),
           },
@@ -921,7 +241,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         );
       }
       if (req.method === "POST" && path.startsWith("/auth/")) {
-        const b = await body(req, origin);
+        const b = await readJson(req, origin);
         if (b instanceof Response) return b;
         if (path === "/auth/claim") {
           const r = await accounts.claim(b.code, b.name, b.secret, device);
@@ -937,7 +257,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         }
         if (path === "/auth/signout") {
           if (token) await accounts.signOut(token);
-          if (me) drop(me.id);
+          if (me) screens.drop(me.id);
           return json({ ok: true }, 200, setCookie("", secure, true));
         }
         if (path === "/auth/secret") {
@@ -951,97 +271,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       if (path.startsWith("/admin/api/")) {
         if (!me) return refuse(401, "Please sign in again.");
         if (!accounts.isSuperuser(me)) return refuse(403, "Only a superuser can do that.");
-        if (path === "/admin/api/store" && req.method === "GET") {
-          if (!store.on) return json({ ok: true, on: false, modules: [] });
-          try {
-            return json({ ok: true, on: true, modules: (await store.list()).map(fromStore) }, 200, {
-              "cache-control": "no-store",
-            });
-          } catch (err) {
-            return json({ ok: true, on: true, modules: [], message: sentence(err) });
-          }
-        }
-        if (path === "/admin/api/all" && req.method === "GET") {
-          return json(
-            {
-              ok: true,
-              me: me.id,
-              people: accounts.people().map((p) => ({ ...p, devices: accounts.sessions(p.id).length })),
-              roles: accounts.roles(),
-              policy: accounts.policy(),
-              canAdd: !!opts.dataDir,
-              drivers: [...hosts.values()].map((h) => {
-                const mine = chosen.get(h.id);
-                const secret = new Set(
-                  (h.settingsForm ?? []).filter((f) => f.kind === "secret").map((f) => f.id),
-                );
-                return {
-                  ...describe(h),
-                  permissions: h.manifest.permissions ?? {},
-                  // A driver that came with the hub holds what its manifest says. It does not ask as it goes.
-                  reach: (h.manifest.permissions?.network ?? []).length
-                    ? networkNotes(h.manifest.permissions?.network ?? []).slice(0, 1)
-                    : ["It reaches nothing on the network."],
-                  added: !!mine?.added,
-                  module: mine?.module ?? null,
-                  // Where it came from, when that is the store: its license, its source, how far it is proven.
-                  store: mine?.store ? { ...mine.store, proven: PROVEN[mine.store.tested] ?? "" } : null,
-                  form: mine?.added ? h.settingsForm ?? null : null,
-                  // What is set now, so the form opens filled in. A secret is never sent back, only whether it is set.
-                  settings: mine?.added
-                    ? Object.fromEntries(Object.entries(mine.settings).filter(([k]) => !secret.has(k)))
-                    : {},
-                  secretsSet: mine?.added ? Object.keys(mine.settings).filter((k) => secret.has(k)) : [],
-                  // What it is waiting on a superuser for, what it holds, and what it tried that is never allowed.
-                  asks: [...h.asks.values()],
-                  grants: mine?.added
-                    ? (h.manifest.permissions?.network ?? []).map((g) => ({ grant: g, words: grantWords(g) }))
-                    : [],
-                  attempts: [...h.attempts].map(([kind, times]) => ({ words: attemptWords(kind), times })),
-                  usedBy: [...screens.values()].filter((sc) => approvals.allowed(sc.manifest.id, h.id))
-                    .map((sc) => sc.manifest.name),
-                };
-              }),
-              // What each screen offers a role, and which per-person slots its abilities refer to.
-              offered: [...screens.values()].map(({ manifest: m }) => ({
-                plugin: m.id,
-                name: m.name,
-                abilities: m.abilities.map((a) => ({
-                  id: a.id,
-                  title: a.title,
-                  description: a.description,
-                  caution: a.caution,
-                })),
-                suggested: m.roles ?? [],
-                // Which connections this screen could use, and which it has been given.
-                works: Object.keys(m.uses).filter((u) => u !== "log"),
-                eligible: eligible(m).map((h) => ({ id: h.id, name: h.manifest.name })),
-                connections: approvals.of(m.id),
-                slots: [
-                  ...new Set(
-                    m.abilities.flatMap((a) => Object.values(a.allows)).flatMap((al) =>
-                      typeof al === "string" ? [] : al.keys
-                    )
-                      .flatMap((k) => [...k.matchAll(/\{([a-z][a-z0-9]*)\}/g)].map((x) => x[1])),
-                  ),
-                ],
-              })),
-            },
-            200,
-            { "cache-control": "no-store" },
-          );
-        }
-        if (req.method !== "POST") return refuse(404, "Not found.");
-        if (path === "/admin/api/module/inspect") {
-          // A file, not JSON. Still only from the hub's own page.
-          const from = req.headers.get("origin");
-          if (from !== null && from !== origin) {
-            return refuse(403, "That request did not come from this hub's own pages.");
-          }
-          return await upload(req, me);
-        }
-        const b = await body(req, origin);
-        return b instanceof Response ? b : await admin(path.slice("/admin/api/".length), b, me);
+        return await admin(req, path.slice("/admin/api/".length), me, origin);
       }
 
       if (req.method !== "GET") return new Response("not found", { status: 404 });
@@ -1059,7 +289,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       if (me.mustChange && !path.startsWith("/api/")) return go("/account");
       if (path === "/admin") return accounts.isSuperuser(me) ? html(adminPage()) : go("/");
       if (path === "/") {
-        const to = homeFor(me);
+        const to = screens.homeFor(me);
         // A superuser with no screen that has anything to show has setting up to do.
         if (!to && accounts.isSuperuser(me)) return go("/admin");
         return to ? go(`/s/${to}`) : html(
@@ -1073,8 +303,8 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       }
       const shell = /^\/s\/([a-z0-9][a-z0-9-]{1,62})$/.exec(path);
       if (shell) {
-        const screen = screens.get(shell[1])?.manifest;
-        if (!screen || accessFor(me, screen).empty) return go("/");
+        const screen = screens.all.get(shell[1])?.manifest;
+        if (!screen || screens.accessFor(me, screen).empty) return go("/");
         return new Response(shellPage(screen), {
           headers: {
             "content-type": TYPES[".html"],
@@ -1112,14 +342,16 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     accounts,
     approvals,
     capabilities,
+    devices,
     hosts,
-    screens,
+    screens: screens.all,
     skills,
     async stop() {
-      for (const c of connections) c.socket.close();
-      await Promise.all([...hosts.values()].map((h) => h.stop()));
+      screens.closeAll();
+      await devices.stop();
       await server.shutdown();
       await gateway.close();
+      if (!dataDir) await Deno.remove(runDir, { recursive: true }).catch(() => {});
       log.append({ type: "skillfully.hub.stopped", source: "core" });
       db.close();
     },

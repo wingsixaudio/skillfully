@@ -101,6 +101,8 @@ export async function runConformance(dir: string, opts: ConformanceOptions = {})
       manifest,
       settings: opts.settings ?? {},
       mode: "act",
+      // A plugin under test holds what its manifest asks for.
+      granted: manifest.permissions?.network ?? [],
       gateway,
       events: {
         onMessage: (m) => (inbox.push(m), wake()),

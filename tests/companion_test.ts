@@ -1,9 +1,11 @@
 // A real Companion module, built with Bitfocus's own tools, dropped into a hub and driving a pretend lamp.
 // The package under tests/fixtures/companion was built from the source beside it.
 
-import { assert, assertEquals } from "./assert.ts";
-import { FIXTURES, hubWith, ofType, until } from "./helpers.ts";
-import { installCompanionModule, readInstall, readTar } from "../core/install.ts";
+import { assert, assertEquals, assertThrows } from "./assert.ts";
+import { FIXTURES, hubWith, ofType, unpacked, until } from "./helpers.ts";
+import type { DriverChoices } from "../core/devices.ts";
+import { networkNotes, readTar } from "../core/packages.ts";
+import { runtimeOf } from "../core/runtimes.ts";
 import { resolveNetwork } from "../core/process.ts";
 import type { DriverManifest } from "../contract/types.ts";
 
@@ -63,10 +65,10 @@ function pretendLamp() {
   };
 }
 
-async function dropIn(opts: Parameters<typeof installCompanionModule>[2]) {
+async function dropIn(choices: DriverChoices) {
   const dataDir = await Deno.makeTempDir({ prefix: "skillfully-data-" });
-  const installed = await installCompanionModule(PACKAGE, dataDir, opts);
-  const hub = await hubWith([{ dir: installed.dir, ...(await readInstall(installed.dir)) }]);
+  const installed = await unpacked(PACKAGE, dataDir, choices);
+  const hub = await hubWith([installed.config]);
   const host = hub.hosts.get(ID)!;
   return {
     hub,
@@ -82,7 +84,7 @@ async function dropIn(opts: Parameters<typeof installCompanionModule>[2]) {
 Deno.test("a Companion module dropped into the hub shows its own readings and actions, and its actions work", async () => {
   const lamp = pretendLamp();
   const { hub, host, installed, close } = await dropIn({
-    network: ["{host}:{port}"],
+    granted: ["{host}:{port}"],
     settings: { host: "127.0.0.1", port: lamp.port },
     mode: "act",
   });
@@ -146,7 +148,7 @@ Deno.test("a Companion module dropped into the hub shows its own readings and ac
 Deno.test("a Companion module is held to the same sandbox as any driver", async () => {
   const lamp = pretendLamp();
   const { host, installed, close } = await dropIn({
-    network: ["{host}:{port}"],
+    granted: ["{host}:{port}"],
     settings: { host: "127.0.0.1", port: lamp.port },
     mode: "act",
   });
@@ -189,15 +191,15 @@ Deno.test("dropped in with nothing said about the network, a module can reach no
   });
   try {
     assertEquals(installed.manifest.permissions?.network, []);
-    assert(installed.notes.some((n) => n.includes("no access to your network")));
-    assert(installed.notes.some((n) => n.includes("Nobody has reviewed")));
-    assertEquals(resolveNetwork(installed.manifest, {}), []);
+    assertEquals(host.granted, [], "what the hub holds for it is nothing either");
+    assert(networkNotes(host.granted).some((n) => n.includes("no access to your network")));
+    assert(networkNotes(host.granted).some((n) => n.includes("Nobody has reviewed")));
     // It starts, describes itself, and says in its own way that it cannot get to its device.
     await until("the module reports trouble", () => host.health.status === "down", 8000);
     assert(host.health.reason?.includes("it is not allowed to reach 127.0.0.1"), host.health.reason);
     assertEquals(lamp.connections, 0);
     // The wide grant still exists for whoever chooses it, and still leaves this computer out.
-    const wide = resolveNetwork({ ...installed.manifest, permissions: { network: ["lan", "listen"] } }, {});
+    const wide = resolveNetwork(["lan", "listen"], {});
     assert(wide.includes("192.168.0.0/16") && wide.includes("10.0.0.0/8") && wide.includes("0.0.0.0"));
     assert(!wide.some((r) => r.startsWith("127.")), "this computer is not part of the local network grant");
   } finally {
@@ -209,7 +211,7 @@ Deno.test("dropped in with nothing said about the network, a module can reach no
 Deno.test("a module starts in Listen mode unless someone decides otherwise", async () => {
   const lamp = pretendLamp();
   const { hub, host, close } = await dropIn({
-    network: ["{host}:{port}"],
+    granted: ["{host}:{port}"],
     settings: { host: "127.0.0.1", port: lamp.port },
   });
   try {
@@ -273,12 +275,12 @@ Deno.test("the installer refuses packages that are not what they claim, before a
   const refused = async (files: Record<string, string>, includes: string, type = "0") => {
     const path = await packageWith(files, type);
     let message = "";
-    await installCompanionModule(path, dataDir).catch((e) => (message = (e as Error).message));
+    await unpacked(path, dataDir).catch((e) => (message = (e as Error).message));
     await Deno.remove(path);
     assert(message.includes(includes), `expected "${includes}", got "${message}"`);
   };
   try {
-    await refused({ "pkg/readme.txt": "hello" }, "no companion/manifest.json");
+    await refused({ "pkg/readme.txt": "hello" }, "this is not a Companion module package");
     await refused(
       { "pkg/companion/manifest.json": theirManifest(), "pkg/main.js": "", "pkg/../../escape.js": "" },
       "unsafe name",
@@ -303,7 +305,7 @@ Deno.test("the installer refuses packages that are not what they claim, before a
     const notZipped = await Deno.makeTempFile({ suffix: ".tgz" });
     await Deno.writeTextFile(notZipped, "this is not a package");
     let message = "";
-    await installCompanionModule(notZipped, dataDir).catch((e) => (message = (e as Error).message));
+    await unpacked(notZipped, dataDir).catch((e) => (message = (e as Error).message));
     await Deno.remove(notZipped);
     assert(message.includes("not a Companion module package"), message);
 
@@ -331,7 +333,10 @@ Deno.test("the two wide network grants are spelled out, and a manifest cannot in
   assert(checkManifest({ ...base, permissions: { network: ["lan", "listen", "{host}:9999"] } }).ok);
   assert(!checkManifest({ ...base, permissions: { network: ["internet"] } }).ok);
   assert(!checkManifest({ ...base, permissions: { network: ["*"] } }).ok);
-  assert(!checkManifest({ ...base, runtime: "node" }).ok);
-  const manifest = { ...base, permissions: { network: ["listen"] } } as unknown as DriverManifest;
-  assertEquals(resolveNetwork(manifest, {}), ["0.0.0.0", "[::]"]);
+  // A runtime is a name. The hub refuses one it does not have, and a name that is not one at all is not a manifest.
+  const node = checkManifest({ ...base, runtime: "node" });
+  assert(node.ok);
+  assertThrows(() => runtimeOf(node.value as DriverManifest), Error, "which this hub does not have");
+  assert(!checkManifest({ ...base, runtime: "../x" }).ok);
+  assertEquals(resolveNetwork(["listen"], {}), ["0.0.0.0", "[::]"]);
 });

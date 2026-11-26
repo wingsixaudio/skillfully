@@ -15,8 +15,8 @@
 import process from "node:process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import type { CommandError, HealthStatus, SettingsField, Values } from "../contract/types.ts";
-import { type CommandOutcome, type PluginLink, runPlugin } from "../sdk/plugin.ts";
+import type { CommandError, HealthStatus, SettingsField, Values } from "../../contract/types.ts";
+import { type CommandOutcome, type PluginLink, runPlugin } from "../../sdk/plugin.ts";
 
 const arg = (name: string): string => {
   const hit = Deno.args.find((a) => a.startsWith(`--${name}=`));

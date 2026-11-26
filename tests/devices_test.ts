@@ -145,8 +145,7 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
       settings: { host: "127.0.0.1", port: lamp.port },
     });
     assertEquals(saved.body, { ok: true, changed: ["host", "port"] });
-    const kept = JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`));
-    assertEquals(kept.settings, { host: "127.0.0.1", port: lamp.port });
+    assertEquals(h.hub.devices.record(id).settings, { host: "127.0.0.1", port: lamp.port });
     // The log says which settings changed, never what they were set to.
     assertEquals(h.hub.log.read({ type: "skillfully.plugin.settings", limit: 5 })[0].data, {
       changed: ["host", "port"],
@@ -174,10 +173,12 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
     assertEquals(yes.body, { ok: true, allowed: [wanted], denied: [], revoked: [] });
     await until("it connects to the lamp", () => host().state.get("generic/reading/power") === "off", 8000);
     assertEquals(host().health.status, "ok");
-    assertEquals(host().manifest.permissions?.network, [wanted]);
+    // What it was allowed is the hub's record. Its own manifest still asks for nothing, and is never rewritten.
+    assertEquals(host().granted, [wanted]);
+    assertEquals(h.hub.devices.record(id).granted, [wanted]);
     assertEquals(
       JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/plugin.json`)).permissions.network,
-      [wanted],
+      [],
     );
     const now = await h.device(id);
     assertEquals(now.asks, []);
@@ -189,7 +190,7 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
     // Listening, nothing is sent. Switched to Act, with the PIN, the choice is kept too.
     assert(!(await host().set("generic/action/on", true, { via: "test" })).ok);
     assert((await h.post("/admin/api/driver/mode", { id, mode: "act", confirm: OWNER_PIN })).body.ok);
-    assertEquals(JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`)).mode, "act");
+    assertEquals(h.hub.devices.record(id).mode, "act");
     const phone = await Phone.connect(h.hub as never, h.owner, "controls");
     await until(
       "the screen it was given sees it",
@@ -246,10 +247,7 @@ Deno.test("what a device tries is shown for what it is, and a no is remembered",
     // Saying "do not ask again" is kept, across the restart that follows and the next start of the hub.
     const values = d.asks.map((a: { value: string }) => a.value);
     assert((await allow({ deny: values })).body.ok);
-    assertEquals(
-      JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`)).denied.sort(),
-      [...values].sort(),
-    );
+    assertEquals([...h.hub.devices.record(id).denied].sort(), [...values].sort());
     await until("it is back", () => host().state.get("generic/reading/power") === "off", 8000);
     assert((await host().set("generic/action/snoop", true, { via: "test" })).ok);
     await until(
@@ -287,7 +285,7 @@ Deno.test("the same module can be added again for a second device, and each is i
     };
     const one = await add("Left lamp"), two = await add("Right lamp");
     assertEquals([one.id, two.id], ["companion-skillfully-test-lamp", "companion-skillfully-test-lamp-2"]);
-    assertEquals(h.hub.hosts.get(two.id)!.manifest.permissions?.network, ["lan", "listen"]);
+    assertEquals(h.hub.hosts.get(two.id)!.granted, ["lan", "listen"]);
     await h.post("/admin/api/driver/settings", { id: two.id, settings: { host: "192.168.50.9" } });
     const drivers = (await h.all()).drivers;
     assertEquals(drivers.map((d: { name: string }) => d.name), ["Left lamp", "Right lamp"]);
@@ -424,8 +422,7 @@ Deno.test("a secret setting is kept, used, never sent back, and never logged", a
       settings: { host: "192.168.50.10", password: "" },
     });
     assertEquals(kept.body.changed, ["host"]);
-    const onDisk = JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/install.json`));
-    assertEquals(onDisk.settings.password, "hunter2-hunter2");
+    assertEquals(h.hub.devices.record(id).settings.password, "hunter2-hunter2");
   } finally {
     await h.close();
   }

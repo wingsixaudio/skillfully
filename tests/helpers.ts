@@ -1,6 +1,8 @@
 import { type Hub, type PluginConfig, startHub } from "../core/hub.ts";
+import type { DriverChoices } from "../core/devices.ts";
 import type { PluginHost } from "../core/host.ts";
 import type { LogEntry } from "../core/log.ts";
+import { readPackage, writePackage } from "../core/packages.ts";
 import { here } from "../core/paths.ts";
 
 export const ROOT = here("..", import.meta.url).replace(/\/$/, "");
@@ -89,6 +91,16 @@ export async function hubWith(plugins: PluginConfig[], dbPath = ":memory:"): Pro
       return { status: res.status, body: await res.json() };
     },
   });
+}
+
+/**
+ * Unpack a package into a folder the way a hub does. What a superuser would choose for it goes in the
+ * hub's record, so it is returned as what to start a hub with.
+ */
+export async function unpacked(packagePath: string, dataDir: string, choices: DriverChoices = {}) {
+  const pkg = await readPackage(await Deno.readFile(packagePath));
+  const written = await writePackage(pkg, dataDir);
+  return { ...written, pkg, config: { dir: written.dir, ...choices } as PluginConfig };
 }
 
 /** The first driver the test loaded. In most tests that is the simulated board. */
