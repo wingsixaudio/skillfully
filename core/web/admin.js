@@ -6,6 +6,7 @@
 //   /admin/hub        Hub      the hub's own settings
 let people = [], roles = [], offered = [], drivers = [], meId = "";
 let proposed = { changes: 0, power: 0, problems: 0 };
+let canAdd = false;
 const SUPER = "superuser";
 
 // --- One confirmation that holds for a few minutes ---
@@ -132,7 +133,7 @@ async function load() {
   meId = r.me;
   unlockedUntil = r.unlocked ? Date.now() + r.unlocked * 1000 : 0;
   drawLock();
-  $("addDevice").hidden = !r.canAdd;
+  canAdd = !!r.canAdd;
   drawHome();
   drawSetup();
   drawPeople();
@@ -914,13 +915,6 @@ async function drawConfig() {
 }
 
 // --- Devices ---
-const STATE = {
-  running: "Running",
-  starting: "Starting",
-  quarantined: "Held by the hub",
-  down: "Stopped",
-  stopped: "Stopped",
-};
 function statusOf(d) {
   if (d.status === "quarantined") {
     return ["The hub stopped it for misbehaving. Release it to try again.", "bad"];
@@ -938,22 +932,285 @@ function statusOf(d) {
   if (d.health.status === "ok") return ["Connected to its device", "ok"];
   return [d.health.reason || "Not ready", d.health.status === "degraded" ? "" : "bad"];
 }
+// Something that hands out power, done from a page and not a dialog. While the superuser's confirmation
+// holds it is simply done. Otherwise the one question is asked first, in the dialog, and then it is done.
+async function sureDo(title, fn, part) {
+  const run = async () => {
+    const r = await fn();
+    if (r && r.ok !== false && part) part.dataset.dirty = "";
+    return r;
+  };
+  if (unlocked()) {
+    const r = await run();
+    if (!r || !r.locked) {
+      say("deviceMsg", r && r.ok === false ? r.message : "", "bad");
+      return load();
+    }
+  }
+  ask(title, (x) => confirmField(x), run, "Yes");
+}
+
 function drawDrivers() {
   const box = $("drivers");
-  box.innerHTML = "";
-  // At a device's own address only that device is shown. Every device's name leads to its address.
+  // At a device's own address its page is shown. Otherwise the list, where every name leads to its page.
   const only = here().device;
-  const known = drivers.some((d) => d.id === only);
+  const one = drivers.find((d) => d.id === only);
   $("oneDevice").hidden = !only;
-  $("oneDeviceGone").hidden = !only || known || !drivers.length;
+  $("oneDeviceGone").hidden = !only || !!one || !drivers.length;
+  $("devicesIntro").hidden = !!one;
+  // Adding belongs to the list. A device's own page is about that device.
+  $("addDevice").hidden = !canAdd || !!one;
+  $("driversMsg").hidden = !!one;
+  if (one) {
+    if (box.dataset.device !== one.id) box.innerHTML = "";
+    box.dataset.device = one.id;
+    return drawDevice(one, box);
+  }
+  box.dataset.device = "";
+  box.innerHTML = "";
   for (const d of drivers) {
-    if (only && known && d.id !== only) continue;
-    const item = el("div", { className: "item" }, el("h3", {}, link(deviceAt(d.id), d.name)));
+    const [words, kind] = statusOf(d);
+    box.append(
+      el(
+        "div",
+        { className: "item" },
+        el("h3", {}, link(deviceAt(d.id), d.name)),
+        el("p", { className: "status " + kind, style: "margin:0", textContent: words }),
+        el("p", {
+          className: "help",
+          style: "margin:4px 0 0",
+          textContent: d.mode === "act" ? "People can control it." : "Watching only.",
+        }),
+      ),
+    );
+  }
+}
+
+// One device's page. Top to bottom it is the order the work happens in: is it connected, its settings, what
+// it may reach, whether people can control it, which screens use it. Nothing waits on anything else.
+function drawDevice(d, box) {
+  // Each part is drawn again whenever the hub is asked how things are, except a part someone is in the
+  // middle of filling in: what they typed or ticked is never drawn over.
+  const part = (id, title, fill) => {
+    let s = $(id);
+    if (!s) {
+      s = el("div", { className: "part", id });
+      const touched = () => s.dataset.dirty = "1";
+      s.addEventListener("input", touched);
+      s.addEventListener("change", touched);
+      box.append(s);
+    }
+    const at = document.activeElement;
+    const typing = s.contains(at) && /^(INPUT|SELECT|TEXTAREA)$/.test(at.tagName) && at.type !== "checkbox";
+    if (s.dataset.dirty === "1" || typing) return s;
+    s.innerHTML = "";
+    if (title) s.append(el("h3", { textContent: title }));
+    fill(s);
+    return s;
+  };
+  const button = (text, fn, quiet = true) => {
+    const b = el("button", {
+      type: "button",
+      className: "small" + (quiet ? " quiet" : ""),
+      textContent: text,
+    });
+    b.onclick = fn;
+    return b;
+  };
+  const lower = (w) => w.charAt(0).toLowerCase() + w.slice(1);
+
+  part("deviceTop", "", (s) => {
+    const [words, kind] = statusOf(d);
+    s.append(
+      el("h2", { textContent: d.name }),
+      el("p", { className: "status " + kind, id: "deviceStatus", textContent: words }),
+    );
+    if (d.status === "quarantined") {
+      s.append(button("Release it", async () => {
+        await call("/admin/api/driver/release", { id: d.id });
+        load();
+      }, false));
+    }
+    s.append(el("p", { className: "msg", id: "deviceMsg", role: "status" }));
+  });
+
+  part("deviceSettings", "Settings", (s) => {
+    const read = settingsFields(d, s);
+    if (!d.form || !d.form.some((f) => f.kind !== "note")) return;
+    s.append(
+      el("p", {
+        className: "help",
+        style: "margin-top:14px",
+        textContent: "Saving restarts this device with the new settings.",
+      }),
+      button("Save settings", async () => {
+        const r = await call("/admin/api/driver/settings", {
+          id: d.id,
+          settings: Object.fromEntries(read.map((r) => r()).filter(Boolean)),
+        });
+        say("deviceMsg", r.ok ? "" : r.message, "bad");
+        if (r.ok) {
+          s.dataset.dirty = "";
+          if (s.contains(document.activeElement)) document.activeElement.blur();
+          load();
+        }
+      }, false),
+    );
+  });
+
+  part("deviceReach", "What it may reach", (s) => {
+    const answer = (title, body) =>
+      sureDo(
+        title,
+        () => sureCall("/admin/api/driver/allow", { id: d.id, allow: [], deny: [], revoke: [], ...body }),
+        s,
+      );
+    if (!d.asks.length && !d.grants.length) {
+      s.append(
+        el("p", {
+          className: "dim",
+          textContent: "It has no access to your network, and has asked for none.",
+        }),
+      );
+    }
+    for (const g of d.grants) {
+      s.append(
+        el(
+          "div",
+          { className: "row grant" },
+          el("span", { style: "flex:1", textContent: g.words + "." }),
+          button("Take away", () => answer("Take this away from " + d.name + "?", { revoke: [g.grant] })),
+        ),
+      );
+    }
+    if (d.asks.length) {
+      s.append(
+        el("p", {
+          className: "dim",
+          style: "margin-top:12px",
+          textContent:
+            "It asks for the following. Tick what makes sense for this device. It gets nothing you leave unticked, and it may ask again as it gets further.",
+        }),
+      );
+      for (const a of d.asks) {
+        // The store's reviewers, when they have said something about this, decide what starts ticked.
+        const advice = !a.advice ? "" : el("span", {
+          className: a.advice.say === "no" ? "caution" : "advice",
+          textContent: (a.advice.say === "no"
+            ? "The store's reviewers advise against this. "
+            : "The store's reviewers expect this. ") + a.advice.why,
+        });
+        s.append(
+          el(
+            "label",
+            { className: "check" },
+            el("input", {
+              type: "checkbox",
+              value: a.value,
+              checked: a.advice ? a.advice.say === "yes" : a.usual,
+              className: "askBox",
+            }),
+            el(
+              "span",
+              {},
+              a.words + ".",
+              a.caution ? el("span", { className: "caution", textContent: a.caution }) : "",
+              advice,
+            ),
+          ),
+        );
+      }
+      const stop = el("input", { type: "checkbox" });
+      s.append(
+        el(
+          "label",
+          { className: "check", style: "margin-top:10px" },
+          stop,
+          el("span", { textContent: "Do not ask me again about the ones I left unticked" }),
+        ),
+        el("p", { className: "help", textContent: "Answering restarts this device." }),
+        button("Allow what is ticked", () => {
+          const allow = [...s.querySelectorAll(".askBox:checked")].map((i) => i.value);
+          const deny = stop.checked ? d.asks.map((a) => a.value).filter((v) => !allow.includes(v)) : [];
+          if (!allow.length && !deny.length) return say("deviceMsg", "Nothing is ticked.", "bad");
+          answer("Allow this for " + d.name + "?", { allow, deny });
+        }, false),
+      );
+    }
+    for (const t of d.attempts) {
+      s.append(
+        el("p", {
+          className: "help",
+          textContent: "It also tried to " + t.words + (t.times > 1 ? ", " + t.times + " times" : "") +
+            ". The hub never allows that.",
+        }),
+      );
+    }
+  });
+
+  part("deviceControl", "People can control it", (s) => {
+    const on = d.mode === "act";
+    s.append(
+      el("p", {
+        className: "status" + (on ? " ok" : ""),
+        textContent: on
+          ? "On. People with a screen that uses it can change it."
+          : "Off. The hub only watches it, and nothing is sent to it.",
+      }),
+      button(on ? "Stop people controlling it" : "Let people control it", () =>
+        sureDo(
+          on ? "Stop people controlling " + d.name + "?" : "Let people control " + d.name + "?",
+          () => sureCall("/admin/api/driver/mode", { id: d.id, mode: on ? "listen" : "act" }),
+          s,
+        ), on),
+    );
+  });
+
+  part("deviceScreens", "Screens that use it", (s) => {
+    const can = offered.filter((o) => o.eligible.some((e) => e.id === d.id));
+    if (!can.length) {
+      s.append(
+        el("p", {
+          className: "dim",
+          textContent: "No screen on this hub works with this kind of device yet.",
+        }),
+      );
+    }
+    for (const o of can) {
+      const uses = o.connections.includes(d.id);
+      s.append(
+        el(
+          "div",
+          { className: "row screenUse" },
+          el(
+            "span",
+            { style: "flex:1" },
+            el("b", { textContent: o.name }),
+            uses ? " uses it." : " does not use it.",
+          ),
+          button(uses ? "Take it away" : "Let it use this", () =>
+            sureDo(
+              uses
+                ? "Take " + d.name + " away from " + o.name + "?"
+                : "Let " + o.name + " use " + d.name + "?",
+              () =>
+                sureCall("/admin/api/screen/connections", {
+                  id: o.plugin,
+                  drivers: uses ? o.connections.filter((x) => x !== d.id) : [...o.connections, d.id],
+                }),
+              s,
+            ), uses),
+        ),
+      );
+    }
+  });
+
+  part("deviceAbout", "About", (s) => {
     if (d.module && d.store) {
-      item.append(
+      s.append(
         el(
           "p",
-          { className: "dim", style: "margin:0 0 4px" },
+          { className: "dim" },
           "From the store: Companion module " + d.module.name + " " + d.module.version +
             (d.store.license ? ", " + d.store.license + " license" : "") + ". " + d.store.proven + " ",
           el("a", {
@@ -965,151 +1222,91 @@ function drawDrivers() {
           ".",
         ),
       );
-      if (d.update) {
-        item.append(
-          el("p", {
-            className: "help update",
-            style: "margin:0 0 6px",
-            textContent: d.update.newer
-              ? "The store has a newer version, " + d.update.version + "."
-              : d.update.rebuilt
-              ? "The store has packaged version " + d.update.version +
-                " again, with a fix to how it is put together."
-              : "The store now lists version " + d.update.version + ", which is not the one running here.",
-          }),
-        );
-      }
     } else if (d.module) {
-      item.append(
+      s.append(
         el("p", {
           className: "dim",
-          style: "margin:0 0 4px",
           textContent: "Companion module " + d.module.name + " " + d.module.version +
             ", added from a file. Nobody has reviewed it for this hub.",
         }),
       );
+    } else {
+      s.append(el("p", { className: "dim", textContent: "This hub was started with it." }));
     }
-    item.append(
-      el(
-        "div",
-        {},
-        el("span", { className: "chip", textContent: STATE[d.status] || d.status }),
-        el("span", {
-          className: "chip" + (d.mode === "act" ? " on" : ""),
-          textContent: d.mode === "act" ? "Act" : "Listen",
-        }),
-      ),
-    );
-    const [words, kind] = statusOf(d);
-    item.append(el("p", { className: "status " + kind, textContent: words }));
-    const reachNow = d.grants.length
-      ? "It may: " + d.grants.map((g) => g.words.charAt(0).toLowerCase() + g.words.slice(1)).join("; ") + "."
-      : "It has no access to your network.";
-    item.append(
-      el("p", {
-        className: "help",
-        textContent: reachNow + (d.mode === "act" ? "" : " In Listen, nothing is sent to it."),
-      }),
-    );
-    item.append(
-      el("p", {
-        className: "help",
-        textContent: d.usedBy.length
-          ? "Used by: " + d.usedBy.join(", ") + "."
-          : "No screen can use it yet. Choose which under Screens.",
-      }),
-    );
-    const row = el("div", { className: "row", style: "margin-top:10px" });
-    const btn = (text, fn) => {
-      const b = el("button", { className: "small quiet", type: "button", textContent: text });
-      b.onclick = fn;
-      row.append(b);
-      return b;
-    };
-    if (d.asks.length) {
-      const b = btn("See what it asks for", () => openAccess(d.id));
-      b.className = "small";
-    }
+    const row = el("div", { className: "row" });
     if (d.update) {
-      btn(d.update.newer ? "Update to " + d.update.version : "Change to " + d.update.version, () =>
-        ask(
-          (d.update.newer ? "Update " : "Change ") + d.name + " to version " + d.update.version,
-          (x) => {
-            const facts = el("ul", { className: "facts" });
-            facts.append(
-              el("li", {
-                textContent: "It keeps its name, its settings, and everything you allowed or refused.",
-              }),
-              el("li", { textContent: d.update.proven }),
-            );
-            if (d.update.also.length) {
+      s.append(
+        el("p", {
+          className: "help update",
+          textContent: d.update.newer
+            ? "The store has a newer version, " + d.update.version + "."
+            : d.update.rebuilt
+            ? "The store has packaged version " + d.update.version +
+              " again, with a fix to how it is put together."
+            : "The store now lists version " + d.update.version + ", which is not the one running here.",
+        }),
+      );
+      row.append(
+        button(d.update.newer ? "Update to " + d.update.version : "Change to " + d.update.version, () =>
+          ask(
+            (d.update.newer ? "Update " : "Change ") + d.name + " to version " + d.update.version,
+            (x) => {
+              const facts = el("ul", { className: "facts" });
               facts.append(
                 el("li", {
-                  textContent: "The store now also lets it, without asking you: " + d.update.also.map((w) =>
-                    w.charAt(0).toLowerCase() + w.slice(1)
-                  ).join("; ") + ".",
+                  textContent: "It keeps its name, its settings, and everything you allowed or refused.",
                 }),
+                el("li", { textContent: d.update.proven }),
               );
-            }
-            facts.append(
-              el("li", { textContent: "If the new version reaches for anything else, you are asked first." }),
-              el("li", { textContent: "It stops for a moment while it is replaced." }),
-            );
-            x.append(facts);
-            confirmField(x);
-          },
-          () => sureCall("/admin/api/driver/update", { id: d.id }),
-          d.update.newer ? "Update" : "Change",
-        ));
-    }
-    if (d.added || d.form) btn("Settings", () => openSettings(d.id));
-    if (!d.asks.length && d.grants.length) btn("Network access", () => openAccess(d.id));
-    btn(
-      d.mode === "act" ? "Switch to Listen" : "Switch to Act",
-      () =>
-        ask(
-          (d.mode === "act" ? "Stop sending changes to " : "Start sending changes to ") + d.name,
-          (x) => confirmField(x),
-          () =>
-            sureCall("/admin/api/driver/mode", {
-              id: d.id,
-              mode: d.mode === "act" ? "listen" : "act",
-            }),
-          "Switch",
-        ),
-    );
-    if (d.status === "quarantined") {
-      btn("Release", async () => {
-        await call("/admin/api/driver/release", { id: d.id });
-        load();
-      });
+              if (d.update.also.length) {
+                facts.append(
+                  el("li", {
+                    textContent: "The store now also lets it, without asking you: " +
+                      d.update.also.map(lower).join("; ") + ".",
+                  }),
+                );
+              }
+              facts.append(
+                el("li", {
+                  textContent: "If the new version reaches for anything else, you are asked first.",
+                }),
+                el("li", { textContent: "It stops for a moment while it is replaced." }),
+              );
+              x.append(facts);
+              confirmField(x);
+            },
+            () => sureCall("/admin/api/driver/update", { id: d.id }),
+            d.update.newer ? "Update" : "Change",
+          ), false),
+      );
     }
     if (d.added) {
-      btn("Remove", () =>
-        ask(
-          "Remove " + d.name,
-          (x) => {
-            x.append(
-              el("p", {
-                className: "dim",
-                textContent:
-                  "It is stopped and taken off this hub, and every screen loses it. Its settings are deleted.",
-              }),
-            );
-            confirmField(x);
-          },
-          async () => {
-            const r = await sureCall("/admin/api/driver/remove", { id: d.id });
-            // Its own address now names nothing: go to where the rest are.
-            if (r.ok && here().device === d.id) history.replaceState(null, "", "/admin/devices");
-            return r;
-          },
-          "Remove",
-        ));
+      row.append(
+        button("Remove", () =>
+          ask(
+            "Remove " + d.name,
+            (x) => {
+              x.append(
+                el("p", {
+                  className: "dim",
+                  textContent:
+                    "It is stopped and taken off this hub, and every screen loses it. Its settings are deleted.",
+                }),
+              );
+              confirmField(x);
+            },
+            async () => {
+              const r = await sureCall("/admin/api/driver/remove", { id: d.id });
+              // Its own address now names nothing: go to where the rest are.
+              if (r.ok && here().device === d.id) history.replaceState(null, "", "/admin/devices");
+              return r;
+            },
+            "Remove",
+          )),
+      );
     }
-    item.append(row);
-    box.append(item);
-  }
+    s.append(row);
+  });
 }
 
 // What a device asks to reach, and what it may reach now. A superuser answers; nothing is allowed by default.
@@ -1210,113 +1407,89 @@ function openAccess(id) {
   }, d.asks.length ? "Allow what is ticked" : "Save");
 }
 
-// A device's own settings, drawn from what it says it takes.
-function openSettings(id, waited = 0) {
-  const d = drivers.find((x) => x.id === id);
-  if (!d) return;
-  if (!d.form && waited < 8) {
-    setTimeout(async () => {
-      await load();
-      openSettings(id, waited + 1);
-    }, 500);
-    return;
-  }
+// A device's own settings, drawn from what it says it takes, into x. Returns how to read them back.
+function settingsFields(d, x) {
   const read = [];
-  ask("Settings for " + d.name, (x) => {
-    const fields = d.form || [];
-    if (!d.form) {
-      x.append(
-        el("p", {
-          className: "dim",
-          textContent:
-            "It has not said what settings it takes. It may not be running. Check its status and try again.",
-        }),
-      );
-    } else if (!fields.some((f) => f.kind !== "note")) {
-      x.append(el("p", { className: "dim", textContent: "This device has nothing to set." }));
-    }
-    for (const f of fields) {
-      const now = f.id in d.settings ? d.settings[f.id] : f.default;
-      const fid = "set_" + f.id;
-      if (f.kind === "note") {
-        x.append(
-          el(
-            "p",
-            { className: "dim", style: "margin-top:12px" },
-            el("b", { textContent: f.label + (f.help ? ": " : "") }),
-            f.help || "",
-          ),
-        );
-        continue;
-      }
-      let field;
-      if (f.kind === "toggle") {
-        field = el("input", { type: "checkbox", id: fid, checked: !!now });
-        x.append(el("label", { className: "check" }, field, el("span", { textContent: f.label })));
-        read.push(() => [f.id, field.checked]);
-      } else if (f.kind === "choice") {
-        field = el(
-          "select",
-          { id: fid },
-          ...(f.choices || []).map((c) =>
-            el("option", {
-              value: String(c.id),
-              textContent: c.label,
-              selected: String(c.id) === String(now),
-            })
-          ),
-        );
-        x.append(el("label", { htmlFor: fid, textContent: f.label }), field);
-        read.push(() => {
-          const c = (f.choices || []).find((c) => String(c.id) === field.value);
-          return c ? [f.id, c.id] : null;
-        });
-      } else {
-        const secret = f.kind === "secret", number = f.kind === "number";
-        field = el("input", {
-          id: fid,
-          type: secret ? "password" : number ? "number" : "text",
-          value: secret ? "" : now ?? "",
-          step: "any",
-          autocomplete: "off",
-        });
-        if (secret) {
-          field.placeholder = d.secretsSet.includes(f.id) ? "Set. Leave blank to keep it." : "Not set";
-        }
-        if (number && f.min !== undefined) field.min = f.min;
-        if (number && f.max !== undefined) field.max = f.max;
-        // Somewhere to type that also offers what the device found: an address it saw on the network, say.
-        if (!secret && !number && f.choices && f.choices.length) {
-          const offers = el(
-            "datalist",
-            { id: fid + "_offers" },
-            ...f.choices.map((c) => el("option", { value: String(c.id), label: c.label })),
-          );
-          field.setAttribute("list", offers.id);
-          x.append(offers);
-        }
-        x.append(el("label", { htmlFor: fid, textContent: f.label }), field);
-        read.push(() =>
-          number ? (field.value === "" ? null : [f.id, Number(field.value)]) : [f.id, field.value]
-        );
-      }
-      if (f.help) x.append(el("p", { className: "help", textContent: f.help }));
-    }
+  const fields = d.form || [];
+  if (!d.form) {
     x.append(
       el("p", {
-        className: "help",
-        style: "margin-top:14px",
-        textContent: "Saving restarts this device with the new settings.",
+        className: "dim",
+        textContent:
+          "It has not said what settings it takes. It may not be running. Check its status and try again.",
       }),
     );
-  }, async () => {
-    const r = await call("/admin/api/driver/settings", {
-      id,
-      settings: Object.fromEntries(read.map((r) => r()).filter(Boolean)),
-    });
-    if (r.ok) say("driversMsg", "");
-    return r;
-  });
+  } else if (!fields.some((f) => f.kind !== "note")) {
+    x.append(el("p", { className: "dim", textContent: "This device has nothing to set." }));
+  }
+  for (const f of fields) {
+    const now = f.id in d.settings ? d.settings[f.id] : f.default;
+    const fid = "set_" + f.id;
+    if (f.kind === "note") {
+      x.append(
+        el(
+          "p",
+          { className: "dim", style: "margin-top:12px" },
+          el("b", { textContent: f.label + (f.help ? ": " : "") }),
+          f.help || "",
+        ),
+      );
+      continue;
+    }
+    let field;
+    if (f.kind === "toggle") {
+      field = el("input", { type: "checkbox", id: fid, checked: !!now });
+      x.append(el("label", { className: "check" }, field, el("span", { textContent: f.label })));
+      read.push(() => [f.id, field.checked]);
+    } else if (f.kind === "choice") {
+      field = el(
+        "select",
+        { id: fid },
+        ...(f.choices || []).map((c) =>
+          el("option", {
+            value: String(c.id),
+            textContent: c.label,
+            selected: String(c.id) === String(now),
+          })
+        ),
+      );
+      x.append(el("label", { htmlFor: fid, textContent: f.label }), field);
+      read.push(() => {
+        const c = (f.choices || []).find((c) => String(c.id) === field.value);
+        return c ? [f.id, c.id] : null;
+      });
+    } else {
+      const secret = f.kind === "secret", number = f.kind === "number";
+      field = el("input", {
+        id: fid,
+        type: secret ? "password" : number ? "number" : "text",
+        value: secret ? "" : now ?? "",
+        step: "any",
+        autocomplete: "off",
+      });
+      if (secret) {
+        field.placeholder = d.secretsSet.includes(f.id) ? "Set. Leave blank to keep it." : "Not set";
+      }
+      if (number && f.min !== undefined) field.min = f.min;
+      if (number && f.max !== undefined) field.max = f.max;
+      // Somewhere to type that also offers what the device found: an address it saw on the network, say.
+      if (!secret && !number && f.choices && f.choices.length) {
+        const offers = el(
+          "datalist",
+          { id: fid + "_offers" },
+          ...f.choices.map((c) => el("option", { value: String(c.id), label: c.label })),
+        );
+        field.setAttribute("list", offers.id);
+        x.append(offers);
+      }
+      x.append(el("label", { htmlFor: fid, textContent: f.label }), field);
+      read.push(() =>
+        number ? (field.value === "" ? null : [f.id, Number(field.value)]) : [f.id, field.value]
+      );
+    }
+    if (f.help) x.append(el("p", { className: "help", textContent: f.help }));
+  }
+  return read;
 }
 
 // Adding a device: choose the package, see what it is and what it could do, then decide.
@@ -1494,10 +1667,7 @@ function openAdd(storeId) {
       // Adding ends on the new device's own address, where everything else about it is.
       history.replaceState(null, "", deviceAt(r.id));
       showPlace();
-      setTimeout(async () => {
-        await load();
-        openSettings(r.id);
-      }, 300);
+      setTimeout(load, 300);
     }
     return r;
   }, "Add device");
