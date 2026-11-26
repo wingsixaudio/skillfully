@@ -329,6 +329,16 @@ The hub never sends the whole list to the page: it sends a page of entries and t
 list names a maker for each entry, the hub works the name out from the entry's id and what it says it makes.
 Choosing an entry opens the same few questions as before, and adding ends at the new device's own address.
 
+**A device has a page, not a card and five dialogs.** At a device's own address everything about it is on one
+page, top to bottom in the order the work happens: whether it is connected, its settings, what it may reach,
+whether people can control it, which screens use it, and where it came from. Nothing waits on anything else.
+Settings are filled in on the page. What it asks to reach is answered on the page, with the store's advice
+beside each request. Updating and removing still ask in a dialog, because each is one question that deserves
+to be read alone. The page keeps itself current every few seconds, part by part, and never draws over a part
+somebody is typing in or has ticked. Something that hands out power is done at once while the superuser's
+confirmation holds, and otherwise asks for it once. The admin now says "People can control it" and "watched
+only" where it said Act and Listen. The contract, the log and the code keep their words.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins

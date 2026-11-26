@@ -486,3 +486,31 @@ button.chip.on {
   font-size: 13px;
   margin-left: 6px;
 }
+.part {
+  padding: 16px 0;
+  border-top: 1px solid var(--rail);
+}
+.part:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.part h3 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+.part h2 {
+  font-size: 20px;
+  margin: 0 0 6px;
+}
+.part > button {
+  margin-top: 10px;
+  width: auto;
+}
+.part .row {
+  align-items: center;
+  margin: 6px 0;
+}
+.part .row button {
+  margin: 0;
+  width: auto;
+}
