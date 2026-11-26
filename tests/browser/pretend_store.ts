@@ -62,6 +62,8 @@ async function publishNewer(): Promise<void> {
     modules: [{
       ...index.modules[0],
       version: "1.1.0",
+      // A later version is its author's source at a later commit.
+      source: { ...index.modules[0].source, commit: "1".repeat(40) },
       tested: "real-device",
       package: {
         path: "packages/skillfully-test-lamp-1.1.0.tgz",

@@ -13,6 +13,8 @@ export interface StoreOrigin {
   commit: string;
   license: string;
   tested: string;
+  /** Which way of building packages made the one this hub has. See StoreModule.recipe. */
+  recipe?: number;
 }
 
 /** Where a device a superuser added came from. A driver the hub was started with has none. */

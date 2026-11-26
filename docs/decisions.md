@@ -178,6 +178,22 @@ the screens it was given to, and everything allowed or refused; it gains only wh
 advance, and that is said before the PIN is asked for. The new version is unpacked and checked beside the
 running one first, so a version this hub cannot run never stops a device that works.
 
+**A package is its source at one commit, built one way.** A hub used to decide that the store had another
+version by comparing the bytes of the package. Builds do not come out byte for byte the same twice, so a store
+that only built the same thing again looked like an update to every hub. A hub now compares the source commit
+and the store's recipe number, which says which way of building made the package. The same commit built the
+same way is the same package for good. A higher recipe for the same commit is offered, and said for what it
+is: the same module, packaged again.
+
+**A signed list may say where its packages are kept.** Packages used to have to sit beside the list. A list
+the store signed may now name any https address for one, and the hub may be passed on from there to where the
+file really is. What arrives is held to the checksum in the signed list either way, so it does not matter
+whose computer handed it over. A list nobody signed still cannot send a hub anywhere but beside itself.
+
+**The shelf is searched, not sent.** The store's list can run to thousands. The hub answers the admin page
+with thirty at a time and finds the rest by the words typed, against a thing's name, what it does and who
+makes it.
+
 **A dropped-in module starts in Listen mode.** It connects and reports, and the hub sends it nothing until
 someone decides it may act.
 

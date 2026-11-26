@@ -239,6 +239,7 @@ async def main():
         shelf = await owner.locator("#shelf").inner_text()
         check("the store's shelf says what each thing is and how far it has been proven", "Test lamp" in shelf and "stand-in" in shelf, shelf)
         check("the hub knows who signed the store's list, so the page does not warn about it", await owner.locator("#unsigned").count() == 0, shelf)
+        check("a store with only a few things does not need a search box", not await owner.locator("#shelfFind").is_visible())
         await owner.locator("#shelf .shelfItem", has_text="Test lamp").get_by_role("button", name="Choose").click()
         await owner.wait_for_selector("#pkgRest:not([hidden])")
         told = await owner.locator("#pkgRest").inner_text()
