@@ -104,6 +104,10 @@ their open connections.
 cookie is hidden from scripts and never sent from other sites, and screens, which have no origin, cannot call
 it at all.
 
+**Every change arrives as a pull request.** `main` is protected: no direct pushes, no force pushes, no
+deleting it, and nothing merges until the `checks` job passes. This applies to maintainers too. The first six
+commits were pushed straight to `main` before the rule existed.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins
