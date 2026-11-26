@@ -56,7 +56,17 @@ deno task test                             # every test
 deno task check-plugin plugins/one-fader   # what the hub would say about a plugin
 deno task conformance plugins/sim-switch   # prove a driver keeps the contract
 tests/browser/run.sh chromium              # the real-browser test (needs Python and Playwright)
+tests/compat/kasa.sh                       # a real Companion module against a pretend plug (needs Node)
 ```
+
+To add a [Bitfocus Companion](https://bitfocus.io/companion) module, download its package (the `.tgz` file
+Companion itself installs) and run:
+
+```sh
+deno task add-module module.tgz --set host=192.168.1.50
+```
+
+It starts in Listen mode. Add `--act` to let its actions through. Restart the hub afterwards.
 
 The first run downloads one library (the JSON Schema validator). After that it runs offline.
 

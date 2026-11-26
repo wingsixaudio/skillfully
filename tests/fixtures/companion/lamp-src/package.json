@@ -1,0 +1,18 @@
+{
+  "name": "skillfully-test-lamp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A Companion module written for Skillfully's tests. It drives a pretend lamp.",
+  "main": "main.js",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "companion-module-build"
+  },
+  "dependencies": {
+    "@companion-module/base": "~1.14.1"
+  },
+  "devDependencies": {
+    "@companion-module/tools": "~2.8.0"
+  }
+}

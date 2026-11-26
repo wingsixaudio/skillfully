@@ -121,3 +121,17 @@ Deno.test("a manifest's own words cannot pose as part of the report", () => {
   );
   assert(lines.every((l) => !l.includes("<b>") && !l.replace(/\\./g, "").includes("*")));
 });
+
+Deno.test("the report spells out the two wide network grants and a change of runtime", () => {
+  const wide = more(driver({ permissions: { network: ["{host}:9999", "lan", "listen"] } }), driver());
+  assertEquals(wide.length, 2);
+  assert(wide[0].includes("any device on the local network"), wide[0]);
+  assert(wide[1].includes("ports it opens on the hub's computer"), wide[1]);
+  assert(
+    asks(driver({ permissions: { network: ["lan"] } })).join(" ").includes("any device on the local network"),
+  );
+
+  const bridged = driver({ runtime: "companion", entry: "module/main.js" });
+  assert(more(bridged, driver()).some((line) => line.includes("runs as")));
+  assert(asks(bridged).some((line) => line.includes("Companion module")));
+});

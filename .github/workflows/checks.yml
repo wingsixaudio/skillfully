@@ -101,6 +101,26 @@ jobs:
           path: shots
           if-no-files-found: ignore
 
+  # A real Companion module, built from its own source and run against a pretend plug. It depends on someone
+  # else's repository and on npm, so it reports and does not decide whether a change can merge.
+  companion:
+    name: Real Companion module (reported, not required)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch what the hub needs before it starts
+        run: deno cache core/main.ts
+      - name: TP-Link Kasa module, switching a pretend plug through the hub
+        run: tests/compat/kasa.sh
+
   # Plain words on what each changed plugin asks for, shown on the pull request's checks page.
   plugin-report:
     name: What changed plugins ask for

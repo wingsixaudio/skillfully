@@ -25,15 +25,24 @@
         "required": ["key", "title", "kind", "writable"],
         "properties": {
           "key": {
-            "description": "The value's name. A part in braces is a number counted from 1.",
+            "description": "The value's name. A part in braces is a number counted from 1, unless it is listed under names.",
             "type": "string",
             "pattern": "^(\\{[a-z]+\\}|[a-z][a-z0-9-]*)(/(\\{[a-z]+\\}|[a-z][a-z0-9-]*)){0,8}$"
           },
           "title": { "type": "string", "minLength": 1, "maxLength": 60 },
           "description": { "type": "string", "maxLength": 300 },
-          "kind": { "enum": ["number", "text", "boolean"] },
+          "kind": {
+            "description": "number, text and boolean are values a device holds and reports. A trigger is something to do: it holds nothing, so there is nothing to read back.",
+            "enum": ["number", "text", "boolean", "trigger"]
+          },
           "unit": { "type": "string", "maxLength": 12 },
           "writable": { "type": "boolean" },
+          "names": {
+            "description": "Parts in braces that are names the driver chooses, not numbers. A driver reports which exist; none are promised.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[a-z]+$" }
+          },
           "bounds": {
             "description": "For each part in braces, the option that says how many there are.",
             "type": "object",

@@ -29,6 +29,20 @@ export async function loadManifest(dir: string): Promise<Manifest> {
 
 const HOST = /^[A-Za-z0-9.-]{1,253}$/;
 
+// The two wide grants, for drivers that cannot say in advance what they will reach.
+// lan: every private address, plus the addresses devices use to find each other. Not the internet, and not
+// this computer, where the hub and anything else installed are listening.
+const LAN = [
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "169.254.0.0/16",
+  "224.0.0.0/4",
+  "255.255.255.255",
+];
+// listen: open ports on this computer's network addresses, for devices that answer or announce themselves.
+const LISTEN = ["0.0.0.0", "[::]"];
+
 /** Turn the manifest's network list into real host:port pairs, filling {placeholders} from settings. */
 export function resolveNetwork(manifest: DriverManifest, settings: Record<string, unknown>): string[] {
   const fill = (part: string, what: "host" | "port"): string => {
@@ -46,9 +60,11 @@ export function resolveNetwork(manifest: DriverManifest, settings: Record<string
     }
     return text;
   };
-  return (manifest.permissions?.network ?? []).map((entry) => {
+  return (manifest.permissions?.network ?? []).flatMap((entry) => {
+    if (entry === "lan") return LAN;
+    if (entry === "listen") return LISTEN;
     const i = entry.lastIndexOf(":");
-    return `${fill(entry.slice(0, i), "host")}:${fill(entry.slice(i + 1), "port")}`;
+    return [`${fill(entry.slice(0, i), "host")}:${fill(entry.slice(i + 1), "port")}`];
   });
 }
 
@@ -71,12 +87,26 @@ export function denoArgs(
     // The script heap gets half of the plugin's memory allowance. The whole process is watched by the hub.
     `--v8-flags=--max-old-space-size=${Math.max(16, Math.floor((manifest.limits?.memoryMb ?? 256) / 2))}`,
     `--allow-net=${net.join(",")}`,
-    // No file, environment, subprocess, system or FFI permission is ever granted.
-    toFileUrl(`${dir}/${manifest.entry}`),
+    ...(manifest.runtime === "companion"
+      ? [
+        // A Companion module expects to read its own package. It may read that folder and nothing else,
+        // and the hub's bridge runs it. No write, environment, subprocess, system or FFI permission.
+        `--allow-read=${dir}`,
+        COMPANION_BRIDGE,
+        `--module=${dir}/${manifest.entry}`,
+        `--package=${dir}/module`,
+        `--id=${manifest.id}`,
+        `--version=${manifest.version}`,
+      ]
+      // No file, environment, subprocess, system or FFI permission is ever granted.
+      : [toFileUrl(`${dir}/${manifest.entry}`)]),
     `--hub=ws://127.0.0.1:${gatewayPort}/plugin`,
     `--token=${token}`,
   ];
 }
+
+/** The hub's own program that runs a Companion module and speaks the contract on its behalf. */
+const COMPANION_BRIDGE = toFileUrl(here("../runtimes/companion.ts", import.meta.url));
 
 // A plugin's process starts with an empty environment, plus the few names the runtime itself needs to
 // start. The plugin's own code cannot read any of them: it is never given permission to read the environment.
@@ -108,6 +138,9 @@ let hubProvidedReal: string[] | undefined;
  * file on the computer just by importing it. Links that point outside count as outside.
  */
 export async function inspectImports(dir: string, manifest: DriverManifest): Promise<void> {
+  // A Companion module is a single built file that the hub's own bridge loads. What it may load and reach
+  // is held by its permissions: its own folder to read, nothing fetched, nothing installed.
+  if (manifest.runtime === "companion") return;
   const root = (await realPath(dir)) + "/";
   hubProvidedReal ??= await Promise.all(
     HUB_PROVIDED.map(async (p) => (await realPath(p)) + (p.endsWith("/") ? "/" : "")),

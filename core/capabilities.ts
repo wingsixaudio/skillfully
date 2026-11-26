@@ -24,6 +24,11 @@ function option(options: Options, path: string): unknown {
 
 const KIND_OF: Record<string, ValueDef["kind"]> = { number: "number", string: "text", boolean: "boolean" };
 
+/** A name a driver may choose for one of its own values. It becomes one part of a key. */
+export const NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
+/** The longest options text a trigger may carry. */
+const TRIGGER_MAX = 4000;
+
 export interface Resolved {
   capability: string;
   def: ValueDef;
@@ -71,6 +76,10 @@ export class Capability {
           if (want !== parts[i]) continue next;
           continue;
         }
+        if (t.def.names?.includes(want.slice(1, -1))) {
+          if (!NAME.test(parts[i])) continue next;
+          continue;
+        }
         if (!/^[1-9][0-9]{0,4}$/.test(parts[i])) continue next;
         const bound = t.def.bounds?.[want.slice(1, -1)];
         const most = bound ? option(options, bound) : undefined;
@@ -86,6 +95,8 @@ export class Capability {
     const out: { path: string; def: ValueDef; min?: number; max?: number }[] = [];
     for (const t of this.#templates) {
       if (t.def.when && !option(options, t.def.when)) continue;
+      // Values under names the driver chooses are reported, not promised. A trigger holds nothing to report.
+      if (t.def.names?.length || t.def.kind === "trigger") continue;
       const range = this.#range(t.def, options);
       let paths = [""];
       for (const part of t.parts) {
@@ -156,6 +167,17 @@ export class Capabilities {
 
   /** Is this value the right kind for that key? Range is the device's call, not the hub's. */
   kindProblem(found: Resolved, value: Value): CommandError | null {
+    if (found.def.kind === "trigger") {
+      // true means "do it". Text carries options, as a JSON object.
+      if (value === true) return null;
+      if (typeof value === "string" && value.length <= TRIGGER_MAX) {
+        try {
+          const parsed = JSON.parse(value);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return null;
+        } catch { /* not JSON */ }
+      }
+      return { code: "invalid", message: `${found.def.title} takes true, or its options as a JSON object` };
+    }
     if (KIND_OF[typeof value] !== found.def.kind || (typeof value === "number" && !Number.isFinite(value))) {
       return { code: "invalid", message: `${found.def.title} must be a ${found.def.kind}` };
     }

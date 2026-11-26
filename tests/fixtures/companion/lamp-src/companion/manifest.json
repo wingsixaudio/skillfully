@@ -1,0 +1,21 @@
+{
+  "id": "skillfully-test-lamp",
+  "name": "skillfully-test-lamp",
+  "shortname": "test-lamp",
+  "description": "A pretend lamp, for Skillfully's tests",
+  "version": "0.0.0",
+  "license": "MIT",
+  "repository": "git+https://github.com/wingsixaudio/skillfully.git",
+  "bugs": "https://github.com/wingsixaudio/skillfully/issues",
+  "maintainers": [{ "name": "Skillfully" }],
+  "legacyIds": [],
+  "runtime": {
+    "type": "node22",
+    "api": "nodejs-ipc",
+    "apiVersion": "0.0.0",
+    "entrypoint": "../main.js"
+  },
+  "manufacturer": "Skillfully",
+  "products": ["Test lamp"],
+  "keywords": ["test"]
+}
