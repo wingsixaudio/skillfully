@@ -20,7 +20,7 @@ import { Devices, type DriverChoices } from "./devices.ts";
 import type { PluginHost } from "./host.ts";
 import { cookieOf, go, json, outcome, readJson, refuse, setCookie, TYPES } from "./http.ts";
 import { Log } from "./log.ts";
-import { adminPage, authPage, notePage, PAGE_POLICY, shellPage } from "./pages.ts";
+import { adminPage, authPage, notePage, pageFile, pagePolicy, shellPage } from "./pages.ts";
 import { realPath } from "./paths.ts";
 import { inspectPlugin } from "./plugins.ts";
 import { PluginGateway } from "./process.ts";
@@ -62,16 +62,6 @@ export interface Hub {
   stop(): Promise<void>;
 }
 
-const html = (body: string, status = 200) =>
-  new Response(body, {
-    status,
-    headers: {
-      "content-type": TYPES[".html"],
-      "content-security-policy": PAGE_POLICY,
-      "cache-control": "no-store",
-    },
-  });
-
 export async function startHub(opts: HubOptions): Promise<Hub> {
   const db = new DatabaseSync(opts.dbPath);
   const log = new Log(db);
@@ -93,9 +83,12 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   const dataDir = opts.dataDir?.replace(/[\\/]$/, "");
   const addedDir = dataDir ? `${dataDir}/plugins` : undefined;
   if (addedDir) await Deno.mkdir(addedDir, { recursive: true });
-  // Scratch files the runtime writes for the hub to read. Nothing in here is kept.
-  const runDir = dataDir ? `${dataDir}/run` : await Deno.makeTempDir({ prefix: "skillfully-run-" });
-  await Deno.mkdir(runDir, { recursive: true });
+  // Scratch files the runtime writes for the hub to read. Nothing in here is kept. A hub with nowhere to
+  // write still refuses what a driver was not allowed. It just cannot hear what was refused, to ask about it.
+  const runDir = dataDir
+    ? `${dataDir}/run`
+    : await Deno.makeTempDir({ prefix: "skillfully-run-" }).catch(() => undefined);
+  if (runDir) await Deno.mkdir(runDir, { recursive: true });
 
   const devices = new Devices({
     log,
@@ -174,6 +167,14 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       const session = await accounts.session(token);
       const me = session?.person;
       const device = (req.headers.get("user-agent") ?? "unknown device").slice(0, 120);
+      const html = async (body: Promise<string>, policy = pagePolicy(origin)) =>
+        new Response(await body, {
+          headers: {
+            "content-type": TYPES[".html"],
+            "content-security-policy": policy,
+            "cache-control": "no-store",
+          },
+        });
       const from = info.remoteAddr.hostname;
 
       // --- A screen's connection, opened by the hub's shell page on the screen's behalf ---
@@ -214,6 +215,11 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
           } catch { /* fall through to 404 */ }
         }
         return new Response("not found", { status: 404 });
+      }
+
+      // --- The scripts and styles of the hub's own pages ---
+      if (req.method === "GET" && path.startsWith("/_hub/")) {
+        return (await pageFile(path.slice("/_hub/".length))) ?? new Response("not found", { status: 404 });
       }
 
       // --- Signing in and out ---
@@ -305,16 +311,11 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       if (shell) {
         const screen = screens.all.get(shell[1])?.manifest;
         if (!screen || screens.accessFor(me, screen).empty) return go("/");
-        return new Response(shellPage(screen), {
-          headers: {
-            "content-type": TYPES[".html"],
-            "cache-control": "no-store",
-            "content-security-policy":
-              `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src ${origin}; connect-src ${origin} ${
-                origin.replace(/^http/, "ws")
-              }; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
-          },
-        });
+        // The frame may also hold the screen, and may open the one connection the screen speaks through.
+        return html(
+          shellPage(screen),
+          pagePolicy(origin, `frame-src ${origin}; connect-src ${origin} ${origin.replace(/^http/, "ws")}`),
+        );
       }
 
       // --- Read-only views of the hub ---
@@ -351,7 +352,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       await devices.stop();
       await server.shutdown();
       await gateway.close();
-      if (!dataDir) await Deno.remove(runDir, { recursive: true }).catch(() => {});
+      if (!dataDir && runDir) await Deno.remove(runDir, { recursive: true }).catch(() => {});
       log.append({ type: "skillfully.hub.stopped", source: "core" });
       db.close();
     },

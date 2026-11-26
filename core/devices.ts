@@ -43,8 +43,8 @@ export class Devices {
       gateway: PluginGateway;
       capabilities: Capabilities;
       registry: Registry;
-      /** Scratch files the runtime writes for the hub to read. Nothing in here is kept. */
-      runDir: string;
+      /** Scratch files the runtime writes for the hub to read. Without it, the hub cannot ask about what a driver tried. */
+      runDir?: string;
       /** Where this hub keeps the devices a superuser adds. Without it, none can be added. */
       dataDir?: string;
       /** The real location of the folder added devices live in, ending in a slash. */
@@ -103,7 +103,7 @@ export class Devices {
     const { log, gateway, capabilities, runDir } = this.deps;
     const host = new PluginHost(manifest, dir, record, log, gateway, capabilities, {
       ...this.#tuning.get(manifest.id),
-      auditPath: `${runDir}/${manifest.id}.jsonl`,
+      ...(runDir ? { auditPath: `${runDir}/${manifest.id}.jsonl` } : {}),
     });
     host.onChange((values) => {
       for (const l of this.#onChange) l(host, values);

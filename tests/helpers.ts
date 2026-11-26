@@ -103,6 +103,110 @@ export async function unpacked(packagePath: string, dataDir: string, choices: Dr
   return { ...written, pkg, config: { dir: written.dir, ...choices } as PluginConfig };
 }
 
+/** A stand-in for the lamp the test module drives: it keeps a power state and a level, and answers every line. */
+export function pretendLamp() {
+  const server = Deno.listen({ hostname: "127.0.0.1", port: 0 });
+  const heard: string[] = [];
+  const conns = new Set<Deno.Conn>();
+  let power = "off", level = 0;
+  (async () => {
+    for await (const conn of server) {
+      conns.add(conn);
+      (async () => {
+        const dec = new TextDecoder(), enc = new TextEncoder();
+        let buf = "";
+        try {
+          for await (const chunk of conn.readable) {
+            buf += dec.decode(chunk);
+            let i;
+            while ((i = buf.indexOf("\n")) >= 0) {
+              const line = buf.slice(0, i).trim();
+              buf = buf.slice(i + 1);
+              heard.push(line);
+              if (line === "on") power = "on";
+              else if (line === "off") power = "off";
+              else if (line.startsWith("level ")) level = Number(line.slice(6));
+              await conn.write(enc.encode(`power=${power} level=${level}\n`));
+            }
+          }
+        } catch {
+          /* the module went away */
+        } finally {
+          conns.delete(conn);
+        }
+      })();
+    }
+  })();
+  return {
+    port: (server.addr as Deno.NetAddr).port,
+    heard,
+    get connections() {
+      return conns.size;
+    },
+    close() {
+      for (const c of conns) {
+        try {
+          c.close();
+        } catch { /* already closed */ }
+      }
+      server.close();
+    },
+  };
+}
+
+/**
+ * A claimed hub that devices can be added to, as its admin page would: with a folder to keep them in,
+ * the Controls screen to give them to, and a store if an address for one is given.
+ */
+export async function addingHub(storeUrl?: string) {
+  const dataDir = await Deno.makeTempDir({ prefix: "skillfully-data-" });
+  const hub = await startHub({
+    dbPath: ":memory:",
+    plugins: [{ dir: CONTROLS }],
+    dataDir,
+    ...(storeUrl ? { storeUrl } : {}),
+  });
+  const claimed = await hub.accounts.claim(hub.accounts.claimCode, "Owner", OWNER_PIN, "test");
+  if (!claimed.ok) throw new Error(claimed.message);
+  const base = `http://127.0.0.1:${hub.port}`;
+  const cookie = `sk_session=${claimed.token}`;
+  const post = async (path: string, body: unknown, as = cookie) => {
+    const res = await fetch(base + path, {
+      method: "POST",
+      headers: { cookie: as, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  const send = async (bytes: Uint8Array, as = cookie, more: Record<string, string> = {}) => {
+    const res = await fetch(base + "/admin/api/module/inspect", {
+      method: "POST",
+      headers: { cookie: as, "content-type": "application/gzip", ...more },
+      body: bytes as BodyInit,
+    });
+    return { status: res.status, body: await res.json() };
+  };
+  const all = async () => await (await fetch(base + "/admin/api/all", { headers: { cookie } })).json();
+  const device = async (id: string) => (await all()).drivers.find((d: { id: string }) => d.id === id);
+  return {
+    hub,
+    dataDir,
+    owner: { id: claimed.person.id, token: claimed.token },
+    get: async (path: string, as = cookie) => {
+      const res = await fetch(base + path, { headers: { cookie: as } });
+      return { status: res.status, body: await res.json() };
+    },
+    post,
+    send,
+    all,
+    device,
+    async close() {
+      await hub.stop();
+      await Deno.remove(dataDir, { recursive: true }).catch(() => {});
+    },
+  };
+}
+
 /** The first driver the test loaded. In most tests that is the simulated board. */
 export const board = (hub: Hub): PluginHost => [...hub.hosts.values()][0];
 

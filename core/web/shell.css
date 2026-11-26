@@ -1,0 +1,84 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  color: #f4f4f5;
+  font-family: "Montserrat",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+body {
+  display: flex;
+  flex-direction: column;
+}
+#bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px max(14px,env(safe-area-inset-right)) 8px max(14px,env(safe-area-inset-left));
+}
+#bar svg {
+  width: 24px;
+  height: 24px;
+}
+#bar svg .core {
+  stroke: #f4f4f5;
+}
+#bar svg .mod {
+  fill: #f7941d;
+}
+#bar b {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+#bar b span {
+  color: #f7941d;
+}
+#menu {
+  margin-left: auto;
+  position: relative;
+}
+#menu summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #a1a1aa;
+  padding: 8px 4px;
+  min-height: 36px;
+}
+#menu summary::-webkit-details-marker {
+  display: none;
+}
+#menu summary:focus-visible,
+#menu a:focus-visible {
+  outline: 2px solid #f7941d;
+  outline-offset: 2px;
+}
+#menu div {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 2;
+  background: #121214;
+  border: 1px solid #26262b;
+  border-radius: 12px;
+  padding: 6px;
+  min-width: 200px;
+}
+#menu a {
+  display: block;
+  padding: 10px 12px;
+  color: #f4f4f5;
+  text-decoration: none;
+  border-radius: 8px;
+  font-size: 15px;
+}
+#menu a[aria-current] {
+  color: #f7941d;
+}
+iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  display: block;
+}

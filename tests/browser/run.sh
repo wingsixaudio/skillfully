@@ -15,7 +15,7 @@ deno run --no-prompt --allow-net="127.0.0.1:$store_port" --allow-read tests/brow
 store=$!
 
 deno run --allow-net --allow-read --allow-env=HOME,DENO_DIR,SYSTEMROOT,LOCALAPPDATA,USERPROFILE --allow-write="$data" --allow-run \
-  core/main.ts --port="$port" --data="$data" --store="http://127.0.0.1:$store_port/index.json" >"$data/hub.log" 2>&1 &
+  core/main.ts --act=sim-console,sim-switch --port="$port" --data="$data" --store="http://127.0.0.1:$store_port/index.json" >"$data/hub.log" 2>&1 &
 hub=$!
 # A pretend lamp for the Companion module the test adds through the admin page.
 lamp_port=${LAMP_PORT:-7007}

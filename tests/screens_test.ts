@@ -234,6 +234,43 @@ Deno.test("a connection needs a signed-in person and the hub's own page", async 
   await hub.stop();
 });
 
+Deno.test("the hub's own pages run only the hub's own scripts", async () => {
+  const hub = await hubWith([{ dir: SIM, mode: "act" }]);
+  const origin = `http://127.0.0.1:${hub.port}`;
+  try {
+    for (const path of ["/signin", "/account", "/admin", "/s/one-fader"]) {
+      const page = await hub.get(path, path === "/signin" ? null : hub.owner);
+      const policy = page.headers.get("content-security-policy") ?? "";
+      const body = await page.text();
+      assertEquals(page.status, 200, path);
+      // No script written into a page can run, whoever wrote it there: only files from the hub's own folder.
+      assert(policy.includes(`script-src ${origin}/_hub/;`), `${path}: ${policy}`);
+      assert(!/script-src[^;]*unsafe-inline/.test(policy), `${path} allows scripts written into the page`);
+      assert(!/<script(?![^>]*\bsrc=)[^>]*>/.test(body), `${path} has a script written into it`);
+      assert(!body.includes("{{"), `${path} was not filled in`);
+    }
+    // What a page is filled in with is text, whatever it holds.
+    const shell = await (await hub.get("/s/one-fader")).text();
+    assert(
+      shell.includes('data-screen="one-fader"') && shell.includes('src="/screens/one-fader/index.html"'),
+    );
+
+    const script = await hub.get("/_hub/admin.js", null);
+    assertEquals(script.status, 200, "the scripts are code, not secrets");
+    assertEquals(script.headers.get("content-type"), "text/javascript; charset=utf-8");
+    await script.body?.cancel();
+    for (
+      const path of ["/_hub/admin.html", "/_hub/..%2Fhub.ts", "/_hub/web/admin.js", "/_hub/nothing.js"]
+    ) {
+      const no = await hub.get(path, null);
+      await no.body?.cancel();
+      assertEquals(no.status, 404, path);
+    }
+  } finally {
+    await hub.stop();
+  }
+});
+
 Deno.test("a screen's files are served locked down, and only its files", async () => {
   const hub = await hubWith([{ dir: SIM, mode: "act" }]);
   const page = await hub.get("/screens/one-fader/index.html", null);

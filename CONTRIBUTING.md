@@ -39,7 +39,10 @@ A driver talks to one device. It runs as its own process and can reach only its 
 
 1. Copy `plugins/sim-switch`. It is about forty lines.
 2. In `plugin.json`, set `capabilities` to what your device has, and `permissions.network` to the address it
-   lives at (for example `"{host}:9999"`, filled from the driver's settings).
+   lives at (for example `"{host}:9999"`, filled from the driver's settings). That list is what the driver
+   **asks for**. A hub started with your plugin gives it that the first time it sees it. If you ask for more
+   later, the driver does not get it until a superuser allows it on the admin page, the same as on anyone
+   else's hub.
 3. In `main.ts`, fill in three things: connect to the device in `start`, return everything it knows in
    `fullState`, and set values in `command`.
 4. Prove it: `deno task conformance plugins/<your-driver>`. **This writes to the device.** Never run it on

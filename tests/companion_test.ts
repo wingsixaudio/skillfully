@@ -2,7 +2,7 @@
 // The package under tests/fixtures/companion was built from the source beside it.
 
 import { assert, assertEquals, assertThrows } from "./assert.ts";
-import { FIXTURES, hubWith, ofType, unpacked, until } from "./helpers.ts";
+import { FIXTURES, hubWith, ofType, pretendLamp, unpacked, until } from "./helpers.ts";
 import type { DriverChoices } from "../core/devices.ts";
 import { networkNotes, readTar } from "../core/packages.ts";
 import { runtimeOf } from "../core/runtimes.ts";
@@ -15,56 +15,6 @@ const READING = (name: string) => `generic/reading/${name}`;
 const ACTION = (name: string) => `generic/action/${name}`;
 
 /** A lamp that is only a TCP port: it answers "get", "on", "off" and "level N" with what it now holds. */
-function pretendLamp() {
-  const server = Deno.listen({ hostname: "127.0.0.1", port: 0 });
-  const heard: string[] = [];
-  const conns = new Set<Deno.Conn>();
-  let power = "off", level = 0;
-  (async () => {
-    for await (const conn of server) {
-      conns.add(conn);
-      (async () => {
-        const dec = new TextDecoder(), enc = new TextEncoder();
-        let buf = "";
-        try {
-          for await (const chunk of conn.readable) {
-            buf += dec.decode(chunk);
-            let i;
-            while ((i = buf.indexOf("\n")) >= 0) {
-              const line = buf.slice(0, i).trim();
-              buf = buf.slice(i + 1);
-              heard.push(line);
-              if (line === "on") power = "on";
-              else if (line === "off") power = "off";
-              else if (line.startsWith("level ")) level = Number(line.slice(6));
-              await conn.write(enc.encode(`power=${power} level=${level}\n`));
-            }
-          }
-        } catch {
-          /* the module went away */
-        } finally {
-          conns.delete(conn);
-        }
-      })();
-    }
-  })();
-  return {
-    port: (server.addr as Deno.NetAddr).port,
-    heard,
-    get connections() {
-      return conns.size;
-    },
-    close() {
-      for (const c of conns) {
-        try {
-          c.close();
-        } catch { /* already closed */ }
-      }
-      server.close();
-    },
-  };
-}
-
 async function dropIn(choices: DriverChoices) {
   const dataDir = await Deno.makeTempDir({ prefix: "skillfully-data-" });
   const installed = await unpacked(PACKAGE, dataDir, choices);
