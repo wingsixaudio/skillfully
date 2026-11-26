@@ -30,7 +30,7 @@ fi
 
 deno run --allow-net --allow-read --allow-env=HOME,DENO_DIR,SYSTEMROOT,LOCALAPPDATA,USERPROFILE --allow-write="$data" --allow-run \
   core/main.ts --act=sim-console,sim-switch --port="$port" --data="$data" \
-  --store="http://127.0.0.1:$store_port/index.json" --store-key="$store_key" >"$data/hub.log" 2>&1 &
+  --store="http://127.0.0.1:$store_port/index.json" --store-key="$store_key" --store-every=1 >"$data/hub.log" 2>&1 &
 hub=$!
 # A pretend lamp for the Companion module the test adds through the admin page.
 lamp_port=${LAMP_PORT:-7007}
@@ -51,4 +51,4 @@ if [ -z "$code" ]; then
   exit 1
 fi
 
-BROWSER="$browser" LAMP_PORT="$lamp_port" python3 tests/browser/screen_sandbox.py "http://127.0.0.1:$port" "$code" ${2:+"$2"}
+BROWSER="$browser" LAMP_PORT="$lamp_port" STORE_PORT="$store_port" python3 tests/browser/screen_sandbox.py "http://127.0.0.1:$port" "$code" ${2:+"$2"}

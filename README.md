@@ -84,6 +84,9 @@ The store signs its list, and the hub checks the signature before it believes an
 reach something, the page also shows what the store's reviewers say about it, if they have said anything. That
 is advice. You still decide.
 
+When the store has a newer version of a device you added from it, its card says so and offers **Update**. The
+device keeps its name, settings, mode and everything you allowed.
+
 `deno task hub --no-store` runs a hub that never looks at the store. `--store=<address>` points it at another
 one, and `--store-key=<that store's public key>` says who signs its list. Without a key, a store's list is
 nobody's word: you can add from it, and each thing asks you before it reaches anything.

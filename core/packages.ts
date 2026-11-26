@@ -145,14 +145,26 @@ export async function writePackage(
   const start = pkg.idStart.slice(0, 58);
   let id = start;
   for (let n = 2; opts.taken?.(id) || await exists(`${root}/${id}`); n++) id = `${start}-${n}`;
-  const name = printable(opts.name ?? "").trim().slice(0, 80) || pkg.about.name;
+  return await writePackageTo(pkg, `${root}/${id}`, id, opts.name);
+}
+
+/**
+ * Write a checked package into one folder, as the plugin with this id. Used to put a newer version of
+ * a device beside the one that is running, before the two are swapped.
+ */
+export async function writePackageTo(
+  pkg: Package,
+  dir: string,
+  id: string,
+  called?: string,
+): Promise<Written> {
+  const name = printable(called ?? "").trim().slice(0, 80) || pkg.about.name;
   const checked = checkManifest(JSON.parse(JSON.stringify({ ...pkg.manifest, id, name })));
   if (!checked.ok || checked.value.kind !== "driver") {
     throw new Error(
       `the package cannot be described to this hub: ${checked.ok ? "it is not a driver" : checked.problem}`,
     );
   }
-  const dir = `${root}/${id}`;
   for (const f of pkg.files) {
     if (!SAFE_PATH.test(f.path) || f.path === "plugin.json") {
       throw new Error(`the package holds a file this hub will not write: ${f.path.slice(0, 80)}`);

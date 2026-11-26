@@ -57,7 +57,9 @@ const hub = await startHub({
   dataDir,
   // --store=<address> reads another store's list, and --store-key=<its public key> says who signs it.
   // --no-store uses none: devices are then added from files.
+  // --store-every=<seconds> says how often its list is read again. Five minutes unless told otherwise.
   ...(Deno.args.includes("--no-store") ? {} : store()),
+  storeEverySeconds: Number(Deno.args.find((a) => a.startsWith("--store-every="))?.slice(14)) || undefined,
 });
 
 await Promise.all([...hub.hosts.values()].map((h) => h.whenReady().catch(() => {})));

@@ -8,7 +8,7 @@ import type { DriverManifest, Mode, Values } from "../contract/mod.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { PluginHost, type Tuning } from "./host.ts";
 import type { Log } from "./log.ts";
-import { type Package, writePackage } from "./packages.ts";
+import { type Package, writePackage, writePackageTo } from "./packages.ts";
 import { inspectPlugin } from "./plugins.ts";
 import type { PluginGateway } from "./process.ts";
 import type { DeviceRecord, Origin, Registry } from "./registry.ts";
@@ -29,6 +29,18 @@ export interface DriverChoices {
 }
 
 type Who = { actor: string; via: string };
+
+/** Try something a few times over a couple of seconds before giving up on it. */
+async function patiently(what: () => Promise<void>): Promise<void> {
+  for (let tries = 0;; tries++) {
+    try {
+      return await what();
+    } catch (err) {
+      if (tries >= 20) throw err;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+}
 
 export class Devices {
   /** Drivers, by id. */
@@ -215,6 +227,79 @@ export class Devices {
     });
     for (const l of this.#onReplaced) l(host.id);
     return host;
+  }
+
+  /**
+   * Replace an added device's package with another version of it. Its name, its settings, its mode and
+   * everything a superuser allowed or refused stay as they are. The new version is unpacked and checked
+   * beside the old one first, so a package that is refused never stops the device that is running.
+   */
+  async update(
+    id: string,
+    pkg: Package,
+    change: { origin: Origin; alsoGranted: string[] },
+    who: Who,
+  ): Promise<PluginHost> {
+    const { registry, capabilities, log } = this.deps;
+    const host = this.hosts.get(id)!;
+    const was = this.record(id);
+    const scratch = `${this.deps.dataDir!.replace(/[\\/]$/, "")}/run`;
+    const staged = `${scratch}/update-${id}`, old = `${scratch}/old-${id}`;
+    await Deno.mkdir(scratch, { recursive: true });
+    await Deno.remove(staged, { recursive: true }).catch(() => {});
+    await Deno.remove(old, { recursive: true }).catch(() => {});
+    let manifest: DriverManifest;
+    try {
+      await writePackageTo(pkg, staged, id, host.manifest.name);
+      const checked = await inspectPlugin(staged, capabilities);
+      if (checked.manifest.kind !== "driver") throw new Error("the package is not a driver");
+      manifest = checked.manifest;
+    } catch (err) {
+      await Deno.remove(staged, { recursive: true }).catch(() => {});
+      throw err;
+    }
+    await host.stop();
+    try {
+      // Some systems hold on to a folder for a moment after the program in it has stopped.
+      await patiently(() => Deno.rename(host.dir, old));
+      await patiently(() => Deno.rename(staged, host.dir)).catch(async (err) => {
+        await patiently(() => Deno.rename(old, host.dir));
+        throw err;
+      });
+    } catch {
+      // What was there is still there, or was put back. Start it again as it was.
+      await Deno.remove(staged, { recursive: true }).catch(() => {});
+      await this.#make(host.manifest, host.dir, was).start();
+      for (const l of this.#onReplaced) l(id);
+      throw new Error(
+        "the new version could not be put in place, so the one that was running was started again",
+      );
+    }
+    await Deno.remove(old, { recursive: true }).catch(() => {});
+    registry.put(id, {
+      ...was,
+      granted: [...new Set([...was.granted, ...change.alsoGranted])],
+      origin: change.origin,
+    });
+    const next = this.#make(manifest, host.dir, this.record(id));
+    await next.start();
+    log.append({
+      type: "skillfully.plugin.updated",
+      source: "core",
+      subject: id,
+      ...who,
+      data: {
+        name: manifest.name,
+        from: { version: was.origin?.package?.version ?? null, sha256: was.origin?.sha256 ?? null },
+        to: { version: pkg.about.version, sha256: pkg.sha256 },
+        alsoAllowed: change.alsoGranted.filter((g) => !was.granted.includes(g)),
+        source: change.origin.store
+          ? `the store, built from ${change.origin.store.repo} at ${change.origin.store.commit}`
+          : "a package file",
+      },
+    });
+    for (const l of this.#onReplaced) l(id);
+    return next;
   }
 
   /** Stop a device a superuser added and take it, and everything the hub holds for it, away. */

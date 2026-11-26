@@ -3,10 +3,11 @@
 
 import { createHash } from "node:crypto";
 import { assert, assertEquals } from "./assert.ts";
-import { addingHub, FIXTURES, OWNER_PIN, pretendLamp, until } from "./helpers.ts";
+import { addingHub, FIXTURES, OWNER_PIN, pretendLamp, repacked, until } from "./helpers.ts";
 import { resolveNetwork } from "../core/process.ts";
 import { grantWords } from "../core/asks.ts";
 import { newKey, sign, verify } from "../core/signing.ts";
+import { Store } from "../core/store.ts";
 
 const PACKAGE = await Deno.readFile(`${FIXTURES}/companion/skillfully-test-lamp-1.0.0.tgz`);
 const SHA = createHash("sha256").update(PACKAGE).digest("hex");
@@ -29,36 +30,69 @@ const listing = (more: Record<string, unknown> = {}) => ({
 // The store's own key, and somebody else's.
 const KEY = await newKey(), STRANGER = await newKey();
 
+interface Published {
+  modules?: unknown[];
+  packageBytes?: Uint8Array;
+  /** More packages, by the path the list gives them. */
+  packages?: Record<string, Uint8Array>;
+  advise?: unknown[];
+  /** When the list says it was made. Unless given, a second later than the one before. null: it does not say. */
+  generated?: string | null;
+  /** null: no signature at all. */
+  signedBy?: string | null;
+  /** Hand out a list that differs from the one that was signed. */
+  changedAfterSigning?: boolean;
+}
+
 /**
- * A store on this computer. What it lists, what it hands out, and who signed the list can be set per test.
- * Unless told otherwise the list is signed with the store's own key.
+ * A store on this computer. What it lists, what it hands out, and who signed the list can be set per test,
+ * and it can publish again. Unless told otherwise each list is signed with the store's own key.
  */
-async function pretendStore(
-  o: {
-    modules?: unknown[];
-    packageBytes?: Uint8Array;
-    advise?: unknown[];
-    /** null: no signature at all. */
-    signedBy?: string | null;
-    /** Hand out a list that differs from the one that was signed. */
-    changedAfterSigning?: boolean;
-  } = {},
-) {
+async function pretendStore(first: Published = {}) {
   const asked: string[] = [];
-  const text = (modules: unknown[]) =>
-    new TextEncoder().encode(JSON.stringify({ format: 1, modules, advise: o.advise ?? [], plugins: [] }));
-  const list = text(o.modules ?? [listing()]);
-  const signature = o.signedBy === null ? null : await sign(list, [o.signedBy ?? KEY.privateKey]);
-  const served = o.changedAfterSigning ? text([listing({ network: ["lan", "listen"] })]) : list;
+  let made = Date.now();
+  let served = {
+    list: new Uint8Array(),
+    signature: null as string | null,
+    packages: new Map<string, Uint8Array>(),
+  };
+  const publish = async (o: Published = {}) => {
+    made += 1000;
+    const text = (modules: unknown[]) =>
+      new TextEncoder().encode(JSON.stringify({
+        format: 1,
+        ...(o.generated === null ? {} : { generated: o.generated ?? new Date(made).toISOString() }),
+        modules,
+        advise: o.advise ?? [],
+        plugins: [],
+      }));
+    const list = text(o.modules ?? [listing()]);
+    served = {
+      list: o.changedAfterSigning ? text([listing({ network: ["lan", "listen"] })]) : list,
+      signature: o.signedBy === null ? null : await sign(list, [o.signedBy ?? KEY.privateKey]),
+      packages: new Map([
+        ["/packages/lamp.tgz", o.packageBytes ?? PACKAGE],
+        ...Object.entries(o.packages ?? {}).map(([path, bytes]) =>
+          [`/${path}`, bytes] as [string, Uint8Array]
+        ),
+      ]),
+    };
+  };
+  await publish(first);
   const server = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen: () => {} }, (req) => {
     const path = new URL(req.url).pathname;
     asked.push(path);
-    if (path === "/index.json") return new Response(served as BodyInit);
-    if (path === "/index.json.sig" && signature) return new Response(signature);
-    if (path === "/packages/lamp.tgz") return new Response((o.packageBytes ?? PACKAGE) as BodyInit);
-    return new Response("not found", { status: 404 });
+    if (path === "/index.json") return new Response(served.list as BodyInit);
+    if (path === "/index.json.sig" && served.signature) return new Response(served.signature);
+    const pkg = served.packages.get(path);
+    return pkg ? new Response(pkg as BodyInit) : new Response("not found", { status: 404 });
   });
-  return { url: `http://127.0.0.1:${server.addr.port}/index.json`, asked, close: () => server.shutdown() };
+  return {
+    url: `http://127.0.0.1:${server.addr.port}/index.json`,
+    asked,
+    publish,
+    close: () => server.shutdown(),
+  };
 }
 /** A hub that knows the store's key. */
 const hubTrusting = (url: string) => addingHub(url, [KEY.publicKey]);
@@ -369,5 +403,181 @@ Deno.test("the store's reviewers can advise on what a device asks for, and a sup
     await h.close();
     await store.close();
     lamp.close();
+  }
+});
+
+type Version = { version: string };
+
+/** The test lamp as its author would publish a later version: the same module, saying it is newer. */
+const laterLamp = (version: string, more: (theirs: Record<string, unknown>) => void = () => {}) =>
+  repacked(PACKAGE, (files) => {
+    const theirs = JSON.parse(files["pkg/companion/manifest.json"]);
+    theirs.version = version;
+    more(theirs);
+    files["pkg/companion/manifest.json"] = JSON.stringify(theirs);
+  });
+const listed = (bytes: Uint8Array, version: string, more: Record<string, unknown> = {}) =>
+  listing({
+    version,
+    package: {
+      path: `packages/lamp-${version}.tgz`,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      bytes: bytes.length,
+    },
+    ...more,
+  });
+
+Deno.test("a hub notices a newer version in the store, and updating keeps everything decided for the device", async () => {
+  const store = await pretendStore(), lamp = pretendLamp();
+  const h = await hubTrusting(store.url);
+  try {
+    const got = await h.post("/admin/api/store/fetch", { id: "skillfully-test-lamp" });
+    const added = await h.post("/admin/api/module/add", {
+      upload: got.body.upload,
+      name: "Stage lamp",
+      screens: ["controls"],
+      confirm: OWNER_PIN,
+    });
+    const id = added.body.id;
+    const host = () => h.hub.hosts.get(id)!;
+    const update = (confirm?: string) =>
+      h.post("/admin/api/driver/update", { id, ...(confirm ? { confirm } : {}) });
+    await until("it describes its settings", () => !!host().settingsForm, 8000);
+    await h.post("/admin/api/driver/settings", { id, settings: { host: "127.0.0.1", port: lamp.port } });
+    await h.post("/admin/api/driver/mode", { id, mode: "act", confirm: OWNER_PIN });
+    await until("it connects", () => host().state.get("generic/reading/power") === "off", 8000);
+    const before = h.hub.devices.record(id);
+    assertEquals((await h.device(id)).update, null, "it is what the store lists");
+    assert(!(await update(OWNER_PIN)).body.ok, "there is nothing to update to");
+
+    // The store publishes a newer version, and now also allows it to open ports.
+    const v2 = await laterLamp("1.1.0");
+    await store.publish({
+      modules: [listed(v2, "1.1.0", { network: ["{host}:{port}", "listen"], tested: "real-device" })],
+      packages: { "packages/lamp-1.1.0.tgz": v2 },
+    });
+    h.hub.store.forget();
+    let offered = (await h.device(id)).update;
+    for (let i = 0; i < 200 && !offered; i++) {
+      await new Promise((r) => setTimeout(r, 25));
+      offered = (await h.device(id)).update;
+    }
+    assertEquals(offered, {
+      version: "1.1.0",
+      newer: true,
+      proven: "It has been used with the real device.",
+      source: "https://github.com/wingsixaudio/skillfully",
+      also: ["Open ports on this computer, so devices can answer it"],
+    });
+    // Seeing it changes nothing. Taking it asks for the superuser's own PIN.
+    assertEquals(h.hub.devices.record(id), before);
+    assert(!(await update()).body.ok);
+    assert(!(await update("000000")).body.ok);
+    assertEquals(host().manifest.version, "1.0.0");
+
+    const done = await update(OWNER_PIN);
+    assertEquals(done.body, { ok: true, id, version: "1.1.0" });
+    const after = h.hub.devices.record(id);
+    assertEquals(host().manifest.version, "1.1.0");
+    assertEquals(host().manifest.name, "Stage lamp", "it keeps the name it was given here");
+    assertEquals(after.settings, before.settings);
+    assertEquals(after.mode, "act");
+    assertEquals(after.granted, ["{host}:{port}", "listen"], "what it held, and what the store now allows");
+    assertEquals(after.origin?.package?.version, "1.1.0");
+    assertEquals(after.origin?.sha256, createHash("sha256").update(v2).digest("hex"));
+    assertEquals(after.origin?.added, before.origin?.added, "it is the same device, added when it was");
+    assertEquals(after.origin?.store?.tested, "real-device");
+    assertEquals(
+      JSON.parse(await Deno.readTextFile(`${h.dataDir}/plugins/${id}/plugin.json`)).version,
+      "1.1.0",
+    );
+    for (const left of [`update-${id}`, `old-${id}`]) {
+      assert(!(await Deno.stat(`${h.dataDir}/run/${left}`).catch(() => null)), `${left} was cleared away`);
+    }
+    // It comes back as it was: connected, acting, and still on the screen it was given to.
+    await until("it connects again", () => host().state.get("generic/reading/power") === "off", 8000);
+    assert((await host().set("generic/action/on", true, { via: "test" })).ok);
+    assertEquals(h.hub.approvals.of("controls"), [id]);
+    const logged = h.hub.log.read({ type: "skillfully.plugin.updated", limit: 5 })[0];
+    assertEquals(logged.actor, h.owner.id);
+    assertEquals(
+      [(logged.data.from as Version).version, (logged.data.to as Version).version, logged.data.alsoAllowed],
+      ["1.0.0", "1.1.0", ["listen"]],
+    );
+    assertEquals((await h.device(id)).update, null);
+    assert((await update(OWNER_PIN)).body.message.includes("already the version"));
+
+    // A version this hub cannot run is refused, and the one that is running carries on untouched.
+    const broken = await laterLamp("2.0.0", (theirs) => {
+      (theirs.runtime as Record<string, unknown>).apiVersion = "2.0.0";
+    });
+    await store.publish({
+      modules: [listed(broken, "2.0.0")],
+      packages: { "packages/lamp-2.0.0.tgz": broken },
+    });
+    h.hub.store.forget();
+    const refused = await update(OWNER_PIN);
+    assert(
+      !refused.body.ok && refused.body.message.includes("this hub runs modules built for 1.x"),
+      refused.body.message,
+    );
+    assertEquals(host().manifest.version, "1.1.0");
+    assertEquals(host().status, "running");
+    assertEquals(h.hub.devices.record(id), after);
+
+    // Something added from a file has no store to ask.
+    const seen = await h.send(PACKAGE);
+    const byHand = await h.post("/admin/api/module/add", {
+      upload: seen.body.upload,
+      name: "Spare",
+      confirm: OWNER_PIN,
+    });
+    const no = await h.post("/admin/api/driver/update", { id: byHand.body.id, confirm: OWNER_PIN });
+    assert(!no.body.ok && no.body.message.includes("did not come from the store"));
+  } finally {
+    await h.close();
+    await store.close();
+    lamp.close();
+  }
+});
+
+Deno.test("a hub refuses a signed list that is older than one it has read, even after a restart", async () => {
+  const store = await pretendStore({ generated: "2026-11-20T10:00:00.000Z" });
+  // What a hub keeps from one start to the next.
+  let kept: string | undefined;
+  const newest = { get: () => kept, set: (made: string) => (kept = made) };
+  const hub = () => new Store(store.url, [KEY.publicKey], newest);
+  const reading = (s: Store) =>
+    s.list().then((l) => l.map((m) => m.version).join(), (e) => (e as Error).message);
+  try {
+    assertEquals(await reading(hub()), "1.0.0");
+    assertEquals(kept, "2026-11-20T10:00:00.000Z");
+    // The same list again is not older than itself.
+    assertEquals(await reading(hub()), "1.0.0");
+
+    // Somebody who can change what the store's address serves hands out last month's list. Its signature
+    // is real: the store did sign it, last month.
+    await store.publish({ generated: "2026-10-20T10:00:00.000Z", modules: [listing({ network: ["lan"] })] });
+    const old = await reading(hub());
+    assert(old.includes("older than one it has already read"), old);
+    assertEquals(kept, "2026-11-20T10:00:00.000Z", "and it is not remembered as the newest");
+
+    // A newer list is read, and becomes the one to beat.
+    await store.publish({ generated: "2026-11-25T10:00:00.000Z", modules: [listing({ version: "1.2.0" })] });
+    assertEquals(await reading(hub()), "1.2.0");
+    assertEquals(kept, "2026-11-25T10:00:00.000Z");
+
+    // A signed list has to say when it was made, or it could never be told from an old one.
+    await store.publish({ generated: null });
+    assert((await reading(hub())).includes("not one this hub understands"));
+    await store.publish({ generated: "last Tuesday" });
+    assert((await reading(hub())).includes("not one this hub understands"));
+
+    // A hub with no key for this store has nobody's word to compare, and reads what it is given.
+    await store.publish({ generated: "2026-10-20T10:00:00.000Z" });
+    assertEquals(await reading(new Store(store.url, [], newest)), "1.0.0");
+    assertEquals(kept, "2026-11-25T10:00:00.000Z");
+  } finally {
+    await store.close();
   }
 });

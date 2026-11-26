@@ -131,9 +131,23 @@ async function limited(res: Response, max: number): Promise<Uint8Array> {
 const UNREACHABLE =
   "The store could not be reached from this hub. You can still add a device from a package file.";
 
+const OLDER =
+  "What this hub was given as the store's list is older than one it has already read, so none of it is used. You can still add a device from a package file.";
+const RETRY_MS = 60 * 1000;
+
+/** Where a hub keeps the date of the newest signed list it has read, from one start to the next. */
+export interface Newest {
+  get(): string | undefined;
+  set(made: string): void;
+}
+
 export class Store {
   #url: string | undefined;
   #keys: string[];
+  #newest: Newest | undefined;
+  #failedAt = 0;
+  /** How long a list that was read is used before the store is asked again. */
+  #keptMs = KEPT_MS;
   #list: StoreModule[] | undefined;
   #general: Advice[] = [];
   #readAt = 0;
@@ -143,9 +157,11 @@ export class Store {
    * No address means this hub does not use a store. A package file can still be added by hand.
    * With keys, only a list signed by one of them is read at all.
    */
-  constructor(url: string | undefined, keys: string[] = []) {
+  constructor(url: string | undefined, keys: string[] = [], newest?: Newest, everySeconds?: number) {
     this.#url = url;
     this.#keys = keys;
+    this.#newest = newest;
+    if (everySeconds && everySeconds > 0) this.#keptMs = everySeconds * 1000;
   }
 
   get on(): boolean {
@@ -160,7 +176,7 @@ export class Store {
   /** What the store lists. Read again after a few minutes. Throws a plain sentence when it cannot be read. */
   async list(): Promise<StoreModule[]> {
     if (!this.#url) throw new Error("This hub is not set up to use a store.");
-    if (this.#list && Date.now() - this.#readAt < KEPT_MS) return this.#list;
+    if (this.#list && Date.now() - this.#readAt < this.#keptMs) return this.#list;
     return await (this.#reading ??= this.#read().finally(() => (this.#reading = undefined)));
   }
 
@@ -185,7 +201,7 @@ export class Store {
         );
       }
     }
-    let parsed: { format?: unknown; modules?: unknown; advise?: unknown };
+    let parsed: { format?: unknown; generated?: unknown; modules?: unknown; advise?: unknown };
     try {
       parsed = JSON.parse(new TextDecoder().decode(bytes));
     } catch {
@@ -193,6 +209,17 @@ export class Store {
     }
     if (parsed?.format !== 1 || !Array.isArray(parsed.modules)) {
       throw new Error("The store's list is not one this hub understands. It may need a newer hub.");
+    }
+    if (this.signed) {
+      // A signed list says when it was made. One made before a list this hub has already read is
+      // somebody handing out an old list with its old signature, and is not used.
+      const made = typeof parsed.generated === "string" ? Date.parse(parsed.generated) : NaN;
+      if (Number.isNaN(made)) {
+        throw new Error("The store's list is not one this hub understands. It may need a newer hub.");
+      }
+      const seen = Date.parse(this.#newest?.get() ?? "");
+      if (made < seen) throw new Error(OLDER);
+      if (!(made <= seen)) this.#newest?.set(new Date(made).toISOString());
     }
     this.#list = parsed.modules.slice(0, 5000).map(entry).filter((m): m is StoreModule => m !== null);
     this.#general = advice(parsed.advise);
@@ -207,9 +234,32 @@ export class Store {
    */
   advice(id?: string): Advice[][] {
     if (!this.#url) return [];
-    if (Date.now() - this.#readAt >= KEPT_MS) this.list().catch(() => {});
+    this.#refresh();
     const lists = [this.#list?.find((m) => m.id === id)?.advise ?? [], this.#general];
     return this.signed ? lists : lists.map((l) => l.filter((a) => a.say === "no"));
+  }
+
+  /**
+   * What the store lists under this id, as far as this hub has heard. Never waits, like advice().
+   * It is how a hub notices that the store has a newer version of something it runs.
+   */
+  listed(id: string): StoreModule | undefined {
+    if (!this.#url) return undefined;
+    this.#refresh();
+    return this.#list?.find((m) => m.id === id);
+  }
+
+  /** Read the list afresh the next time it is wanted, instead of in a few minutes. */
+  forget(): void {
+    this.#readAt = 0;
+    this.#failedAt = 0;
+  }
+
+  /** Read the list again for next time if what this hub has is old. A store that cannot be read is left alone for a minute. */
+  #refresh(): void {
+    const now = Date.now();
+    if (now - this.#readAt < this.#keptMs || now - this.#failedAt < RETRY_MS) return;
+    this.list().catch(() => (this.#failedAt = Date.now()));
   }
 
   /** Download one package and check it is the one the list describes. Nothing in it is run. */
