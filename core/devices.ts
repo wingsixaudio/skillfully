@@ -9,6 +9,7 @@ import type { Capabilities } from "./capabilities.ts";
 import { PluginHost, type Tuning } from "./host.ts";
 import type { Log } from "./log.ts";
 import { type Package, writePackage } from "./packages.ts";
+import { inspectPlugin } from "./plugins.ts";
 import type { PluginGateway } from "./process.ts";
 import type { DeviceRecord, Origin, Registry } from "./registry.ts";
 
@@ -181,6 +182,12 @@ export class Devices {
     who: Who,
   ): Promise<PluginHost> {
     const written = await writePackage(pkg, this.deps.dataDir!, { name: chosen.name, taken });
+    // Checked on the way in like any plugin folder, and known from here on by where it really is.
+    const { manifest, dir } = await inspectPlugin(written.dir, this.deps.capabilities).catch(async (err) => {
+      await Deno.remove(written.dir, { recursive: true }).catch(() => {});
+      throw err;
+    });
+    if (manifest.kind !== "driver") throw new Error("the package is not a driver");
     this.deps.registry.put(written.id, {
       mode: "listen",
       settings: chosen.settings,
@@ -188,7 +195,7 @@ export class Devices {
       denied: [],
       origin: chosen.origin,
     });
-    const host = this.adopt(written.manifest, written.dir);
+    const host = this.adopt(manifest, dir);
     await host.start();
     this.deps.log.append({
       type: "skillfully.plugin.added",
