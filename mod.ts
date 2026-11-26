@@ -20,8 +20,10 @@ export { networkNotes, type Package, readPackage, writePackage, type Written } f
 // What a device asks for or tried, in the words a hub would use.
 export { type Ask, attemptWords, classify, covered, grantWords } from "./core/asks.ts";
 
-// The store's list, as a hub reads it.
-export { STORE_URL, type StoreModule } from "./core/store.ts";
+// The store's list, as a hub reads it, and the signature that says the store published it.
+export { STORE_KEYS, STORE_URL, type StoreModule } from "./core/store.ts";
+export { newKey, sign, verify } from "./core/signing.ts";
+export { type Advice, advised, WHERES } from "./core/asks.ts";
 
 // Text from a plugin, made safe to put in a report.
 export { safe } from "./tools/plugin_report.ts";

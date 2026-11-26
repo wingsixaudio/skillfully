@@ -209,6 +209,11 @@ form > button {
   font-size: 13px;
   display: block;
 }
+.advice {
+  color: var(--dim);
+  font-size: 13px;
+  display: block;
+}
 dialog {
   background: var(--panel);
   color: var(--text);

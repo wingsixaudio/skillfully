@@ -158,13 +158,14 @@ export function pretendLamp() {
  * A claimed hub that devices can be added to, as its admin page would: with a folder to keep them in,
  * the Controls screen to give them to, and a store if an address for one is given.
  */
-export async function addingHub(storeUrl?: string) {
+export async function addingHub(storeUrl?: string, storeKeys?: string[]) {
   const dataDir = await Deno.makeTempDir({ prefix: "skillfully-data-" });
   const hub = await startHub({
     dbPath: ":memory:",
     plugins: [{ dir: CONTROLS }],
     dataDir,
     ...(storeUrl ? { storeUrl } : {}),
+    ...(storeKeys ? { storeKeys } : {}),
   });
   const claimed = await hub.accounts.claim(hub.accounts.claimCode, "Owner", OWNER_PIN, "test");
   if (!claimed.ok) throw new Error(claimed.message);

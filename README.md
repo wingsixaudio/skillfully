@@ -80,8 +80,13 @@ The same thing from a command line, for a hub with no screen:
 `deno task add-module module.tgz --set
 host=192.168.1.50`, then restart the hub.
 
-`deno task hub --no-store` runs a hub that never looks at the store, and `--store=<address>` points it at
-another one.
+The store signs its list, and the hub checks the signature before it believes any of it. When a device asks to
+reach something, the page also shows what the store's reviewers say about it, if they have said anything. That
+is advice. You still decide.
+
+`deno task hub --no-store` runs a hub that never looks at the store. `--store=<address>` points it at another
+one, and `--store-key=<that store's public key>` says who signs its list. Without a key, a store's list is
+nobody's word: you can add from it, and each thing asks you before it reaches anything.
 
 The first run downloads one library (the JSON Schema validator). After that it runs offline.
 
