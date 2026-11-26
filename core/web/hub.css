@@ -514,3 +514,7 @@ button.chip.on {
   margin: 0;
   width: auto;
 }
+button:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
