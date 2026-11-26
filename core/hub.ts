@@ -5,9 +5,19 @@
 // screen is for: those arrive as capability definitions, drivers and screens.
 
 import { DatabaseSync } from "node:sqlite";
-import type { Ability, Mode, ScreenManifest, SkillManifest, Value, Values } from "../contract/mod.ts";
+import { checkManifest } from "../contract/mod.ts";
+import type {
+  Ability,
+  DriverManifest,
+  Mode,
+  ScreenManifest,
+  SkillManifest,
+  Value,
+  Values,
+} from "../contract/mod.ts";
 import { Access, ANY } from "./access.ts";
 import { Approvals } from "./approvals.ts";
+import { attemptWords, grantWords } from "./asks.ts";
 import { Accounts, type Person } from "./accounts.ts";
 import { Capabilities, CAPABILITIES_DIR } from "./capabilities.ts";
 import { PluginHost, type Tuning } from "./host.ts";
@@ -130,6 +140,9 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   const addedRoot = opts.dataDir ? `${opts.dataDir.replace(/[\\/]$/, "")}/plugins` : undefined;
   if (addedRoot) await Deno.mkdir(addedRoot, { recursive: true });
   const addedReal = addedRoot ? `${await realPath(addedRoot)}/` : undefined;
+  // Scratch files the runtime writes for the hub to read. Nothing in here is kept.
+  const runDir = opts.dataDir ? `${opts.dataDir.replace(/[\\/]$/, "")}/run` : "";
+  if (runDir) await Deno.mkdir(runDir, { recursive: true });
 
   /** Read and check one plugin folder and take it in. Throws with a plain reason when it cannot be. */
   async function load(cfg: PluginConfig): Promise<PluginHost | undefined> {
@@ -142,12 +155,17 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     else {
       const added = !!addedReal && dir.startsWith(addedReal);
       const install = added ? await readInstall(dir) : {};
+      // For a device a superuser added, the runtime notes what it tries, so the hub can ask about each thing.
+      const tuning: Tuning = {
+        ...cfg.tuning,
+        ...(added ? { auditPath: `${runDir}/${manifest.id}.jsonl`, denied: install.denied ?? [] } : {}),
+      };
       chosen.set(manifest.id, {
         dir,
         settings: cfg.settings ?? {},
         added,
         ...(install.module ? { module: install.module } : {}),
-        ...(cfg.tuning ? { tuning: cfg.tuning } : {}),
+        tuning,
       });
       const host = new PluginHost(
         manifest,
@@ -157,7 +175,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         log,
         gateway,
         capabilities,
-        cfg.tuning,
+        tuning,
       );
       hosts.set(manifest.id, host);
       return host;
@@ -325,8 +343,8 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         ok: true,
         upload: pkg.sha256,
         module: pkg.module,
-        // What each choice of reach would let it do, in words, before anything is decided.
-        notes: { lan: networkNotes(["lan", "listen"]), one: networkNotes(["that one address", "listen"]) },
+        // What it will and will not be able to do, in words, before anything is decided.
+        notes: networkNotes([]),
         screens: fits(["generic"]).map((m) => ({ id: m.id, name: m.name })),
       });
     } catch (err) {
@@ -335,20 +353,25 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   }
 
   /** Stop a driver and start it again with other settings. Its permissions can depend on them. */
-  async function restart(id: string, settings: Record<string, unknown>): Promise<void> {
+  async function restart(
+    id: string,
+    settings: Record<string, unknown>,
+    change: { manifest?: DriverManifest; denied?: string[] } = {},
+  ): Promise<void> {
     const old = hosts.get(id)!;
     const was = chosen.get(id)!;
     await old.stop();
-    chosen.set(id, { ...was, settings });
+    const tuning = { ...was.tuning, ...(change.denied ? { denied: change.denied } : {}) };
+    chosen.set(id, { ...was, settings, tuning });
     const host = new PluginHost(
-      old.manifest,
+      change.manifest ?? old.manifest,
       old.dir,
       settings,
       old.mode,
       log,
       gateway,
       capabilities,
-      was.tuning,
+      tuning,
     );
     hosts.set(id, host);
     attach(host);
@@ -537,9 +560,10 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         if (!up || up.pkg.sha256 !== b.upload || Date.now() - up.at > UPLOAD_KEPT_MS) {
           return refuse(400, "Choose the package again.");
         }
-        const reach = String(b.reach ?? "lan").trim();
+        // Unless told otherwise a device starts with no access to the network and asks as it goes.
+        const reach = String(b.reach ?? "ask").trim();
         const one = /^[A-Za-z0-9.-]{1,253}:[0-9]{1,5}$/.test(reach);
-        if (reach !== "lan" && !one) {
+        if (reach !== "ask" && reach !== "lan" && !one) {
           return refuse(400, "Write the address with its port, like 192.168.1.50:9999.");
         }
         const wanted = Array.isArray(b.screens) ? b.screens.map(String) : [];
@@ -552,7 +576,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         try {
           const installed = await writeModule(up.pkg, opts.dataDir!, {
             name: String(b.name ?? ""),
-            network: [reach, "listen"],
+            network: reach === "ask" ? [] : [reach, "listen"],
             mode: "listen",
             taken: (taken) => hosts.has(taken) || screens.has(taken) || skills.has(taken),
           });
@@ -614,6 +638,57 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         });
         await restart(id, next);
         return json({ ok: true, changed });
+      }
+      case "driver/allow": {
+        // A superuser's answers to what a device asked for, and anything they take back. It restarts with them.
+        const host = hosts.get(id);
+        const mine = chosen.get(id);
+        if (!host || !mine?.added) return refuse(400, "This device does not ask before reaching things.");
+        const list = (v: unknown) => (Array.isArray(v) ? [...new Set(v.map(String))] : []);
+        const allow = list(b.allow), deny = list(b.deny), revoke = list(b.revoke);
+        if (allow.some((v) => !host.asks.has(v)) || deny.some((v) => !host.asks.has(v))) {
+          return refuse(400, "It is no longer asking for one of those. Look again.");
+        }
+        const held = host.manifest.permissions?.network ?? [];
+        if (revoke.some((g) => !held.includes(g))) return refuse(400, "It does not hold one of those.");
+        if (!allow.length && !deny.length && !revoke.length) {
+          return json({ ok: true, allowed: [], denied: [], revoked: [] });
+        }
+        const no = await sure();
+        if (no) return no;
+        const network = [
+          ...new Set([
+            ...held.filter((g) => !revoke.includes(g)),
+            ...allow.map((v) => host.asks.get(v)!.grant),
+          ]),
+        ];
+        const checked = checkManifest({
+          ...host.manifest,
+          permissions: { ...host.manifest.permissions, network },
+        });
+        if (!checked.ok || checked.value.kind !== "driver") {
+          return refuse(400, "That is more than one device can be given.");
+        }
+        await Deno.writeTextFile(`${mine.dir}/plugin.json`, JSON.stringify(checked.value, null, 2) + "\n");
+        const denied = [...new Set([...(mine.tuning?.denied ?? []), ...deny])].filter((v) =>
+          !allow.includes(v)
+        );
+        await updateInstall(mine.dir, { denied });
+        log.append({
+          type: "skillfully.plugin.allowed",
+          source: "core",
+          subject: id,
+          actor: me.id,
+          via: "admin",
+          data: {
+            allowed: allow.map((v) => host.asks.get(v)!.grant),
+            denied: deny,
+            revoked: revoke,
+            now: network,
+          },
+        });
+        await restart(id, mine.settings, { manifest: checked.value, denied });
+        return json({ ok: true, allowed: allow, denied: deny, revoked: revoke });
       }
       case "driver/remove": {
         const host = hosts.get(id);
@@ -830,7 +905,10 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
                 return {
                   ...describe(h),
                   permissions: h.manifest.permissions ?? {},
-                  reach: networkNotes(h.manifest.permissions?.network ?? []).slice(0, mine?.added ? 4 : 1),
+                  // A driver that came with the hub holds what its manifest says. It does not ask as it goes.
+                  reach: (h.manifest.permissions?.network ?? []).length
+                    ? networkNotes(h.manifest.permissions?.network ?? []).slice(0, 1)
+                    : ["It reaches nothing on the network."],
                   added: !!mine?.added,
                   module: mine?.module ?? null,
                   form: mine?.added ? h.settingsForm ?? null : null,
@@ -839,6 +917,12 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
                     ? Object.fromEntries(Object.entries(mine.settings).filter(([k]) => !secret.has(k)))
                     : {},
                   secretsSet: mine?.added ? Object.keys(mine.settings).filter((k) => secret.has(k)) : [],
+                  // What it is waiting on a superuser for, what it holds, and what it tried that is never allowed.
+                  asks: [...h.asks.values()],
+                  grants: mine?.added
+                    ? (h.manifest.permissions?.network ?? []).map((g) => ({ grant: g, words: grantWords(g) }))
+                    : [],
+                  attempts: [...h.attempts].map(([kind, times]) => ({ words: attemptWords(kind), times })),
                   usedBy: [...screens.values()].filter((sc) => approvals.allowed(sc.manifest.id, h.id))
                     .map((sc) => sc.manifest.name),
                 };

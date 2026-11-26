@@ -14,6 +14,7 @@ import type {
   Values,
 } from "../contract/mod.ts";
 import type { Capabilities } from "./capabilities.ts";
+import { type Ask, classify, covered } from "./asks.ts";
 import { type Log, newId } from "./log.ts";
 import { type PluginGateway, PluginProcess, PluginRefused, resolveNetwork, usageOf } from "./process.ts";
 
@@ -39,6 +40,10 @@ export interface Tuning {
   pollMs?: number;
   /** The span processor use is averaged over. */
   cpuWindowMs?: number;
+  /** Where the runtime notes what this plugin tries to use. With it, the hub can ask a superuser about each. */
+  auditPath?: string;
+  /** Addresses a superuser has already said no to, so they are not asked about again. */
+  denied?: string[];
 }
 
 interface Pending {
@@ -70,6 +75,12 @@ export class PluginHost {
   health: { status: HealthStatus; reason?: string } = { status: "down", reason: "not started" };
   /** The settings this driver says it takes, if it has said. */
   settingsForm: SettingsField[] | undefined;
+  /** What it tried to reach and was not allowed, waiting for a superuser's answer. By address. */
+  asks = new Map<string, Ask>();
+  /** What it tried that the hub never allows, by kind, with how often. */
+  attempts = new Map<string, number>();
+  #auditAt = 0;
+  #auditTick = 0;
   status: HostStatus = "down";
   restarts = 0;
 
@@ -165,7 +176,12 @@ export class PluginHost {
     this.#exitBecause = undefined;
     try {
       const network = resolveNetwork(this.manifest, this.settings);
+      if (this.tuning.auditPath) {
+        await Deno.writeFile(this.tuning.auditPath, new Uint8Array());
+        this.#auditAt = 0;
+      }
       this.#proc = await PluginProcess.start({
+        ...(this.tuning.auditPath ? { audit: this.tuning.auditPath } : {}),
         dir: this.dir,
         manifest: this.manifest,
         settings: this.settings,
@@ -533,9 +549,72 @@ export class PluginHost {
     for (const l of this.#healthListeners) l();
   }
 
+  /** What this plugin holds on the network right now, as the grants a superuser would recognize. */
+  #grants(): string[] {
+    const out = [`127.0.0.1:${this.gateway.port}`];
+    for (const entry of this.manifest.permissions?.network ?? []) {
+      if (entry === "lan" || entry === "listen") out.push(entry);
+      else {
+        try {
+          out.push(...resolveNetwork({ ...this.manifest, permissions: { network: [entry] } }, this.settings));
+        } catch { /* a setting it needs is not filled in yet, so this grants nothing */ }
+      }
+    }
+    return out;
+  }
+
+  /** Read what the runtime noted since last time, and turn what was refused into questions. */
+  async #readAudit(): Promise<void> {
+    const path = this.tuning.auditPath;
+    if (!path) return;
+    let bytes: Uint8Array;
+    try {
+      bytes = await Deno.readFile(path);
+    } catch {
+      return;
+    }
+    if (bytes.length < this.#auditAt) this.#auditAt = 0;
+    const fresh = bytes.subarray(this.#auditAt);
+    const end = fresh.lastIndexOf(10); // only whole lines
+    if (end < 0) return;
+    this.#auditAt += end + 1;
+    const grants = this.#grants();
+    let asked = false;
+    for (const line of new TextDecoder().decode(fresh.subarray(0, end)).split("\n")) {
+      let note: { permission?: unknown; value?: unknown };
+      try {
+        note = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const permission = String(note.permission ?? ""), value = String(note.value ?? "");
+      if (permission === "net") {
+        if (value.includes("://") || covered(value, grants) || this.tuning.denied?.includes(value)) continue;
+        const ask = classify(value);
+        if (!ask || this.asks.has(value)) continue;
+        this.asks.set(value, ask);
+        asked = true;
+        this.#plog({
+          type: "skillfully.plugin.asked",
+          source: this.#source,
+          subject: this.id,
+          data: { value, words: ask.words },
+        });
+      } else if (permission && !(permission === "read" && value.replaceAll("\\", "/").startsWith(this.dir))) {
+        this.attempts.set(permission, (this.attempts.get(permission) ?? 0) + 1);
+      }
+    }
+    // The file is the runtime's scratch paper. Once read, a long one is cleared.
+    if (bytes.length > 512 * 1024 && this.#auditAt === bytes.length) {
+      await Deno.truncate(path, 0).then(() => (this.#auditAt = 0), () => {});
+    }
+    if (asked) { for (const l of this.#healthListeners) l(); }
+  }
+
   /** Runs a few times a second: silence, flooding, memory and processor. */
   async #watch(): Promise<void> {
     const now = Date.now();
+    if (this.#auditTick++ % 4 === 0) await this.#readAudit();
 
     // One summary a second at most, however long the flood lasts.
     if (

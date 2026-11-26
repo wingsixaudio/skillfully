@@ -102,6 +102,13 @@ const unsupported = new Set<string>();
 let link: PluginLink | undefined;
 let refreshing: ReturnType<typeof setTimeout> | undefined;
 
+/** The runtime's own wording for a refusal, said the way a person would. */
+const plainer = (text: string) =>
+  text.replace(
+    /(NotCapable: )?Requires net access to "([^"]+)", run again with the --allow-net flag/g,
+    "it is not allowed to reach $2",
+  );
+
 const asText = (v: unknown): string => {
   const text = v === undefined || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
   return text.slice(0, TEXT_MAX);
@@ -176,7 +183,7 @@ function fromModule(m: Wire): void {
       break;
     case "set-status": {
       const status = String(data?.status ?? "");
-      const said = data?.message ? `: ${asText(data.message).slice(0, 200)}` : "";
+      const said = data?.message ? `: ${plainer(asText(data.message)).slice(0, 200)}` : "";
       const health = HEALTH[status] ?? "down";
       link?.health(
         health,

@@ -43,6 +43,7 @@ const STYLE = `
   .step.done i { background:var(--ok); border-color:var(--ok); } .step.done span { color:var(--dim); }
   .step small { display:block; color:var(--dim); font-weight:400; font-size:13px; }
   .status { font-size:14px; margin:6px 0 2px; } .status.ok { color:var(--ok); } .status.bad { color:var(--bad); }
+  .status.wait { color:var(--accent); }
   .help { font-size:13px; color:var(--dim); margin:4px 0 0; }
   .facts { margin:10px 0 0; padding-left:18px; font-size:14px; color:var(--dim); line-height:1.45; }
   .about { background:var(--rail); border-radius:12px; padding:12px 14px; margin-top:14px; }
@@ -374,6 +375,7 @@ export function adminPage(): string {
   const STATE = { running: "Running", starting: "Starting", quarantined: "Held by the hub", down: "Stopped", stopped: "Stopped" };
   function statusOf(d) {
     if (d.status === "quarantined") return ["The hub stopped it for misbehaving. Release it to try again.", "bad"];
+    if (d.asks.length) return ["It is waiting for you. It asks to reach " + (d.asks.length === 1 ? "something" : d.asks.length + " things") + " before it can go on.", "wait"];
     if (d.status !== "running") return [d.status === "starting" ? "Starting" : "Not running", d.status === "starting" ? "" : "bad"];
     if (d.health.status === "ok") return ["Connected to its device", "ok"];
     return [d.health.reason || "Not ready", d.health.status === "degraded" ? "" : "bad"];
@@ -386,11 +388,14 @@ export function adminPage(): string {
       item.append(el("div", {}, el("span", { className: "chip", textContent: STATE[d.status] || d.status }), el("span", { className: "chip" + (d.mode === "act" ? " on" : ""), textContent: d.mode === "act" ? "Act" : "Listen" })));
       const [words, kind] = statusOf(d);
       item.append(el("p", { className: "status " + kind, textContent: words }));
-      item.append(el("p", { className: "help", textContent: d.reach[0] + (d.mode === "act" ? "" : " In Listen, nothing is sent to it.") }));
+      const reachNow = d.added ? (d.grants.length ? "It may: " + d.grants.map((g) => g.words.charAt(0).toLowerCase() + g.words.slice(1)).join("; ") + "." : "It has no access to your network.") : d.reach[0];
+      item.append(el("p", { className: "help", textContent: reachNow + (d.mode === "act" ? "" : " In Listen, nothing is sent to it.") }));
       item.append(el("p", { className: "help", textContent: d.usedBy.length ? "Used by: " + d.usedBy.join(", ") + "." : "No screen can use it yet. Choose which under Screens." }));
       const row = el("div", { className: "row", style: "margin-top:10px" });
       const btn = (text, fn) => { const b = el("button", { className: "small quiet", type: "button", textContent: text }); b.onclick = fn; row.append(b); return b; };
+      if (d.asks.length) { const b = btn("See what it asks for", () => openAccess(d.id)); b.className = "small"; }
       if (d.added) btn("Settings", () => openSettings(d.id));
+      if (d.added && !d.asks.length && d.grants.length) btn("Network access", () => openAccess(d.id));
       btn(d.mode === "act" ? "Switch to Listen" : "Switch to Act", () => ask((d.mode === "act" ? "Stop sending changes to " : "Start sending changes to ") + d.name, (x) => confirmField(x),
         () => call("/admin/api/driver/mode", { id: d.id, mode: d.mode === "act" ? "listen" : "act", confirm: $("confirm").value }), "Switch"));
       if (d.status === "quarantined") btn("Release", async () => { await call("/admin/api/driver/release", { id: d.id }); load(); });
@@ -398,6 +403,34 @@ export function adminPage(): string {
         () => call("/admin/api/driver/remove", { id: d.id, confirm: $("confirm").value }), "Remove"));
       item.append(row); box.append(item);
     }
+  }
+
+  // What a device asks to reach, and what it may reach now. A superuser answers; nothing is allowed by default.
+  function openAccess(id) {
+    const d = drivers.find((x) => x.id === id);
+    if (!d) return;
+    ask(d.asks.length ? "What " + d.name + " asks for" : "What " + d.name + " may reach", (x) => {
+      if (d.asks.length) {
+        x.append(el("p", { className: "dim", textContent: "Tick what makes sense for this device. It gets nothing you leave unticked, and it may ask again as it gets further." }));
+        for (const a of d.asks) {
+          const box = el("input", { type: "checkbox", value: a.value, checked: a.usual, className: "askBox" });
+          x.append(el("label", { className: "check" }, box, el("span", {}, a.words + ".", a.caution ? el("span", { className: "caution", textContent: a.caution }) : "")));
+        }
+        x.append(el("label", { className: "check", style: "margin-top:14px" }, el("input", { type: "checkbox", id: "stopAsking" }), el("span", { textContent: "Do not ask me again about the ones I left unticked" })));
+      }
+      if (d.grants.length) {
+        x.append(el("p", { className: "dim", style: "margin-top:16px", textContent: "It may already do these. Tick one to take it away." }));
+        for (const g of d.grants) x.append(el("label", { className: "check" }, el("input", { type: "checkbox", value: g.grant, className: "revokeBox" }), el("span", { textContent: g.words + "." })));
+      }
+      for (const t of d.attempts) x.append(el("p", { className: "help", textContent: "It also tried to " + t.words + (t.times > 1 ? ", " + t.times + " times" : "") + ". The hub never allows that." }));
+      x.append(el("p", { className: "help", style: "margin-top:14px", textContent: "Saving restarts this device." }));
+      confirmField(x);
+    }, () => {
+      const picked = (cls) => [...document.querySelectorAll("." + cls + ":checked")].map((i) => i.value);
+      const allow = picked("askBox");
+      const deny = $("stopAsking") && $("stopAsking").checked ? d.asks.map((a) => a.value).filter((v) => !allow.includes(v)) : [];
+      return call("/admin/api/driver/allow", { id, allow, deny, revoke: picked("revokeBox"), confirm: $("confirm").value });
+    }, d.asks.length ? "Allow what is ticked" : "Save");
   }
 
   // A device's own settings, drawn from what it says it takes.
@@ -463,12 +496,9 @@ export function adminPage(): string {
         const m = r.module;
         rest.append(el("div", { className: "about" }, el("b", { textContent: m.makes || m.name }), el("span", { textContent: "Module " + m.name + " " + m.version + (m.license ? ", " + m.license + " license" : "") + (m.description ? ". " + m.description : "") })));
         input(rest, "devName", "What do you call this device?", { value: m.makes || m.name, required: true, maxLength: 80 });
-        rest.append(el("label", { textContent: "What may it reach?" }));
         const facts = el("ul", { className: "facts" });
-        const one = el("input", { id: "reachOne", placeholder: "192.168.1.50:9999", hidden: true, "aria-label": "The one address it may reach, with its port" });
-        const show = () => { const only = $("reachPick").value === "one"; one.hidden = !only; one.required = only; facts.innerHTML = ""; for (const n of (only ? r.notes.one : r.notes.lan)) facts.append(el("li", { textContent: n })); };
-        rest.append(el("select", { id: "reachPick", onchange: show }, el("option", { value: "lan", textContent: "Devices on your local network (the usual choice)" }), el("option", { value: "one", textContent: "Only one address" })), one, facts);
-        show();
+        for (const n of r.notes) facts.append(el("li", { textContent: n }));
+        rest.append(facts);
         rest.append(el("label", { textContent: "Which screens may use it?" }));
         if (!r.screens.length) rest.append(el("p", { className: "dim", textContent: "No screen on this hub works with it yet." }));
         for (const sc of r.screens) rest.append(el("label", { className: "check" }, el("input", { type: "checkbox", value: sc.id, className: "useScreen" }), el("span", { textContent: sc.name })));
@@ -478,8 +508,7 @@ export function adminPage(): string {
       };
     }, async () => {
       if (!seen) return { ok: false, message: "Choose the package first." };
-      const r = await call("/admin/api/module/add", { upload: seen.upload, name: $("devName").value, reach: $("reachPick").value === "one" ? $("reachOne").value.trim() : "lan",
-        screens: [...document.querySelectorAll(".useScreen:checked")].map((i) => i.value), confirm: $("confirm").value });
+      const r = await call("/admin/api/module/add", { upload: seen.upload, name: $("devName").value, screens: [...document.querySelectorAll(".useScreen:checked")].map((i) => i.value), confirm: $("confirm").value });
       if (r.ok) { say("driversMsg", r.name + " was added. Fill in its settings next.", "ok"); setTimeout(async () => { await load(); openSettings(r.id); }, 300); }
       return r;
     }, "Add device");

@@ -76,7 +76,7 @@ async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
 }
 
 export interface InstallOptions {
-  /** What the module may reach. Unless told otherwise: the local network, and ports to be answered on. */
+  /** What the module may reach to begin with. Unless told otherwise, nothing: it asks as it goes. */
   network?: string[];
   /** Handed to the module as its settings, over its own defaults. */
   settings?: Record<string, unknown>;
@@ -113,7 +113,11 @@ export function networkNotes(network: string[]): string[] {
     notes.push("It may reach any device on your local network, and nothing on the internet.");
   } else if (named.length) {
     notes.push(`It may reach ${named.join(" and ")}, and nothing else on the network.`);
-  } else notes.push("It may reach nothing on the network.");
+  } else if (!network.length) {
+    notes.push(
+      "It starts with no access to your network. When it tries to reach something, you are asked first.",
+    );
+  }
   if (network.includes("listen")) notes.push("It may open ports on this computer for devices to answer on.");
   notes.push("It can read its own folder, and no other file on this computer.");
   notes.push("Nobody has reviewed it for this hub.");
@@ -206,7 +210,7 @@ export async function writeModule(
   if (opts.taken) {
     for (let n = 2; opts.taken(id) || await exists(`${root}/${id}`); n++) id = `${base}-${n}`;
   }
-  const network = opts.network ?? ["lan", "listen"];
+  const network = opts.network ?? [];
   const name = printable(opts.name ?? "").trim().slice(0, 80) || pkg.module.name;
   const manifest = {
     kind: "driver",
@@ -267,7 +271,7 @@ export async function installCompanionModule(
 /** Change what was chosen for an added plugin: its mode, its settings, or both. */
 export async function updateInstall(
   dir: string,
-  change: { mode?: Mode; settings?: Record<string, unknown> },
+  change: { mode?: Mode; settings?: Record<string, unknown>; denied?: string[] },
 ): Promise<void> {
   const raw = JSON.parse(await Deno.readTextFile(`${dir}/install.json`));
   await Deno.writeTextFile(`${dir}/install.json`, JSON.stringify({ ...raw, ...change }, null, 2) + "\n");
@@ -277,7 +281,13 @@ export async function updateInstall(
 export async function readInstall(
   dir: string,
 ): Promise<
-  { mode?: Mode; settings?: Record<string, unknown>; module?: { id: string; name: string; version: string } }
+  {
+    mode?: Mode;
+    settings?: Record<string, unknown>;
+    module?: { id: string; name: string; version: string };
+    /** Addresses a superuser said no to. */
+    denied?: string[];
+  }
 > {
   try {
     const raw = JSON.parse(await Deno.readTextFile(`${dir}/install.json`));
@@ -285,6 +295,7 @@ export async function readInstall(
       mode: raw.mode === "act" ? "act" : "listen",
       settings: raw.settings && typeof raw.settings === "object" ? raw.settings : {},
       ...(raw.module && typeof raw.module === "object" ? { module: raw.module } : {}),
+      denied: Array.isArray(raw.denied) ? raw.denied.map(String) : [],
     };
   } catch {
     return {};

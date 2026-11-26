@@ -110,11 +110,10 @@ own folder. No write, no environment, no subprocess. The module is shown an empt
 to "Companion" are answered by the bridge. A test module tries all of it and is refused each time. Where
 Companion would give a module the whole network, this hub makes the grant visible.
 
-**Two wide network grants exist, and both are named.** A dropped-in module cannot say in advance what it will
-reach, so it gets `lan` (any private address, plus the addresses devices use to find each other) and `listen`
-(ports on the hub's computer for devices to answer on). `lan` leaves out the internet and the hub's own
-computer. A reviewed module replaces them with the one address it needs. The checker and the pull request
-report spell both out in words.
+**Two wide network grants exist, and both are named.** `lan` is any private address plus the addresses devices
+use to find each other, and never the internet or the hub's own computer. `listen` is ports on the hub's
+computer for devices to answer on. A device added from the admin page is given neither by default: it asks for
+the exact addresses it uses. The checker and the pull request report spell both out in words.
 
 **What a module names is kept as it named it.** Keys may now carry capitals, underscores and dots in the parts
 a driver chooses, because module authors already use them and renaming would make two names collide.
@@ -160,6 +159,21 @@ permissions are fixed when its process starts.
 the same tools this repository uses. People who merge plugins should not be able to change the hub that
 confines them. Plugins written for this contract can live there as code. A Companion module, or anything with
 its own home, is an entry pointing at a pinned commit. Not built yet.
+
+**A device a superuser adds asks before it reaches anything.** It starts with no access to the network. The
+runtime keeps an exact note of everything a plugin uses or is refused, in a file the plugin cannot read. The
+hub reads it and turns each refused address into a question in plain words: reach this device, open ports on
+this computer, send to everything on the network, reach the internet. A superuser ticks what makes sense and
+confirms with their own PIN or password, and the device restarts holding exactly that. Only the ordinary case,
+one device on the local network, is ticked for them. A no can be remembered, and anything allowed can be taken
+away. Nobody has to describe a module to the hub before it can be used safely.
+
+**What the hub never allows is noted, not asked.** Reading files outside its folder, writing, the environment,
+starting programs: these are counted and shown beside the device, and there is no way to say yes to them.
+
+**A reviewed list is advice on top, not a gate.** The store's entries become answers given in advance: always
+allow this, ask about that, do not allow the other. That needs signing so a hub can trust where the advice
+came from. Not built.
 
 **Every change arrives as a pull request.** `main` is protected: no direct pushes, no force pushes, no
 deleting it, and nothing merges until the `checks` job passes. This applies to maintainers too. The first six
@@ -207,6 +221,11 @@ on each system, because a test that fails one time in twenty is found by repetit
 - **Browser coverage.** The screen sandbox was proven in Chrome only. Safari on a phone matters most and has
   not been run.
 - **Record and replay.** The spec calls for recording plugin traffic and replaying it as tests. Not built.
+- **A question an admin cannot judge.** "Send to every device on your network, port 9999" is worded plainly
+  and carries a warning, but someone still has to decide. The reviewed list is what will answer it for them.
+- **Several rounds.** A device may ask, restart, get further, and ask again. Each round is a restart.
+- **Starting another program shows up as reading the environment.** The runtime stops it one step earlier than
+  the attempt itself, so that is what is noted.
 - **Updating a device's module.** A newer package can only be added as a new device. There is no update that
   keeps the settings, and no way back to the version before.
 - **Secrets on disk.** A device's settings, secrets included, are kept as plain text in the hub's data folder.
@@ -230,8 +249,6 @@ on each system, because a test that fails one time in twenty is found by repetit
   done by the module. The bridge refuses both and records that the module asked.
 - **A module's stored settings.** Companion keeps a module's settings and upgrades them between versions. The
   hub hands settings over fresh at each start, so a module's upgrade scripts never run.
-- **Names under `lan`.** The grant is written as address ranges, so a module set to reach a device by name
-  rather than by address is refused.
 - **License.** Not chosen.
 
 ## Not tested

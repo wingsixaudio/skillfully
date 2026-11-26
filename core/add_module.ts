@@ -45,7 +45,9 @@ try {
       ? "It starts in Act mode: people with a role that allows it can use its actions."
       : "It starts in Listen mode: it connects and reports, and the hub sends it nothing. Add --act to let actions through.",
   );
-  console.log("Restart the hub to start it.");
+  console.log(
+    "Restart the hub to start it. Then open the admin page: it will ask before it reaches anything.",
+  );
 } catch (err) {
   const outside = (err as Error).name === "NotCapable"
     ? `this command may only write to ./data. To use another folder, run it yourself with --allow-write=${dataDir}`
