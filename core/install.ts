@@ -12,6 +12,9 @@ const PACKAGE_MAX = 64 * 1024 * 1024;
 const FILES_MAX = 2000;
 const SAFE_PATH = /^[A-Za-z0-9_@.+-]+(\/[A-Za-z0-9_@.+ -]+)*$/;
 
+/** Text with anything that is not a printable character turned into a space, so a name cannot hide a line break. */
+const printable = (text: string) => [...text].map((c) => (c.charCodeAt(0) < 32 ? " " : c)).join("");
+
 interface TarFile {
   path: string;
   data: Uint8Array;
@@ -172,8 +175,7 @@ export async function readModulePackage(packed: Uint8Array): Promise<ModulePacka
   }
   const id = String(theirs.id ?? "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!id) throw new Error("the module's manifest has no id");
-  const words = (v: unknown, max: number) =>
-    String(v ?? "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, max);
+  const words = (v: unknown, max: number) => printable(String(v ?? "")).trim().slice(0, max);
   const products = Array.isArray(theirs.products) ? theirs.products.map((p: unknown) => words(p, 60)) : [];
   return {
     sha256: createHash("sha256").update(packed).digest("hex"),
@@ -205,7 +207,7 @@ export async function writeModule(
     for (let n = 2; opts.taken(id) || await exists(`${root}/${id}`); n++) id = `${base}-${n}`;
   }
   const network = opts.network ?? ["lan", "listen"];
-  const name = (opts.name ?? "").replace(/[\u0000-\u001f]+/g, " ").trim().slice(0, 80) || pkg.module.name;
+  const name = printable(opts.name ?? "").trim().slice(0, 80) || pkg.module.name;
   const manifest = {
     kind: "driver",
     id,
