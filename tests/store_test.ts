@@ -7,6 +7,7 @@ import { addingHub, FIXTURES, OWNER_PIN, pretendLamp, until } from "./helpers.ts
 import { resolveNetwork } from "../core/process.ts";
 import { grantWords } from "../core/asks.ts";
 import { newKey, sign, verify } from "../core/signing.ts";
+import { STORE_KEYS } from "../core/store.ts";
 
 const PACKAGE = await Deno.readFile(`${FIXTURES}/companion/skillfully-test-lamp-1.0.0.tgz`);
 const SHA = createHash("sha256").update(PACKAGE).digest("hex");
@@ -370,4 +371,16 @@ Deno.test("the store's reviewers can advise on what a device asks for, and a sup
     await store.close();
     lamp.close();
   }
+});
+
+Deno.test("the real store's keys are keys, so a hub started without being told otherwise checks its list", async () => {
+  assert(STORE_KEYS.length >= 1, "with no key, the real store's list would be read as nobody's word");
+  for (const key of STORE_KEYS) {
+    const raw = Uint8Array.from(atob(key), (c) => c.charCodeAt(0));
+    assertEquals(raw.length, 32);
+    await crypto.subtle.importKey("raw", raw, "Ed25519", false, ["verify"]);
+  }
+  // A list signed by anyone else is not the real store's list.
+  const list = new TextEncoder().encode("{}");
+  assert(!(await verify(list, await sign(list, [KEY.privateKey]), STORE_KEYS)));
 });

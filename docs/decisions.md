@@ -277,9 +277,9 @@ on each system, because a test that fails one time in twenty is found by repetit
 - **Browser coverage.** The screen sandbox was proven in Chrome only. Safari on a phone matters most and has
   not been run.
 - **Record and replay.** The spec calls for recording plugin traffic and replaying it as tests. Not built.
-- **The store has no key yet.** Everything for a signed list is built and tested, and `STORE_KEYS` in
-  `core/store.ts` is empty until the store's key is made. Until then a hub reads the real store's list as
-  unsigned: things can be added from it, and nothing in it is allowed in advance.
+- **The store's key has one keeper.** The private half is a secret of the store repository's publishing
+  environment, made on its owner's computer. Nobody else can sign a list, and if it is lost a new key has to
+  reach every hub through a new version of the hub.
 - **An old signed list is still a signed list.** Someone who could change what the store's address serves
   could hand out last month's list with last month's signature. A hub does not yet remember the newest list it
   has seen.

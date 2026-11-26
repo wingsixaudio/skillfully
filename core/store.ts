@@ -17,10 +17,10 @@ import { verify } from "./signing.ts";
 /** Where the store's list is published unless a hub is told otherwise. */
 export const STORE_URL = "https://wingsixaudio.github.io/skillfully-plugins/index.json";
 /**
- * The public keys that list is signed with. More than one while a key is being replaced. While this is
- * empty the store has no key yet, and a hub treats its list as unsigned.
+ * The public keys that list is signed with. More than one while a key is being replaced. The same keys
+ * are in keys.json in the store's own repository. A hub reads nothing from a list not signed with one.
  */
-export const STORE_KEYS: string[] = [];
+export const STORE_KEYS: string[] = ["84ukMjO6CugIrXkX23bBB1Q4WKZKEaEYZ89kjaidiEU="];
 
 export interface StoreModule {
   id: string;
