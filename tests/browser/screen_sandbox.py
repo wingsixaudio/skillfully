@@ -235,6 +235,11 @@ async def main():
         check("the screen shows what the board holds", float(shown) == held, shown)
         log_text = await fr.inner_text("#log")
         check("the screen's history is filled through the bridge, as Sam's own", "You set the level" in log_text, log_text[:80])
+        for _ in range(30):
+            if "You moved the level from" in await fr.inner_text("#log"): break
+            await pg.wait_for_timeout(100)
+        log_text = await fr.inner_text("#log")
+        check("a drag is in the history as its first step and where it came to rest, not as every position", "You moved the level from Off to" in log_text and log_text.count("You set the level") == 1, log_text[:300])
         if shots: await pg.screenshot(path=f"{shots}/3-sam.png", full_page=True)
 
         # --- Now behave badly from inside the screen ---

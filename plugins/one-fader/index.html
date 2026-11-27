@@ -423,6 +423,13 @@
             return `${who} set the level to ${words(d.value)} dB. It was ${words(d.before)}.` +
               (d.adjusted ? ` Asked for ${d.requested}; the board holds ${d.value}.` : "") +
               ` Confirmed by the board in ${d.ms} ms.`;
+          case "skillfully.command.moved":
+            return `${who} moved the level from ${words(d.from)} to ${
+              words(d.value)
+            } dB, in ${d.steps} steps over ${(d.ms / 1000).toFixed(1)} s.` +
+              (d.adjusted ? ` Asked for ${d.requested}; the board holds ${d.value}.` : "");
+          case "skillfully.state.moved":
+            return `Moved at the board itself: from ${words(d.from)} to ${words(d.value)} dB.`;
           case "skillfully.command.failed":
             return `${who} asked for ${d.requested} dB. It failed: ${d.message}.`;
           case "skillfully.command.blocked":
@@ -466,10 +473,13 @@
           ol.append(li);
         }
       }
-      let logTimer;
+      let logTimer, restTimer;
       const askLogSoon = () => {
         clearTimeout(logTimer);
         logTimer = setTimeout(() => toHub({ type: "log", limit: 60 }), 150);
+        // A move is written to the log once the fader has been still for half a second. Ask again then.
+        clearTimeout(restTimer);
+        restTimer = setTimeout(() => toHub({ type: "log", limit: 60 }), 900);
       };
 
       addEventListener("message", (ev) => {

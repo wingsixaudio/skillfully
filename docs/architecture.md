@@ -140,7 +140,9 @@ refuses, and logs the attempt. This is what makes it reasonable to install a plu
 by an agent.
 
 **One log.** Every request, confirmation, refusal, crash and device-side change is one append-only record,
-with people as IDs. Undo, audit, habits, reports and anything an agent does later all read from it.
+with people as IDs. Undo, audit, habits, reports and anything an agent does later all read from it. It says
+who changed what, from what to what, and when. It does not hold every position a value passed through: a fader
+being moved is written as its first step and where it came to rest.
 
 ## Connections
 

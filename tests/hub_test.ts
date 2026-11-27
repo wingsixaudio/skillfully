@@ -66,11 +66,38 @@ Deno.test("during a drag the newest value wins and nothing is lost from the reco
   assertEquals(board(hub).state.get(LEVEL), Math.round(last * 10) / 10);
   assert(acks.every((a) => a.ok), "every move got an answer");
 
+  // The drag is in the log as its first step, written when it happened, and where it came to rest.
+  await until("the fader has come to rest", () => ofType(hub, "skillfully.command.moved").length === 1);
   const sent = ofType(hub, "skillfully.command.sent");
-  assert(sent.length > 3 && sent.length < moves / 4, `${sent.length} of ${moves} moves reached the board`);
-  const skipped = sent.reduce((n, e) => n + (e.data.superseded as number), 0);
-  assertEquals(sent.length + skipped, moves, "every move is accounted for: sent, or counted as skipped");
-  assertEquals(ofType(hub, "skillfully.command.confirmed").length, sent.length);
+  const confirmed = ofType(hub, "skillfully.command.confirmed");
+  const [moved] = ofType(hub, "skillfully.command.moved");
+  assertEquals(
+    [sent.length, confirmed.length],
+    [1, 1],
+    "the first step is written in full, and only that one",
+  );
+  assertEquals([moved.actor, moved.subject, moved.traceid, moved.parentid], [
+    phone.id,
+    `sim-console:${LEVEL}`,
+    sent[0].traceid,
+    confirmed[0].id,
+  ]);
+  const d = moved.data as {
+    from: number;
+    value: number;
+    requested: number;
+    steps: number;
+    overtaken: number;
+    ms: number;
+  };
+  assertEquals([d.from, d.value, d.requested], [-90, Math.round(last * 10) / 10, last]);
+  assert(d.steps > 3 && d.steps < moves / 4, `${d.steps} of ${moves} changes reached the board`);
+  assertEquals(
+    d.steps + d.overtaken + (sent[0].data.superseded as number),
+    moves,
+    "every change is accounted for: it reached the board, or it is counted as overtaken",
+  );
+  assert(d.ms > 300 && d.ms < 5000, `it says how long the move took: ${d.ms} ms`);
 
   await phone.close();
   await hub.stop();

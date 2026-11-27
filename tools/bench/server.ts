@@ -78,6 +78,8 @@ setInterval(() => {
       lagMs: Math.round(worst),
       rssMb: Math.round(m.rss / 1e6),
       heapMb: Math.round(m.heapUsed / 1e6),
+      // How many entries the log holds.
+      entries: hub.log.read({ newest: true, limit: 1 })[0]?.seq ?? 0,
     }),
   );
   worst = 0;

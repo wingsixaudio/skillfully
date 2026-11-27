@@ -21,6 +21,6 @@ for scenario in "$@"; do
   # The hub reports once a second how long its loop was held up and what it holds.
   tail -n +"$((seen + 1))" "$work/hub.log" | deno eval '
     const rows = (await new Response(Deno.stdin.readable).text()).split("\n").filter((l) => l.startsWith("{")).map((l) => JSON.parse(l));
-    if (rows.length) console.log("   the hub meanwhile: loop held up", Math.max(...rows.map((r) => r.lagMs)), "ms at worst, memory", Math.max(...rows.map((r) => r.rssMb)), "MB");
+    if (rows.length) console.log("   the hub meanwhile: loop held up", Math.max(...rows.map((r) => r.lagMs)), "ms at worst, memory", Math.max(...rows.map((r) => r.rssMb)), "MB,", rows.at(-1).entries - rows[0].entries, "log entries written");
   '
 done

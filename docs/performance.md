@@ -27,22 +27,23 @@ everyone else was kept waiting.
 
 ## What it showed, and what changed
 
-| What a person feels                                    | Before              | After               |
-| ------------------------------------------------------ | ------------------- | ------------------- |
-| A press after a quiet moment, until the device has it  | 21 ms (34 at times) | 3.6 ms (7 at times) |
-| Sixteen faders moving, the slowest 1 in 20 changes     | 99 ms               | 41 ms               |
-| The same, the slowest 1 in 100                         | 131 ms              | 61 ms               |
-| Changes dropped because a newer one overtook them      | 1,474 of 4,711      | 69 of 4,705         |
-| How often a watcher's screen is brought up to date     | 22 a second         | 29 a second         |
-| The hub's loop held up while sixteen faders move       | 80 ms               | 9 ms                |
-| Fifty phones connecting at once, small board           | 197 ms              | 50 ms               |
-| Fifty phones connecting at once, 33,024-value board    | 3.1 s               | 0.7 s               |
-| The hub's loop held up while they connect, large board | 1.7 s               | 39 ms               |
-| A musician connecting, large board                     | 58 ms               | 25 ms               |
+| What a person feels                                    | At first       | Now         |
+| ------------------------------------------------------ | -------------- | ----------- |
+| A press after a quiet moment, until the device has it  | 21 ms          | 1.6 ms      |
+| Sixteen faders moving, the slowest 1 in 20 changes     | 99 ms          | 37 ms       |
+| The same, the slowest 1 in 100                         | 131 ms         | 58 ms       |
+| Changes dropped because a newer one overtook them      | 1,474 of 4,711 | 70 of 4,720 |
+| How often a watcher's screen is brought up to date     | 22 a second    | 30 a second |
+| The hub's loop held up while sixteen faders move       | 80 ms          | 4 ms        |
+| Log entries written while they move, for ten seconds   | about 9,200    | 64          |
+| Fifty phones connecting at once, small board           | 197 ms         | 50 ms       |
+| Fifty phones connecting at once, 33,024-value board    | 3.1 s          | 0.7 s       |
+| The hub's loop held up while they connect, large board | 1.7 s          | 39 ms       |
+| A musician connecting, large board                     | 58 ms          | 25 ms       |
 
 The rows from "Sixteen faders" to "held up" are `faders+log`, which is what a room of musicians really does.
 
-Five changes did that:
+Six changes did that:
 
 1. **The newest of the log is answered from memory.** Every screen that shows what just happened asks for the
    recent log after every change. Each ask read a thousand rows from the database and unpacked them. With
@@ -60,6 +61,11 @@ Five changes did that:
 5. **Checking whether a value is someone's to read makes nothing it does not need.** It is asked for every
    value, for every phone, on every change.
 
+6. **A value on the move is written as where it started and where it came to rest.** A fader being dragged was
+   sixty log entries a second. It is now its first step, written at once, and one closing entry when it has
+   been still for half a second. `docs/decisions.md` says exactly what is and is not folded. Every step still
+   reaches every phone: this is only about what is written down.
+
 Saving a document also told every phone on the screen about every document the screen keeps. It now tells them
 about the one that changed (`doc`, see the contract).
 
@@ -67,10 +73,6 @@ about the one that changed (`doc`, see the contract).
 
 These are not fixed. They are in the order they would bite.
 
-- **The log grows without end.** An entry is about 700 bytes. A fader being moved writes sixty a second, two
-  for each of thirty changes. One musician moving faders for a minute is 2.5 MB. Nothing is ever removed, by
-  design. A year of services is several gigabytes, which fills a small computer's card. This needs a decision:
-  see `docs/decisions.md`.
 - **A phone is sent everything it may see.** A Controls or Canvas phone on a 33,024-value board is sent 1.1 MB
   when it connects, though a canvas shows a few dozen values. Sharing the working-out made this cheap for the
   hub. It is still a lot for a phone on poor wifi. The answer is for a screen to say which values it is
@@ -81,6 +83,9 @@ These are not fixed. They are in the order they would bite.
 - **Each device's memory and processor use is read by starting a small program, four times a second.** It is
   under 1% of the hub's time with two devices and grows with the number of devices. Twenty would be worth
   reading together.
+- **The log has no end.** It used to grow by 2.5 MB for every minute one musician spent moving a fader. A move
+  is now about 2 kB however long it lasts, so the log grows by what people do and not by how long a thumb is
+  down. It is still never trimmed. A new file each month would give it an end, and is not done.
 - **One hub is one process on one computer.** There is no second hub to take over. For one venue that is the
   right size. It does mean the hub's computer is the thing to keep healthy.
 

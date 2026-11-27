@@ -15,7 +15,14 @@ The hub's log. Every entry is in CloudEvents shape with these fields that matter
 - `type`: what happened. The ones to look for:
   - `skillfully.command.sent` and `skillfully.command.confirmed`: someone asked for a value through the hub,
     and the device read it back.
+  - `skillfully.command.moved`: the value was moved in many steps by one person, as a fader is dragged. The
+    first step is a `sent` and a `confirmed` like any other. This entry is written when the value came to
+    rest: `from` is what it was before the first step, `value` is where it rested, `steps` is how many changes
+    reached the device, `overtaken` how many were asked for and skipped for a newer one, and `ms` how long it
+    took. The positions in between are not in the log.
   - `skillfully.state.changed`: the value changed at the device itself. Nobody asked through the hub.
+  - `skillfully.state.moved`: the same, for a value moved in many steps at the device, as a fader is ridden at
+    the desk. `from`, `value`, `steps` and `ms` as above.
   - `skillfully.command.blocked`, `.rejected`, `.failed`: someone asked and it did not happen. `data.message`
     says why.
   - `skillfully.plugin.crashed`, `.stopped`, `.limit`, `.quarantined`: the driver had trouble.
@@ -34,7 +41,8 @@ Read the log at `GET /api/log?limit=200`, newest last. Narrow with `type=` or `t
 1. Find the value. Work out its subject from the question. If you cannot tell which value is meant, ask.
 2. Find the entries for that subject around the time in question.
 3. For each change, read who, through what, from what, to what. Follow `traceid` to see the request and its
-   result together.
+   result together. A move shares its `traceid` with its first step, so the two are one story: when it began,
+   and where it ended.
 4. Check the minutes before for driver trouble. A restart can reset a device and show up as a change found by
    resync.
 5. Answer in plain words: what changed, when, from what to what, and how you know. Give IDs as they are.
