@@ -336,6 +336,17 @@ Deno.test("asking the agent is an ability like any other: given by a role, on a 
   await until("it answers", finished(ask));
   assertEquals(words(ask), "Hello.");
 
+  // Ask opens beside whatever screen a person is on, so the page is told where it lives. It is somewhere
+  // to land only for someone who has nowhere else.
+  const me = await (await hub.get("/auth/me", lee)).json();
+  assertEquals(me.screens, [
+    { id: "ask", name: "Ask", beside: "/screens/ask/index.html" },
+    { id: "one-fader", name: "One fader" },
+  ]);
+  assertEquals(me.home, "one-fader");
+  const only = await hub.member("Only asks", { roles: [t.asker], slots: {} });
+  assertEquals((await (await hub.get("/auth/me", only)).json()).home, "ask");
+
   // Off, the screen is told so when it connects, and asking is refused in words.
   assert(hub.agent.turn(hub.owner.id, false).ok);
   const later = await Phone.connect(hub, lee, "ask");

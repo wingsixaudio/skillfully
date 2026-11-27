@@ -220,6 +220,14 @@
           ],
           "default": "all"
         },
+        "opens": {
+          "description": "How the screen is opened. 'page': on its own. 'beside': as a panel beside whichever screen the person is on, from a link in the bar above it, so both are in view at once. A screen that opens beside others can still be opened on its own.",
+          "enum": [
+            "page",
+            "beside"
+          ],
+          "default": "page"
+        },
         "abilities": {
           "$ref": "#/$defs/abilities"
         },

@@ -163,6 +163,10 @@ From the hub:
 }
 ```
 
+- **opens**: `"beside"` for a screen meant to be used with another one in view, such as one for talking to the
+  agent. The hub then offers it as a word in the bar above every screen, and opens it in a panel beside the
+  screen the person is on: below it on a phone, to its right with room. Both stay whole and both stay live,
+  each on a connection of its own. It is still a screen like any other, and can be opened on its own.
 - **uses**: capability names, each `read` or `write`. `log` is the hub's log. `documents` is the documents the
   hub keeps for this screen (below). `agent` is the hub's agent: `read` to ask it things, `write` to have it
   do things for the person, each after their yes. `any` is every kind of device, and never covers those three.

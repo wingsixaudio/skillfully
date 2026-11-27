@@ -34,8 +34,33 @@ body {
 #bar b span {
   color: #f7941d;
 }
-#menu {
+/* Screens that open beside this one: a word each, no icon. */
+#besides {
   margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+#besides a {
+  color: #f4f4f5;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 8px 10px;
+  min-height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+}
+#besides a[aria-expanded="true"] {
+  color: #f7941d;
+  background: #121214;
+}
+#besides a:focus-visible,
+#besideClose:focus-visible {
+  outline: 2px solid #f7941d;
+  outline-offset: 2px;
+}
+#menu {
   position: relative;
 }
 #menu summary {
@@ -76,9 +101,55 @@ body {
 #menu a[aria-current] {
   color: #f7941d;
 }
+/* The screen, and beside it whatever was opened beside it. Neither covers the other: both are whole and
+   both can be used. On a phone the panel is below. With room, it is to the right. */
+#stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 iframe {
   flex: 1;
+  min-height: 0;
   width: 100%;
   border: 0;
   display: block;
+}
+#beside {
+  flex: none;
+  height: min(62dvh,560px);
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #26262b;
+}
+#beside[hidden] {
+  display: none;
+}
+#besideBar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 8px 0;
+}
+#besideClose {
+  font: inherit;
+  font-size: 13px;
+  color: #a1a1aa;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-height: 36px;
+  cursor: pointer;
+}
+@media (min-width: 860px) {
+  #stage {
+    flex-direction: row;
+  }
+  #beside {
+    height: auto;
+    width: 400px;
+    border-top: 0;
+    border-left: 1px solid #26262b;
+  }
 }

@@ -9,9 +9,15 @@
   </head>
   <body data-screen="{{id}}">
     <div
-      id="bar"><svg viewBox="0 0 48 48" aria-hidden="true"><rect class="core" x="16" y="16" width="16" height="16" rx="4.5" fill="none" stroke-width="3.6"/><g class="mod"><rect x="19" y="3.5" width="10" height="7" rx="2.5"/><rect x="19" y="37.5" width="10" height="7" rx="2.5"/><rect x="3.5" y="19" width="7" height="10" rx="2.5"/><rect x="37.5" y="19" width="7" height="10" rx="2.5"/></g></svg><b>skillfully<span>.live</span></b><details id="menu"><summary id="who">Menu</summary><div id="links"></div></details></div>
-    <iframe id="screen" title="{{name}}" sandbox="allow-scripts"
-      data-src="/screens/{{id}}/{{entry}}"></iframe>
+      id="bar"><svg viewBox="0 0 48 48" aria-hidden="true"><rect class="core" x="16" y="16" width="16" height="16" rx="4.5" fill="none" stroke-width="3.6"/><g class="mod"><rect x="19" y="3.5" width="10" height="7" rx="2.5"/><rect x="19" y="37.5" width="10" height="7" rx="2.5"/><rect x="3.5" y="19" width="7" height="10" rx="2.5"/><rect x="37.5" y="19" width="7" height="10" rx="2.5"/></g></svg><b>skillfully<span>.live</span></b><span id="besides"></span><details id="menu"><summary id="who">Menu</summary><div id="links"></div></details></div>
+    <div id="stage">
+      <iframe id="screen" title="{{name}}" sandbox="allow-scripts"
+        data-src="/screens/{{id}}/{{entry}}"></iframe>
+      <aside id="beside" hidden>
+        <div id="besideBar"><button id="besideClose" type="button">Close</button></div>
+        <iframe id="besideFrame" sandbox="allow-scripts"></iframe>
+      </aside>
+    </div>
     <script src="/_hub/shell.js"></script>
   </body>
 </html>

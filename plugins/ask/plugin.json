@@ -10,6 +10,7 @@
     "agent": "write"
   },
   "values": "asked",
+  "opens": "beside",
   "abilities": [
     {
       "id": "ask",
