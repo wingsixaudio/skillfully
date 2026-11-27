@@ -75,6 +75,29 @@ try {
     await read("keys.txt"),
   );
 
+  // Left alone for a while, as a television is between songs. The television asks every few seconds
+  // whether the remote is still there, and hangs up on one that has lost its place. What it said when
+  // the remote arrived came as several messages at once, and all of them have to have been understood.
+  await new Promise((r) => setTimeout(r, 14000));
+  const quiet = await read("keys.txt");
+  check(
+    "left alone, it stays connected: the television did not hang up and was not rung again",
+    !quiet.includes("hung up") && quiet.split("let in").length === 2 && host.health.status === "ok",
+    `${quiet.replaceAll("\n", " | ")} ${JSON.stringify(host.health)}`,
+  );
+  check(
+    "what the television said all at once was each heard",
+    host.state.get("generic/reading/volume_level") === 7 ||
+      host.state.get("generic/reading/volume_level") === "7",
+    String(host.state.get("generic/reading/volume_level")),
+  );
+  const again = await host.set(ACTION("power"), JSON.stringify({ power: "power_off" }), { via: "compat" });
+  check(
+    "and it still does what it is told",
+    again.ok && await until(async () => (await read("keys.txt")).split("key ").length === 3),
+    await read("keys.txt"),
+  );
+
   // The hub is stopped and started. Nothing is typed again.
   await hub.stop();
   await Deno.writeTextFile(`${tv}/keys.txt`, "");

@@ -16,6 +16,8 @@ import process from "node:process";
 import childProcess from "node:child_process";
 import os from "node:os";
 import fs from "node:fs";
+import tls from "node:tls";
+import net from "node:net";
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import { createRequire } from "node:module";
@@ -23,6 +25,7 @@ import { pathToFileURL } from "node:url";
 import type { CommandError, HealthStatus, SettingsField, Values } from "../../contract/types.ts";
 import { type CommandOutcome, type PluginLink, runPlugin } from "../../sdk/plugin.ts";
 import { asField, asReady, asText, asWords, type Ready } from "./fields.ts";
+import { oneRecordAtATime } from "./tls_records.ts";
 
 const arg = (name: string): string => {
   const hit = Deno.args.find((a) => a.startsWith(`--${name}=`));
@@ -419,6 +422,7 @@ function registered(m: Wire, data: any): void {
 function installHost(): void {
   refuseRunning();
   passOnErrors();
+  oneRecordAtATime(tls, net);
   sayNothingOfThisComputer();
   filesElsewhereAreNotThere();
   // The few environment values a module reads, and nothing from the real environment.

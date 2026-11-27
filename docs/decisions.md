@@ -148,6 +148,22 @@ up after a second and a half. An action that pairs does not finish until someone
 it looked like a failure while it was working. Companion does not wait on an action. After that second and a
 half a press is now answered as begun, and an action that fails later is noted in the log.
 
+**A device that cannot be reached says why.** A module that cannot reach its device usually says only "check
+the address". The reason is an error its library prints, which nothing kept, so a person had nowhere to read
+it and could only guess. An error a module prints is now put beside what the module says is wrong, and noted
+in the log: the kind of error and its message, and nothing else, because what a module prints as plain words
+could be anything.
+
+**A secure connection hands a module one message at a time, as where modules were written to run.** Where
+modules were written to run, each record arriving on a secure connection is one "data" event. Libraries lean
+on that without knowing it and take each event for one whole message. This runtime hands over whatever is
+waiting joined together. A television that says four short things as a remote arrives was heard as one broken
+message, nothing after it was understood, the television's "are you there" went unanswered, and it hung up:
+paired, working, and gone ten seconds after the last press. The bridge now makes a module's secure connections
+over a stream of its own that gives the secure layer one record at a time. This is the third place a module
+met a runtime that is not the one it was written for, after files and programs. It is evidence for the
+question still open: whether Companion modules should run on the runtime they were written for.
+
 **A module's own rules for its settings are held to, in the module's process.** A module can say how a setting
 must be written, as a pattern. The hub's form ignored that, so an address typed wrongly reached the module and
 failed in the module's words or none. The pattern is the module's code, and a pattern can be written to take
