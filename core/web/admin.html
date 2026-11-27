@@ -17,7 +17,7 @@
         hidden><span id="lockLeft"></span> <button type="button" class="small quiet" id="lockNow">Lock now</button></p>
       <div class="place" data-place="">
         <section class="card"
-          id="home"><h2 id="homeStatus"></h2><p class="dim" id="homeDetail"></p><a class="button" id="homeAdd" href="/admin/devices" data-go="1" hidden>Add a device</a></section>
+          id="home"><h2 id="homeStatus"></h2><p class="dim" id="homeDetail"></p><a class="button" id="homeAdd" href="/admin/devices" data-go="1" hidden>Add a device</a><a class="button" id="homeUpdate" href="/admin/hub" data-go="1" hidden>A newer version is ready</a></section>
         <section class="card" id="needs" hidden>
           <h2>Needs you</h2>
           <div id="needsList"></div>
@@ -91,6 +91,11 @@
          </div>
          <button>Save the rule</button><p class="msg" id="policyMsg" role="status"></p>
        </form>
+        </section>
+        <section class="card" id="secVersion">
+          <h2>This hub</h2>
+          <div id="version"></div>
+          <p class="msg" id="versionMsg" role="status"></p>
         </section>
         <section class="card" id="secAgent">
           <h2>Agent</h2>

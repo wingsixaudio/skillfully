@@ -10,7 +10,7 @@
 //   admin.ts     a superuser's tools
 //   accounts.ts  people, roles and signing in
 
-import { DatabaseSync } from "node:sqlite";
+import { backup, DatabaseSync } from "node:sqlite";
 import type { SkillManifest } from "../contract/mod.ts";
 import { Accounts } from "./accounts.ts";
 import { adminApi } from "./admin.ts";
@@ -33,6 +33,7 @@ import { bringToShape } from "./shape.ts";
 import { Agent } from "./agent.ts";
 import { Engine, type EngineTuning } from "./engine.ts";
 import { Talks } from "./talk.ts";
+import { Updates, type UpdatesOptions } from "./update.ts";
 import { Store } from "./store.ts";
 
 /** One plugin folder to start the hub with. What is chosen here for a driver is used the first time the hub sees it. */
@@ -58,6 +59,8 @@ export interface HubOptions {
   storeKeys?: string[];
   /** How often the store's list is read again, in seconds. Five minutes unless told otherwise. */
   storeEverySeconds?: number;
+  /** How this hub is kept up to date: where its versions live and which one is running. */
+  updates?: Omit<UpdatesOptions, "backup" | "log">;
   /** Timings of the agent's engine a test may shorten. */
   engine?: EngineTuning;
 }
@@ -72,6 +75,8 @@ export interface Hub {
   engine: Engine;
   /** The documents the hub keeps for screens. */
   documents: Documents;
+  /** Keeping the hub's own code up to date. */
+  updates: Updates;
   /** Everything about screens and the people at them. */
   screening: Screens;
   /** Which connections each screen may use. */
@@ -201,7 +206,26 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   }, opts.storeEverySeconds);
   const engine = new Engine({ accounts, agent, capabilities, log, screens }, opts.engine);
   screens.talks = new Talks({ agent, engine });
-  const admin = adminApi({ accounts, agent, approvals, config, devices, engine, screens, store, taken });
+  const updates = new Updates({
+    running: null,
+    restart: () => {},
+    ...opts.updates,
+    // The whole of what the hub knows, copied while it runs, as one file that opens on its own.
+    backup: (to) => backup(db, to),
+    log,
+  });
+  const admin = adminApi({
+    accounts,
+    agent,
+    approvals,
+    config,
+    devices,
+    engine,
+    screens,
+    store,
+    taken,
+    updates,
+  });
 
   const publicRule = (superuser: boolean) => {
     const p = accounts.policy();
@@ -432,6 +456,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     agent,
     engine,
     documents,
+    updates,
     screening: screens,
     approvals,
     capabilities,
@@ -442,6 +467,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     screens: screens.all,
     skills,
     async stop() {
+      updates.stop();
       await engine.stop();
       screens.closeAll();
       await devices.stop();

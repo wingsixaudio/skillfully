@@ -532,6 +532,21 @@ an ability on Canvas that reads documents and so does that person. To save one, 
 writes them. A canvas never widens reach: a control on it works for whoever is looking only as far as their
 own abilities go, so an agent cannot hand anyone a button they could not already press.
 
+**A hub is updated by one button, and believes only what was signed for it.** A team's hub is installed, not
+cloned. Every change to `main` is packed whole, with everything it needs to start, and published with a signed
+note. The hub looks for a newer note a few times a day, believes it only if it was signed with a key the hub
+carries, and tells a superuser what is in it. It never updates by itself: someone says when, with their own
+PIN, and not during a service. The new version is unpacked beside the old one, the data is copied first, and
+the hub stops with a code that tells whatever started it to start the new one. If that version will not start,
+whatever started it goes back to the one before, with the data as it was. `docs/updates.md` has the whole of
+it.
+
+**What starts the hub is small, fixed, and the same on every kind of computer.** The part that is not itself
+updated does three things: run the current version, move on when asked, go back when a version will not start.
+Everything else about updating is in the hub, where it is tested. A Mac app, a Windows app and a script for a
+computer with neither all do those three things and nothing more, so the next kind of computer is a small job.
+The runtime travels with the app, and a version that needs a newer one says so.
+
 **Looking through a large board takes turns.** Going through thirty thousand values to list what a device
 holds would keep everything else on the hub waiting. Whatever goes through a lot stops every few thousandths
 of a second and lets a fader move. `docs/performance.md` has the numbers.
