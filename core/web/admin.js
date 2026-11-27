@@ -127,6 +127,8 @@ const confirmField = (parent) =>
 
 async function load() {
   const r = await call("/admin/api/all");
+  // A hub that is away for a moment is waited for where the person is, not left for the front page.
+  if (r.away) return;
   if (!r.ok) return location.replace("/");
   ({ people, roles, offered, drivers } = r);
   drawAgent(r.agent);

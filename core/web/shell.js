@@ -154,5 +154,5 @@
     }
     if (me.person.superuser) add("/admin", "Skillfully Config");
     add("/account", "Account");
-  });
+  }).catch(() => {/* the hub is away: the screen itself says so */});
 })();
