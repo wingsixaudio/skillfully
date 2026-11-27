@@ -177,6 +177,11 @@
       gap: 8px;
       padding: 4px 0 2px;
     }
+    .opts .note {
+      margin: 0;
+      color: var(--dim);
+      font-size: 14px;
+    }
     .opts label {
       display: flex;
       align-items: center;
@@ -335,11 +340,16 @@
         if (item.kind === "trigger") {
           const go = el("button", {
             type: "button",
-            textContent: item.fields.length ? "Options" : "Do it",
+            textContent: item.fields.some((f) => f.type !== "static-text") ? "Options" : "Do it",
             disabled: !can,
           });
           const form = el("div", { className: "opts", hidden: true });
-          const inputs = item.fields.map((f) => {
+          // A note among the options is read, not filled in.
+          const notes = item.fields.filter((f) => f.type === "static-text");
+          for (const n of notes) {
+            form.append(el("p", { className: "note", textContent: String(n.value || n.label || "") }));
+          }
+          const inputs = item.fields.filter((f) => f.type !== "static-text").map((f) => {
             let input;
             if (Array.isArray(f.choices)) {
               input = el(

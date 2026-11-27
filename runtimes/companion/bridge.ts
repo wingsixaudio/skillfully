@@ -22,7 +22,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import type { CommandError, HealthStatus, SettingsField, Values } from "../../contract/types.ts";
 import { type CommandOutcome, type PluginLink, runPlugin } from "../../sdk/plugin.ts";
-import { asField, asReady, asText, type Ready } from "./fields.ts";
+import { asField, asReady, asText, asWords, type Ready } from "./fields.ts";
 
 const arg = (name: string): string => {
   const hit = Deno.args.find((a) => a.startsWith(`--${name}=`));
@@ -128,10 +128,15 @@ function fullState(): Values {
   }
   for (const [id, a] of actions) {
     out[`generic/action/${id}/title`] = a.name.slice(0, 200);
-    const fields = a.options.filter((o) => o && typeof o.id === "string").map((o) => ({
+    // A note among an action's options is words to read, not something to fill in. An action with
+    // nothing to fill in is a plain button, so its notes are left out with the form they would sit in.
+    const real = a.options.filter((o) => o && typeof o.id === "string");
+    const toFill = real.some((o) => o.type !== "static-text");
+    const fields = real.filter(() => toFill).map((o) => ({
       id: o.id,
       type: o.type,
-      label: o.label,
+      label: o.type === "static-text" ? asWords(o.label).slice(0, 200) : o.label,
+      ...(o.type === "static-text" ? { value: asWords(o.value).slice(0, 500) } : {}),
       default: o.default,
       ...("choices" in o ? { choices: o.choices } : {}),
       ...("min" in o ? { min: o.min } : {}),

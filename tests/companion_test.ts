@@ -50,8 +50,12 @@ Deno.test("a Companion module dropped into the hub shows its own readings and ac
     assertEquals(host.state.get(READING("Lamp_Model.v2")), "L-100");
     assertEquals(host.state.get(ACTION("level") + "/title"), "Set level");
     const fields = JSON.parse(String(host.state.get(ACTION("level") + "/options")));
-    assertEquals(fields[0].id, "level");
-    assertEquals(fields[0].default, 50);
+    // A note among an action's options is words to read, and what the module wrote as HTML is words.
+    assertEquals([fields[0].type, fields[0].value], ["static-text", "Full is 100."]);
+    assertEquals(fields[1].id, "level");
+    assertEquals(fields[1].default, 50);
+    // An action whose only option is a note has nothing to fill in, so it is a plain button.
+    assertEquals(host.state.get(ACTION("pair") + "/options"), "[]");
     assertEquals(host.health.status, "ok");
 
     // An action is done, not confirmed: there is nothing to read back, and the log says so.
