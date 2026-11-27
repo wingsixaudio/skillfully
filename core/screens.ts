@@ -200,6 +200,7 @@ export class Screens {
         screen: screen.id,
         me: { id: me.id, name: me.name, slots: me.slots },
         abilities: access.abilities,
+        reach: access.reach(),
         plugins: mine.map((h) => this.describe(h, c)),
         capabilities: this.#definitionsFor(c),
       });
