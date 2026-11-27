@@ -105,14 +105,32 @@ tls.createServer(options, (socket) => {
       },
     },
   }));
-  let n = 0;
-  const ping = setInterval(() => socket.write(remote.create({ remotePingRequest: { val1: ++n } })), 3000);
+  // A television asks every few seconds whether the remote is still there, and hangs up on one that has
+  // stopped answering. That is how a remote that has lost its place in the conversation is found out.
+  let n = 0, unanswered = 0;
+  const ping = setInterval(() => {
+    if (unanswered >= 2) {
+      fs.appendFileSync(`${work}/keys.txt`, "hung up\n");
+      return socket.resetAndDestroy();
+    }
+    unanswered++;
+    socket.write(remote.create({ remotePingRequest: { val1: ++n } }));
+  }, 2000);
   socket.on("close", () => clearInterval(ping));
   whole(socket, (bytes) => {
     const m = remote.parse(bytes);
-    if (m.remoteConfigure) {
-      socket.write(remote.create({ remoteSetActive: { active: 622 } }));
-      socket.write(remote.create({ remoteStart: { started: true } }));
+    if (m.remotePingResponse) unanswered = 0;
+    else if (m.remoteConfigure) {
+      // What a television says once a remote has introduced itself: several short messages one straight
+      // after another, each sent on its own, so that they arrive together.
+      const burst = [
+        { remoteSetActive: { active: 622 } },
+        { remoteStart: { started: true } },
+        { remoteSetVolumeLevel: { volumeLevel: 7, volumeMax: 100, volumeMuted: false } },
+        { remoteImeKeyInject: { appInfo: { appPackage: "tv.pretend.home" } } },
+      ];
+      const next = () => burst.length && socket.write(remote.create(burst.shift()), next);
+      next();
     } else if (m.remoteKeyInject) fs.appendFileSync(`${work}/keys.txt`, `key ${m.remoteKeyInject.keyCode}\n`);
   });
 }).listen(6466, "127.0.0.1", () => console.log("the pretend television is on"));

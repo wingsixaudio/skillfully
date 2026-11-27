@@ -301,8 +301,14 @@ Deno.test("dropped in with nothing said about the network, a module can reach no
     assertEquals(host.granted, [], "what the hub holds for it is nothing either");
     assert(networkNotes(host.granted).some((n) => n.includes("no access to your network")));
     assert(networkNotes(host.granted).some((n) => n.includes("Nobody has reviewed")));
-    // It starts, describes itself, and says in its own way that it cannot get to its device.
+    // It starts, describes itself, and says that it cannot get to its device. The module's own words are
+    // only "check the lamp". The error its library printed is beside them, so a person can tell why.
     await until("the module reports trouble", () => host.health.status === "down", 8000);
+    await until("and why", () => !!host.health.reason?.includes("Its error:"), 8000);
+    assert(
+      host.health.reason?.startsWith("It cannot reach the device: Check the lamp. Its error:"),
+      host.health.reason,
+    );
     assert(host.health.reason?.includes("it is not allowed to reach 127.0.0.1"), host.health.reason);
     assertEquals(lamp.connections, 0);
     // The wide grant still exists for whoever chooses it, and still leaves this computer out.
@@ -312,6 +318,26 @@ Deno.test("dropped in with nothing said about the network, a module can reach no
   } finally {
     await close();
     lamp.close();
+  }
+});
+
+Deno.test("allowed to reach a device that is not answering, a module says which way it failed", async () => {
+  // A lamp that was there and is gone: its port is closed.
+  const gone = pretendLamp();
+  gone.close();
+  const { host, close } = await dropIn({
+    granted: ["{host}:{port}"],
+    settings: { host: "127.0.0.1", port: gone.port },
+    mode: "act",
+  });
+  try {
+    await until("it says why", () => !!host.health.reason?.includes("ECONNREFUSED"), 8000);
+    assert(
+      host.health.reason?.startsWith("It cannot reach the device: Check the lamp. Its error:"),
+      host.health.reason,
+    );
+  } finally {
+    await close();
   }
 });
 

@@ -30,7 +30,7 @@ echo "built $(basename "$package")"
 mkdir "$work/data"
 deno run --allow-net=127.0.0.1 --allow-read --allow-write="$work/data" --allow-run \
   --allow-env=HOME,DENO_DIR,SYSTEMROOT,LOCALAPPDATA,USERPROFILE \
-  "$root/tests/compat/starts_through_hub.ts" "$package" "$work/data" "--grant={host}:6466" "--grant={host}:6467" host=127.0.0.1
+  "$root/tests/compat/starts_through_hub.ts" "$package" "$work/data" "--grant={host}:6466" "--grant={host}:6467" host=127.0.0.1 --press=pair --says=ECONNREFUSED
 
 # A television to pair with, on this computer. It uses the module's own message definitions, and nothing
 # else of it.

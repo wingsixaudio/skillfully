@@ -115,7 +115,9 @@ class Lamp extends InstanceBase {
 			}
 		})
 		sock.on('error', (e) => {
-			this.updateStatus(InstanceStatus.ConnectionFailure, e.message)
+			// As libraries do: the error is printed, and the status says only that something is wrong.
+			console.error(e)
+			this.updateStatus(InstanceStatus.ConnectionFailure, 'Check the lamp')
 		})
 		sock.on('close', () => {
 			if (this.sock !== sock) return
