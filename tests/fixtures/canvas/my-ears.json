@@ -1,0 +1,26 @@
+{
+  "kind": "canvas",
+  "name": "My ears",
+  "columns": 4,
+  "pages": [
+    {
+      "name": "Mix",
+      "pieces": [
+        { "type": "label", "at": [1, 1, 4, 1], "text": "My ears", "size": "large" },
+        {
+          "type": "group",
+          "at": [1, 2, 4],
+          "repeat": { "as": "n", "from": 1, "to": 8 },
+          "pieces": [
+            {
+              "type": "slider",
+              "at": [1, 1, 1, 4],
+              "key": "console/input/{n}/bus/{ears}/level",
+              "title": { "key": "console/input/{n}/name" }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "kind": "canvas",
+  "name": "Run sheet",
+  "columns": 4,
+  "pages": [
+    {
+      "name": "Service",
+      "pieces": [
+        { "type": "clock", "at": [1, 1, 4, 2], "seconds": true },
+        { "type": "readout", "at": [1, 3, 2, 1], "key": "generic/reading/power", "title": "Lamp" },
+        {
+          "type": "button",
+          "at": [3, 3, 2, 1],
+          "key": "generic/ready/lamp_on",
+          "title": "Lamp on",
+          "lit": { "key": "generic/reading/power", "is": "on" },
+          "color": "green"
+        },
+        {
+          "type": "toggle",
+          "at": [1, 4, 2, 1],
+          "key": "switch/outlet/1/on",
+          "title": { "key": "switch/outlet/1/name" }
+        },
+        {
+          "type": "toggle",
+          "at": [3, 4, 2, 1],
+          "key": "switch/outlet/2/on",
+          "title": { "key": "switch/outlet/2/name" }
+        },
+        {
+          "type": "slider",
+          "at": [1, 5, 4, 1],
+          "key": "switch/outlet/2/brightness",
+          "title": "House lights"
+        },
+        {
+          "type": "button",
+          "at": [1, 6, 2, 1],
+          "key": "console/input/1/bus/9/level",
+          "value": -90,
+          "title": "Band out of the stream",
+          "color": "red"
+        },
+        {
+          "type": "button",
+          "at": [3, 6, 2, 1],
+          "key": "console/input/1/bus/9/level",
+          "value": 0,
+          "title": "Band back",
+          "color": "white"
+        }
+      ]
+    }
+  ]
+}

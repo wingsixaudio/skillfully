@@ -367,7 +367,33 @@ what its abilities allow, so there is no second set of rules. "any" never covers
 the log. Saving one is not handing out power: a document can only ever ask the screen to do what that screen
 and that person may already do.
 
+**Canvas is a screen like any other, and a canvas is one of its documents.** Canvas draws screens from JSON:
+pages of pieces on a grid, each tied to a value or an action of any device. It got nothing the contract does
+not give every screen. What a canvas is, is the Canvas plugin's business: its checker, its schema and its
+format reference live in `plugins/canvas/`, and the hub still does not read a document for meaning. A canvas
+is checked before it is drawn, and one that fails is not half drawn: whoever may change canvases is shown what
+is wrong in words, which is what a person or an agent writing the file needs. Placement is a grid and not free
+pixels, so one canvas works on a phone and on a tablet, and a group that repeats is how eight channel strips
+are one strip written once.
+
+**A canvas never widens anyone's reach.** What a canvas has on it and what a person may do are separate
+things. A canvas is written by whoever may add canvases; what each person in front of it can change is still
+their roles and their own slots, enforced by the hub on every command. So one ear-mix canvas with `{ears}` in
+its keys is every musician's own mix, and a musician who is shown a canvas of the whole board can move nothing
+on it that is not theirs.
+
+**A screen is told its person's own reach.** The hello now carries `reach`: what this person may read and may
+change, as key patterns with their slots already filled in. It is theirs and nobody else's, so telling the
+screen gives nothing away, and it lets any screen dim what is not a person's to touch and say why, without
+trying and being refused. It decides nothing. The hub checks every command as before.
+
 ## Open, and worth deciding before the next stage
+
+- **Giving a role one canvas and not another.** Canvas's abilities are for the whole screen: "use everything
+  on a canvas" reaches every connection Canvas was given, and a person is shown every canvas that has
+  something of theirs on it. A video volunteer who should have the switcher canvas and nothing else cannot be
+  given exactly that yet. It needs a role to be able to name a canvas, and the hub to hold that person to what
+  the canvas is tied to.
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins
   import the SDK by relative path. A real install step must copy a plugin's dependencies into place first.

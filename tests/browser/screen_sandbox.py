@@ -432,8 +432,126 @@ async def main():
         check("the device added a minute ago can be used from Controls", (await reading.inner_text()).strip() == "on", await reading.inner_text())
         if shots: await owner.screenshot(path=f"{shots}/8-controls-lamp.png", full_page=True)
 
-        # --- Someone who can only write files proposes a change. The hub does what is safe, and asks about the rest ---
+        # --- Canvas: screens put together from JSON, by a person or by whoever can write a file ---
         import re
+        everything = await (await owner_ctx.request.get(base + "/admin/api/all")).json()
+        lamp_id = next(d["id"] for d in everything["drivers"] if d["name"] == "Stage lamp")
+        given = await admin("/admin/api/screen/connections", {"id": "canvas", "drivers": ["sim-console", "sim-switch", lamp_id], "confirm": OWNER_PIN})
+        check("Canvas can be given any kind of device", given.get("ok") is True, json.dumps(given))
+        await owner.goto(base + "/s/canvas")
+        cv = owner.frame_locator("#screen")
+        await cv.locator("#shelf .item", has_text="Stage lamp").wait_for(timeout=10000)
+        offered = await cv.locator("#shelf .item b").all_inner_texts()
+        check("with no canvas yet, Canvas offers ones to start from, for the devices it was given", offered == ["My ears", "Channel strips", "Power and lights", "Stage lamp"], str(offered))
+        if shots: await owner.screenshot(path=f"{shots}/10-canvas-start.png")
+        await cv.locator("#shelf .item", has_text="Stage lamp").get_by_role("button", name="Add").click()
+        await cv.locator("#pages button").first.wait_for(timeout=8000)
+        tabs = await cv.locator("#pages button").all_inner_texts()
+        check("a device's ready-made buttons become a canvas, a page for each group", tabs == ["Levels", "Power"] and await cv.locator("#name").inner_text() == "Stage lamp", str(tabs))
+        await cv.locator("#board button.piece", has_text="Full brightness").wait_for(timeout=8000)
+        check("its buttons take their words from the device", await cv.locator("#board button.piece").all_inner_texts() == ["Full brightness", "Half brightness"], str(await cv.locator("#board button.piece").all_inner_texts()))
+        await cv.locator("#pages button", has_text="Power").click()
+        await cv.locator("#board button.piece", has_text="Lamp off").click()
+        for _ in range(40):
+            if (await state(lamp_id)).get("generic/reading/power") == "off": break
+            await owner.wait_for_timeout(100)
+        await cv.locator("#board button.piece", has_text="Lamp on").click()
+        for _ in range(40):
+            if (await state(lamp_id)).get("generic/reading/power") == "on": break
+            await owner.wait_for_timeout(100)
+        check("pressing one does what the device's author set it up to do", (await state(lamp_id)).get("generic/reading/power") == "on", json.dumps(await state(lamp_id))[:200])
+
+        # Canvases written straight into the config folder, the way an agent would write them.
+        await owner.goto(base + "/admin/hub"); await owner.wait_for_selector("#secConfig:not([hidden]) #configTrust")
+        canvas_dir = os.path.join(re.search(r"in (.+)/devices\.", await owner.locator("#configWhere").inner_text()).group(1), "screens", "canvas")
+        fixtures = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "canvas")
+        for name in ["switcher", "run-sheet"]:
+            with open(os.path.join(fixtures, name + ".json")) as src, open(os.path.join(canvas_dir, name + ".json"), "w") as dst: dst.write(src.read())
+        with open(os.path.join(canvas_dir, "broken.json"), "w") as f:
+            json.dump({"kind": "canvas", "name": "Half written", "pages": [{"name": "One", "pieces": [{"type": "slider", "at": [1, 1], "key": "level"}]}]}, f)
+        with open(os.path.join(canvas_dir, "words.json"), "w") as f:
+            json.dump({"kind": "canvas", "name": "<img src=x onerror=parent.postMessage({type:'set'},'*')>", "pages": [{"name": "<b>One</b>", "pieces": [{"type": "label", "at": [1, 1, 4, 1], "text": "<script>document.title='run'</script><img src=x>"}, {"type": "label", "at": [1, 2, 4, 1], "text": "second"}]}]}, f)
+        await owner.goto(base + "/s/canvas")
+        cv = owner.frame_locator("#screen")
+        await cv.locator("#pick option").nth(4).wait_for(state="attached", timeout=8000)
+        names = await cv.locator("#pick option").all_inner_texts()
+        check("canvases written as files are there beside the one made on the page", names == ["<img src=x onerror=parent.postMessage({type:'set'},'*')>", "Half written", "Run sheet", "Stage lamp", "Switcher"], str(names))
+        await cv.locator("#pick").select_option("words"); await cv.locator("#board .label").first.wait_for()
+        check("every word of a canvas is shown as words and never run", await cv.locator("#board img, #board script, #pick img").count() == 0 and "<script>" in await cv.locator("#board .label").first.inner_text() and await next(f for f in owner.frames if "/screens/canvas/" in f.url).title() == "Skillfully: canvas")
+        await cv.locator("#pick").select_option("broken"); await cv.locator("#blank li").first.wait_for()
+        told = await cv.locator("#blank").inner_text()
+        check("a canvas that cannot be drawn says which file and what is wrong with it", "This canvas cannot be drawn" in told and "broken.json" in told and "Page 1, piece 1 (slider)" in told and "needs a key such as" in told, told)
+        await cv.locator("#pick").select_option("switcher"); await cv.locator("#board button.piece", has_text="Outlet 3").wait_for(timeout=8000)
+        lamp_on = cv.locator("#board button.piece", has_text="Lamp on")
+        check("a button is lit by a reading of its device", "lit" in await lamp_on.get_attribute("class") and "lit" not in await cv.locator("#board button.piece", has_text="Lamp off").get_attribute("class"), await lamp_on.get_attribute("class"))
+        three = cv.locator("#board button.piece", has_text="Outlet 3")
+        was = "lit" in await three.get_attribute("class")
+        await three.click()
+        await cv.locator("#board button.piece.lit", has_text="Outlet 3").wait_for(timeout=5000)
+        check("a repeated row of buttons: the one pressed turns the outlet on and lights up", not was and (await state("sim-switch"))["switch/outlet/3/on"] is True)
+        if shots: await owner.screenshot(path=f"{shots}/10b-canvas-switcher.png")
+        await cv.locator("#pick").select_option("run-sheet"); await cv.locator("#board .clock .num").wait_for()
+        check("one canvas holds pieces of several devices, and a clock", re.match(r"^\d{1,2}:\d\d:\d\d", await cv.locator("#board .clock .num").inner_text()) is not None and await cv.locator("#board .readout .num").inner_text() == "on" and await cv.locator("#board button.piece[aria-pressed]").count() == 2, await cv.locator("#board").inner_text())
+        house = cv.locator("#board .slider", has_text="House lights")
+        box = await house.locator(".track").bounding_box()
+        await owner.mouse.move(box["x"] + box["width"] * .9, box["y"] + 4); await owner.mouse.down()
+        await owner.mouse.move(box["x"] + box["width"] * .3, box["y"] + 4, steps=6); await owner.mouse.up()
+        for _ in range(40):
+            if abs((await state("sim-switch"))["switch/outlet/2/brightness"] - 30) <= 3: break
+            await owner.wait_for_timeout(100)
+        dim = (await state("sim-switch"))["switch/outlet/2/brightness"]
+        check("a slider lying down sets the brightness it is dragged to", abs(dim - 30) <= 3 and await house.locator(".num").inner_text() == f"{round(dim)}%", f"{dim} {await house.locator('.num').inner_text()}")
+        if shots: await owner.screenshot(path=f"{shots}/10c-canvas-run-sheet.png")
+        # The owner adds the ear-mix canvas. Nobody has set the owner's own ears, and it says so.
+        await cv.locator("#more").click()
+        await cv.locator("#shelf .item", has_text="My ears").get_by_role("button", name="Add").click()
+        await cv.locator("#board .slider").first.wait_for(timeout=8000)
+        check("a piece that needs something nobody has set for you says so, and sends nothing", await cv.locator("#board .slider.off").count() == 8 and "Not set for you" in await cv.locator("#board .slider").first.inner_text(), await cv.locator("#board .slider").first.inner_text())
+
+        # A canvas of nothing but words is for everyone, so the test's one is taken away again before Sam looks.
+        os.remove(os.path.join(canvas_dir, "words.json"))
+        # Sam is given the two abilities about Sam's own ears, on Canvas. The same canvas is now Sam's own mix.
+        musician = next(r for r in everything["roles"] if r["name"] == "Musician")
+        saved = await admin("/admin/api/role", {"role": {**musician, "grants": {**musician["grants"], "canvas": ["see-my-ears", "adjust-my-ears"]}}})
+        check("a role can be given part of Canvas", saved.get("ok") is True, json.dumps(saved)[:200])
+        # Sam was turned off earlier. The owner turns Sam back on, and Sam signs in again.
+        await admin("/admin/api/person/disabled", {"id": sam_id, "disabled": False})
+        await pg.goto(base + "/signin"); await pg.fill("#name", "Sam"); await pg.fill("#secret", SAM_PIN); await pg.click("#go")
+        await pg.wait_for_url("**/s/one-fader")
+        await pg.goto(base + "/s/canvas")
+        sv = pg.frame_locator("#screen")
+        await sv.locator("#board .slider").first.wait_for(timeout=10000)
+        check("Sam is shown the one canvas with anything of Sam's on it, and no way to add or remove one", await sv.locator("#name").inner_text() == "My ears" and not await sv.locator("#pick").is_visible() and not await sv.locator("#more").is_visible(), await sv.locator("header").inner_text())
+        strips = await sv.locator("#board .slider .name").all_inner_texts()
+        check("each strip takes its name from the board", len(strips) == 8 and strips[1] == (await state("sim-console"))["console/input/2/name"], str(strips))
+        two = sv.locator("#board .slider").nth(1)
+        box = await two.locator(".track").bounding_box()
+        await pg.mouse.move(box["x"] + 4, box["y"] + box["height"] * .5); await pg.mouse.down()
+        await pg.mouse.move(box["x"] + 4, box["y"] + box["height"] * .2, steps=8); await pg.mouse.up()
+        # The board ends up where the thumb was let go, and the strip shows what the board holds.
+        words = lambda v: ("+" if v > 0 else "") + f"{v:.1f}"
+        for _ in range(40):
+            level = (await state("sim-console"))["console/input/2/bus/1/level"]
+            if level > -90 and await two.locator(".num").inner_text() == words(level): break
+            await pg.wait_for_timeout(100)
+        check("dragging a strip moves that input in Sam's own bus on the board", -20 < level < 5 and await two.locator(".num").inner_text() == words(level), f"{level} {await two.locator('.num').inner_text()}")
+        if shots: await pg.screenshot(path=f"{shots}/10d-canvas-sam.png")
+        sf = next(f for f in pg.frames if "/screens/canvas/" in f.url)
+        ack = await sf.evaluate(ASK, ["sim-console", "console/input/2/bus/5/level", 0])
+        check("whatever a canvas has on it, Sam's reach stops at Sam's own bus", ack.get("ok") is False and ack.get("error", {}).get("code") == "not_allowed", json.dumps(ack))
+        ack = await sf.evaluate(ASK, ["sim-switch", "switch/outlet/1/on", True])
+        check("and Sam cannot flip a switch through Canvas", ack.get("ok") is False and (await state("sim-switch"))["switch/outlet/1/on"] is False, json.dumps(ack))
+        kept = await sf.evaluate("""() => new Promise((res) => {
+          addEventListener("message", (e) => { if (e.data.type === "doc-ack" && e.data.ref === "probe-doc") res(e.data); });
+          parent.postMessage({ type: "doc-put", id: "my-ears", doc: { kind: "canvas", name: "Sam's", pages: [] }, ref: "probe-doc" }, "*");
+          setTimeout(() => res({ timeout: true }), 1500);
+        })""")
+        check("or change a canvas", kept.get("ok") is False, json.dumps(kept))
+        probes = await sf.evaluate(PROBES)
+        check("Canvas is held to the same sandbox as every screen", all(v == "blocked" for k, v in probes.items() if k != "origin") and probes["origin"] == "null", json.dumps(probes))
+        await pg.goto(base + "/s/one-fader")
+
+        # --- Someone who can only write files proposes a change. The hub does what is safe, and asks about the rest ---
         await owner.goto(base + "/admin/hub"); await owner.wait_for_selector("#secConfig:not([hidden]) #configTrust")
         folder = re.search(r"in (.+)/devices\.", await owner.locator("#configWhere").inner_text()).group(1)
         check("a hub starts out strict about what files may do", "Strict." in await owner.locator("#configTrust").inner_text())

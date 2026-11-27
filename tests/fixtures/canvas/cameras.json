@@ -1,0 +1,86 @@
+{
+  "kind": "canvas",
+  "name": "Cameras",
+  "columns": 4,
+  "pages": [
+    {
+      "name": "Presets",
+      "pieces": [
+        {
+          "type": "group",
+          "at": [1, 1, 4],
+          "repeat": { "as": "cam", "each": ["left", "centre", "right"] },
+          "pieces": [
+            { "type": "label", "at": [1, 1, 4, 1], "text": "Camera {cam}" },
+            {
+              "type": "button",
+              "at": [1, 2],
+              "device": "camera-{cam}",
+              "key": "generic/ready/preset_1",
+              "title": "Wide"
+            },
+            {
+              "type": "button",
+              "at": [2, 2],
+              "device": "camera-{cam}",
+              "key": "generic/ready/preset_2",
+              "title": "Pulpit"
+            },
+            {
+              "type": "button",
+              "at": [3, 2],
+              "device": "camera-{cam}",
+              "key": "generic/ready/preset_3",
+              "title": "Band"
+            },
+            {
+              "type": "button",
+              "at": [4, 2],
+              "device": "camera-{cam}",
+              "key": "generic/ready/preset_4",
+              "title": "Keys"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Move",
+      "pieces": [
+        { "type": "label", "at": [1, 1, 4, 1], "text": "Camera left" },
+        {
+          "type": "button",
+          "at": [2, 2],
+          "device": "camera-left",
+          "key": "generic/action/tilt",
+          "value": { "direction": "up" },
+          "title": "Up"
+        },
+        {
+          "type": "button",
+          "at": [1, 3],
+          "device": "camera-left",
+          "key": "generic/action/pan",
+          "value": { "direction": "left" },
+          "title": "Left"
+        },
+        {
+          "type": "button",
+          "at": [3, 3],
+          "device": "camera-left",
+          "key": "generic/action/pan",
+          "value": { "direction": "right" },
+          "title": "Right"
+        },
+        {
+          "type": "button",
+          "at": [2, 4],
+          "device": "camera-left",
+          "key": "generic/action/tilt",
+          "value": { "direction": "down" },
+          "title": "Down"
+        }
+      ]
+    }
+  ]
+}
