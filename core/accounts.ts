@@ -28,6 +28,8 @@ const DEFAULT_POLICY: Policy = { kind: "pin", minLength: 6, mixed: false };
 export interface Person {
   id: string;
   name: string;
+  /** A person, or the hub's agent: an account with roles like anyone's that cannot sign in. */
+  kind: "person" | "agent";
   roles: string[];
   /** Per-person values that abilities refer to, such as which bus is this person's ears. Set by a superuser. */
   slots: Record<string, string | number>;
@@ -88,7 +90,8 @@ export class Accounts {
     db.exec(`
       CREATE TABLE IF NOT EXISTS people (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
-        slots TEXT NOT NULL DEFAULT '{}', disabled INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL
+        slots TEXT NOT NULL DEFAULT '{}', disabled INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'person'
       );
       CREATE TABLE IF NOT EXISTS secrets (
         person TEXT PRIMARY KEY REFERENCES people(id), salt BLOB NOT NULL, hash BLOB NOT NULL,
@@ -145,6 +148,7 @@ export class Accounts {
     return {
       id: row.id,
       name: row.name,
+      kind: row.kind === "agent" ? "agent" : "person",
       roles: this.#all("SELECT role FROM person_roles WHERE person = ? ORDER BY role", row.id).map((r) =>
         r.role
       ),
@@ -391,7 +395,11 @@ export class Accounts {
     from: string,
   ): Promise<Outcome<{ token: string; person: Person }>> {
     const row = typeof name === "string"
-      ? this.#one("SELECT id, disabled FROM people WHERE name_key = ?", name.trim().toLowerCase())
+      ? this.#one(
+        // The agent's account is nobody's to sign in to, whatever is typed.
+        "SELECT id, disabled FROM people WHERE name_key = ? AND kind = 'person'",
+        name.trim().toLowerCase(),
+      )
       : null;
     const who = row ? `person:${row.id}` : null;
     const wait = Math.max(this.#mustWait(`from:${from}`), who ? this.#mustWait(who) : 0);
@@ -460,14 +468,15 @@ export class Accounts {
     const taken = this.#one("SELECT id FROM people WHERE name_key = ?", name.trim().toLowerCase());
     return taken && taken.id !== except ? "Someone already has that name." : null;
   }
-  #insertPerson(name: string): string {
+  #insertPerson(name: string, kind: "person" | "agent" = "person"): string {
     const id = newId("p");
     this.#run(
-      "INSERT INTO people (id, name, name_key, created) VALUES (?, ?, ?, ?)",
+      "INSERT INTO people (id, name, name_key, created, kind) VALUES (?, ?, ?, ?, ?)",
       id,
       name.trim(),
       name.trim().toLowerCase(),
       new Date().toISOString(),
+      kind,
     );
     return id;
   }
@@ -480,9 +489,24 @@ export class Accounts {
     return { ok: true, person: this.person(id)! };
   }
 
+  /**
+   * Give the hub's agent its account. It is given roles like anyone, and what it may see and do is worked
+   * out from them like anyone's. It has no PIN or password and is never given one, so nobody can sign in as it.
+   */
+  addAgent(by: string, name: unknown): Outcome<{ person: Person }> {
+    const problem = this.#nameProblem(name);
+    if (problem) return no("bad_name", problem);
+    const id = this.#insertPerson(name as string, "agent");
+    this.#note("skillfully.agent.made", by, id);
+    return { ok: true, person: this.person(id)! };
+  }
+
   /** Make a one-time invitation the person uses to choose their own PIN or password. Replaces any earlier one. */
   async invite(by: string, person: string): Promise<Outcome<{ code: string; expires: number }>> {
     if (!this.person(person)) return no("unknown", "No such person.");
+    if (this.person(person)!.kind === "agent") {
+      return no("agent", "An agent does not sign in, so it has no invitation.");
+    }
     const fresh = `${code(4)}-${code(4)}`;
     const expires = Date.now() + INVITE_DAYS * DAY;
     this.#run("DELETE FROM invites WHERE person = ?", person);
@@ -500,6 +524,7 @@ export class Accounts {
   async resetSecret(by: string, person: string, temporary: unknown): Promise<Outcome<Record<never, never>>> {
     const p = this.person(person);
     if (!p) return no("unknown", "No such person.");
+    if (p.kind === "agent") return no("agent", "An agent does not sign in, so it has no PIN or password.");
     const problem = this.secretProblem(temporary, this.isSuperuser(p));
     if (problem) return no("weak", problem);
     await this.#setSecret(person, temporary as string, true);
@@ -515,6 +540,9 @@ export class Accounts {
     const known = new Set([SUPERUSER, ...this.roles().map((r) => r.id)]);
     if (!Array.isArray(roles) || !roles.every((r) => typeof r === "string" && known.has(r))) {
       return no("bad_roles", "One of those roles does not exist.");
+    }
+    if (p.kind === "agent" && roles.includes(SUPERUSER)) {
+      return no("agent", "An agent is given roles like anyone else, and is never a superuser.");
     }
     if (this.isSuperuser(p) && !roles.includes(SUPERUSER) && !p.disabled && this.#superusers() <= 1) {
       return no("last_superuser", "A hub must always have a superuser. Make someone else one first.");

@@ -682,6 +682,28 @@ async def main():
         check("trusting can be turned on for an hour, and the page says when it ends", "Trusting." in await owner.locator("#configTrust").inner_text())
         if shots: await owner.screenshot(path=f"{shots}/9b-config-trusting.png", full_page=True)
 
+        # --- The agent: someone on the team who is not a person ---
+        secret_key = "sk-browser-test-key-123456"
+        async def ok_dialog():
+            await confirm(); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.goto(base + "/admin/hub"); await owner.wait_for_selector("#agentMake")
+        check("the Hub place says what an agent is before there is one", "someone on the team who is not a person" in await owner.locator("#secAgent").inner_text())
+        await owner.click("#agentMake"); await owner.fill("#agentName", "Robin"); await ok_dialog()
+        await owner.wait_for_selector("#agentStatus")
+        told = await owner.locator("#secAgent").inner_text()
+        check("made, it is off with no roles and no key, says so, and cannot be turned on yet", "Off." in told and "It has no roles yet" in told and "No key yet" in told and await owner.locator("#agentTurn").is_disabled(), told)
+        await owner.click("#agentKeySet"); await owner.fill("#agentKey", secret_key); await ok_dialog()
+        await owner.wait_for_function("() => document.querySelector('#secAgent').innerText.includes('A key is set')")
+        everything = await (await owner_ctx.request.get(base + "/admin/api/all")).text()
+        check("its key is kept and never shown again: not on the page, and not in what the page is told", secret_key not in await owner.content() and secret_key not in everything and '"keySet":true' in everything)
+        await owner.click("#agentTurn"); await ok_dialog()
+        await owner.locator("#agentStatus", has_text="On.").wait_for(timeout=8000)
+        check("with a key it can be turned on, after a yes", True)
+        if shots: await owner.screenshot(path=f"{shots}/12-agent.png", full_page=True)
+        await place("People"); await owner.wait_for_selector("#people .item")
+        robin = owner.locator("#people .item", has=owner.locator("h3", has_text="Robin"))
+        check("under People it is one of the team, marked as the agent, with roles to give and no way to sign in", "Agent" in await robin.inner_text() and await robin.get_by_role("button", name="Roles").count() == 1 and await robin.get_by_role("button", name="Invite").count() == 0 and await robin.get_by_role("button", name="Reset sign-in").count() == 0, await robin.inner_text())
+
         check("no page errors", not unexpected, "; ".join(unexpected))
         await b.close()
 

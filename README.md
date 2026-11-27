@@ -12,16 +12,17 @@ soundboard and a simulated switch.
 
 ## What is here
 
-|                                                           |                                                                                                                                                 |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Capabilities** (`capabilities/`)                        | What a soundboard is and what a switch is, as data. Adding a kind of device is adding a file.                                                   |
-| **Drivers** (`plugins/sim-console`, `plugins/sim-switch`) | Each runs as its own process, limited to the addresses a superuser allowed it. Its manifest only asks.                                          |
-| **A screen** (`plugins/one-fader`)                        | One ear-mix fader. A web page in a sandbox that can reach the hub only by asking, and only for what the person using it was granted.            |
-| **Canvas** (`plugins/canvas`)                             | Screens put together from JSON: buttons, switches, sliders and readouts on a grid, each tied to any device. A person or an agent can write one. |
-| **A skill** (`plugins/explain-a-change`)                  | Instructions that teach an agent to answer "why did that change?" from the log.                                                                 |
-| **The hub** (`core/`)                                     | Plugin processes, the write queue, people and sign-in, roles, and the log. It names no capability.                                              |
-| **The contract** (`contract/`)                            | Every manifest and message as JSON Schema, with a plain-language guide.                                                                         |
-| **The conformance test** (`conformance/`)                 | Proves any driver of any capability keeps the contract.                                                                                         |
+|                                                           |                                                                                                                                                  |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Capabilities** (`capabilities/`)                        | What a soundboard is and what a switch is, as data. Adding a kind of device is adding a file.                                                    |
+| **Drivers** (`plugins/sim-console`, `plugins/sim-switch`) | Each runs as its own process, limited to the addresses a superuser allowed it. Its manifest only asks.                                           |
+| **A screen** (`plugins/one-fader`)                        | One ear-mix fader. A web page in a sandbox that can reach the hub only by asking, and only for what the person using it was granted.             |
+| **Canvas** (`plugins/canvas`)                             | Screens put together from JSON: buttons, switches, sliders and readouts on a grid, each tied to any device. A person or an agent can write one.  |
+| **A skill** (`plugins/explain-a-change`)                  | Instructions that teach an agent to answer "why did that change?" from the log.                                                                  |
+| **The agent** (`core/agent.ts`)                           | Someone on the team who is not a person: an account with roles like anyone's that nobody can sign in as, and a key that is kept and never shown. |
+| **The hub** (`core/`)                                     | Plugin processes, the write queue, people and sign-in, roles, and the log. It names no capability.                                               |
+| **The contract** (`contract/`)                            | Every manifest and message as JSON Schema, with a plain-language guide.                                                                          |
+| **The conformance test** (`conformance/`)                 | Proves any driver of any capability keeps the contract.                                                                                          |
 
 ## What it proves
 
