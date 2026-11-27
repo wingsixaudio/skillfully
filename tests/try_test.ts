@@ -89,6 +89,30 @@ Deno.test("a device is seen working from its page, and is told to do something o
     await until("and says so", () => host().state.get("generic/reading/power") === "on");
     assertEquals((await tryIt("power")).readings[0].value, "on");
 
+    // An action that needs something filled in says what, so the device's own page can ask for it. A note
+    // among its options is words to read. An action whose only option is a note needs nothing.
+    const offered = (await tryIt("level")).actions.find((x: { key: string }) =>
+      x.key === "generic/action/level"
+    );
+    assertEquals([offered.options, offered.fields.map((f: { id: string; type: string }) => [f.id, f.type])], [
+      true,
+      [["about", "static-text"], ["level", "number"]],
+    ]);
+    const pairing = (await tryIt("pair")).actions.find((x: { key: string }) =>
+      x.key === "generic/action/pair"
+    );
+    assertEquals([pairing.options, pairing.fields], [false, []]);
+    // Filled in and sent from the device's page, it reaches the device with what was typed.
+    assert(
+      (await h.post("/admin/api/driver/do", {
+        id,
+        key: "generic/action/level",
+        options: { level: 30, nonsense: { deep: true } },
+        confirm: OWNER_PIN,
+      })).body.ok,
+    );
+    await until("the lamp is set to what was typed", () => lamp.heard.includes("level 30"));
+
     // Ready-made buttons: what the module's author put together comes first, under the author's headings.
     // Only a press that is exactly one of the module's own actions is kept. Its looks are not.
     const all = await tryIt();

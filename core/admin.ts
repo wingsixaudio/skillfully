@@ -115,6 +115,57 @@ export function adminApi(deps: AdminDeps) {
     },
   });
 
+  /** One thing an action needs filled in, or a note to read beside it, as the device's page shows it. */
+  interface ActionField {
+    id: string;
+    type: string;
+    label: string;
+    value?: string;
+    default?: Value;
+    min?: number;
+    max?: number;
+    choices?: { id: Value; label: string }[];
+  }
+  const plainValue = (v: unknown): v is Value =>
+    typeof v === "string" || typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v));
+  function actionFields(text: unknown): ActionField[] {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(String(text ?? "[]").slice(0, 4000));
+    } catch {
+      return [];
+    }
+    if (!Array.isArray(raw)) return [];
+    const out: ActionField[] = [];
+    for (const f of raw.slice(0, 30)) {
+      if (!f || typeof f !== "object" || typeof f.id !== "string" || !f.id) continue;
+      out.push({
+        id: f.id.slice(0, 64),
+        type: String(f.type ?? "textinput").slice(0, 30),
+        label: String(f.label ?? f.id).slice(0, 200),
+        ...(typeof f.value === "string" ? { value: f.value.slice(0, 500) } : {}),
+        ...(plainValue(f.default)
+          ? { default: typeof f.default === "string" ? f.default.slice(0, 500) : f.default }
+          : {}),
+        ...(typeof f.min === "number" ? { min: f.min } : {}),
+        ...(typeof f.max === "number" ? { max: f.max } : {}),
+        ...(Array.isArray(f.choices)
+          ? {
+            choices: f.choices.filter((c: unknown) => c && plainValue((c as { id: unknown }).id)).slice(
+              0,
+              100,
+            )
+              .map((c: { id: Value; label?: unknown }) => ({
+                id: c.id,
+                label: String(c.label ?? c.id).slice(0, 200),
+              })),
+          }
+          : {}),
+      });
+    }
+    return out;
+  }
+
   /** Everything the admin page shows. */
   async function overview(me: Person, session: string) {
     return {
@@ -220,7 +271,7 @@ export function adminApi(deps: AdminDeps) {
     const most = typed.length ? 40 : 8;
     const cut = (v: unknown, long: number) => String(v ?? "").slice(0, long);
     const readings: { key: string; label: string; value: Value }[] = [];
-    const actions: { key: string; label: string; options: boolean }[] = [];
+    const actions: { key: string; label: string; options: boolean; fields: ActionField[] }[] = [];
     // What the driver's author put together: an action with its options already chosen. Shown first.
     const ready: { key: string; label: string; group: string }[] = [];
     let total = 0;
@@ -243,7 +294,15 @@ export function adminApi(deps: AdminDeps) {
         const k = `generic/action/${generic[2]}`;
         const options = cut(host.state.get(`${k}/options`), 3);
         if (hit(`${value} ${k}`) && actions.length < most) {
-          actions.push({ key: k, label: cut(value, 120), options: options !== "" && options !== "[]" });
+          // What the action needs filled in, so its own page can ask for it. A device's words about its
+          // options are read as data, piece by piece, and nothing in them is acted on.
+          const fields = actionFields(host.state.get(`${k}/options`));
+          actions.push({
+            key: k,
+            label: cut(value, 120),
+            options: options !== "" && options !== "[]" && fields.some((f) => f.type !== "static-text"),
+            fields,
+          });
         }
         continue;
       }
@@ -504,17 +563,30 @@ export function adminApi(deps: AdminDeps) {
       case "driver/do": {
         // Tell a device to do one thing, from its own page. It is a superuser doing what a person with a
         // screen could do, so it passes the same checks on the way: the device has to be one people can
-        // control, and what is asked has to be something it offers. Only a plain "do this", with nothing to
-        // fill in. The hub logs it either way, with who asked and that it came from the admin.
+        // control, and what is asked has to be something it offers. Setting a device up often needs one
+        // of these with something typed in, such as the code a television shows, so that can be done
+        // here too. The hub logs it either way, with who asked and that it came from the admin.
         const host = devices.hosts.get(id);
         if (!host) return refuse(400, "No such device.");
         const key = String(b.key ?? "");
         if (!/^generic\/(action|ready)\/[^/]{1,200}$/.test(key) || !host.state.has(`${key}/title`)) {
           return refuse(400, "That is not something this device offers to do.");
         }
+        // What was filled in for it, when the action takes something: a code, a level, a choice. Plain
+        // values only, and no more of them than an action has options.
+        let value: Value = true;
+        if (b.options && typeof b.options === "object" && !Array.isArray(b.options)) {
+          const filled: Record<string, Value> = {};
+          for (const [k, v] of Object.entries(b.options as Record<string, unknown>).slice(0, 30)) {
+            if (typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))) {
+              filled[k.slice(0, 64)] = v;
+            } else if (typeof v === "string") filled[k.slice(0, 64)] = v.slice(0, 500);
+          }
+          if (Object.keys(filled).length) value = JSON.stringify(filled);
+        }
         const no = await sure();
         if (no) return no;
-        const done = await host.set(key, true, who);
+        const done = await host.set(key, value, who);
         return done.ok ? json({ ok: true }) : refuse(
           400,
           done.error.code === "listen_mode"

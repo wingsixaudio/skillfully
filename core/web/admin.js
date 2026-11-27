@@ -96,6 +96,25 @@ addEventListener("popstate", () => {
 queueMicrotask(showPlace);
 
 // One dialog, reused. fill() builds the fields; done() returns a result with ok, or nothing to close.
+// A button that asks the hub for something says so until the hub has answered. Some answers take
+// seconds, a device being started again for one, and a button that looks as if nothing happened is
+// pressed again.
+async function busy(b, fn) {
+  if (b.dataset.busy) return;
+  const text = b.textContent;
+  b.dataset.busy = "1";
+  b.disabled = true;
+  b.textContent = "Working…";
+  try {
+    return await fn();
+  } finally {
+    delete b.dataset.busy;
+    if (b.isConnected) {
+      b.disabled = false;
+      b.textContent = text;
+    }
+  }
+}
 function ask(title, fill, done, okText = "Save") {
   $("dlgTitle").textContent = title;
   $("dlgBody").innerHTML = "";
@@ -106,7 +125,7 @@ function ask(title, fill, done, okText = "Save") {
   $("dlgForm").onsubmit = async (e) => {
     if (e.submitter && e.submitter.value === "cancel") return;
     e.preventDefault();
-    const r = await done();
+    const r = await busy($("dlgOk"), done);
     if (r && r.ok === false) {
       // The few minutes ran out while this was open: ask here, and keep everything that was filled in.
       if (r.locked && !$("confirm")) confirmField($("dlgBody"));
@@ -1411,10 +1430,57 @@ async function drawTry(id) {
     : r.control
     ? "What it reports, as it changes, and what it can be told to do."
     : "What it reports, as it changes. Its buttons work once people can control it.";
-  const doIt = (key, label, off) => {
+  const doIt = (key, label, off, fields = []) => {
     const b = el("button", { type: "button", className: "small quiet", textContent: "Do it", disabled: off });
-    b.onclick = () =>
-      sureDo("Tell it to: " + label + "?", () => sureCall("/admin/api/driver/do", { id, key }));
+    const toFill = fields.filter((f) => f.type !== "static-text");
+    b.onclick = () => {
+      if (!toFill.length) {
+        return busy(
+          b,
+          () => sureDo("Tell it to: " + label + "?", () => sureCall("/admin/api/driver/do", { id, key })),
+        );
+      }
+      // An action that needs something typed in, such as the code a device is showing, asks for it here.
+      const read = [];
+      ask(
+        label,
+        (x) => {
+          for (const f of fields) {
+            if (f.type === "static-text") {
+              x.append(el("p", { className: "dim", textContent: f.value || f.label }));
+              continue;
+            }
+            const fid = "opt-" + f.id;
+            let i;
+            if (Array.isArray(f.choices)) {
+              i = el(
+                "select",
+                { id: fid },
+                ...f.choices.map((c) => el("option", { value: String(c.id), textContent: c.label })),
+              );
+              i.value = String(f.default ?? "");
+              read.push(() => [f.id, (f.choices.find((c) => String(c.id) === i.value) || {}).id ?? i.value]);
+            } else if (f.type === "checkbox") {
+              i = el("input", { id: fid, type: "checkbox", checked: !!f.default });
+              read.push(() => [f.id, i.checked]);
+            } else if (f.type === "number") {
+              i = el("input", { id: fid, type: "number", step: "any", value: f.default ?? "" });
+              if (f.min !== undefined) i.min = f.min;
+              if (f.max !== undefined) i.max = f.max;
+              read.push(() => [f.id, Number(i.value)]);
+            } else {
+              i = el("input", { id: fid, type: "text", value: f.default ?? "", autocomplete: "off" });
+              read.push(() => [f.id, i.value]);
+            }
+            x.append(el("label", { htmlFor: fid, textContent: f.label }), i);
+          }
+          confirmField(x);
+        },
+        () =>
+          sureCall("/admin/api/driver/do", { id, key, options: Object.fromEntries(read.map((r) => r())) }),
+        "Do it",
+      );
+    };
     return b;
   };
   // Ready-made buttons first, under the headings their author filed them under.
@@ -1447,7 +1513,7 @@ async function drawTry(id) {
     );
   }
   for (const a of r.actions) {
-    const b = doIt(a.key, a.label, !r.control || a.options);
+    const b = doIt(a.key, a.label, !r.control, a.fields || []);
     list.append(
       el(
         "div",
@@ -1456,9 +1522,7 @@ async function drawTry(id) {
           "span",
           { style: "flex:1" },
           a.label,
-          a.options
-            ? el("span", { className: "advice", textContent: "It has options. Use a screen for this one." })
-            : "",
+          a.options ? el("span", { className: "advice", textContent: "It asks for something first." }) : "",
         ),
         b,
       ),
@@ -1505,7 +1569,7 @@ function drawDevice(d, box) {
       className: "small" + (quiet ? " quiet" : ""),
       textContent: text,
     });
-    b.onclick = fn;
+    b.onclick = () => busy(b, fn);
     return b;
   };
   const lower = (w) => w.charAt(0).toLowerCase() + w.slice(1);
