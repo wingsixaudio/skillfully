@@ -347,6 +347,17 @@ the device itself offers with nothing to fill in. It goes through the same door 
 the same checks run and it is logged with who asked and that it came from the admin. Anything with options,
 and anything that sets a value, is still done from a screen.
 
+**A module's presets become ready-made buttons, without their looks.** A Companion preset is a button for
+Companion's grid: a look, and what pressing it does. The hub has no grid, so it used to drop presets whole. It
+now keeps the half that is useful anywhere: the name, the heading its author filed it under, and the press,
+when the press is exactly one of the module's own actions. A press that does several things, or does something
+on release or after a delay, is left out, because doing half of it would be worse than not offering it. A
+ready-made button is published like everything else a generic device has (`generic/ready/<id>`), so any screen
+can show it, and pressing it goes through the same path as any command: same checks, same log. The device page
+and the Controls screen show them first, under the author's headings, with everything else after. For a device
+with hundreds of actions this is what makes the first look usable: the person who knows the device best
+already chose what matters.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins

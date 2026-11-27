@@ -205,8 +205,21 @@ export function adminApi(deps: AdminDeps) {
     const cut = (v: unknown, long: number) => String(v ?? "").slice(0, long);
     const readings: { key: string; label: string; value: Value }[] = [];
     const actions: { key: string; label: string; options: boolean }[] = [];
+    // What the driver's author put together: an action with its options already chosen. Shown first.
+    const ready: { key: string; label: string; group: string }[] = [];
     let total = 0;
     for (const [key, value] of host.state) {
+      const made = /^generic\/ready\/([^/]+)(\/(title|group))?$/.exec(key);
+      if (made) {
+        if (made[3] !== "title") continue;
+        total++;
+        const k = `generic/ready/${made[1]}`;
+        const group = cut(host.state.get(`${k}/group`), 80);
+        if (hit(`${value} ${group} ${k}`) && ready.length < most) {
+          ready.push({ key: k, label: cut(value, 120), group });
+        }
+        continue;
+      }
       const generic = /^generic\/(reading|action)\/([^/]+)(\/(title|options))?$/.exec(key);
       if (generic && generic[1] === "action") {
         if (generic[4] !== "title") continue;
@@ -231,6 +244,7 @@ export function adminApi(deps: AdminDeps) {
         control: host.mode === "act",
         running: host.status === "running",
         total,
+        ready: ready.sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label)),
         readings,
         actions,
       },
@@ -448,7 +462,7 @@ export function adminApi(deps: AdminDeps) {
         const host = devices.hosts.get(id);
         if (!host) return refuse(400, "No such device.");
         const key = String(b.key ?? "");
-        if (!/^generic\/action\/[^/]{1,200}$/.test(key) || !host.state.has(`${key}/title`)) {
+        if (!/^generic\/(action|ready)\/[^/]{1,200}$/.test(key) || !host.state.has(`${key}/title`)) {
           return refuse(400, "That is not something this device offers to do.");
         }
         const no = await sure();

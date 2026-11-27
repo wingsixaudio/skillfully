@@ -73,3 +73,49 @@ export function asField(f: any): SettingsField | null {
   }
   return { ...base, kind: "note", help: "This setting cannot be shown here yet." };
 }
+
+/** A ready-made button: one of the module's actions with its options already chosen. */
+export interface Ready {
+  id: string;
+  name: string;
+  group: string;
+  actionId: string;
+  options: Record<string, unknown>;
+}
+
+/**
+ * What the hub keeps of one of a module's presets. A preset is a button for Companion's grid: a look, and
+ * what pressing it does. The hub has no grid, so the look is dropped. What is kept is the name, the heading
+ * the author filed it under, and the press, when the press is exactly one of the module's own actions.
+ * A press that does several things, or does something on release or on a long hold, is not one action and
+ * is left out: doing half of it would be worse than not offering it.
+ */
+export function asReady(p: any, id: unknown, nameOk: RegExp): Ready | null {
+  if (!p || typeof id !== "string" || !nameOk.test(id)) return null;
+  if (p.type !== undefined && p.type !== "button") return null;
+  const steps = Array.isArray(p.steps)
+    ? p.steps
+    : p.steps && typeof p.steps === "object"
+    ? Object.values(p.steps)
+    : [];
+  if (steps.length !== 1) return null;
+  const step: any = steps[0] ?? {};
+  const sets = step.action_sets ?? step;
+  const down = Array.isArray(sets.down) ? sets.down : [];
+  const others = Object.entries(sets).filter(([k, v]) => k !== "down" && Array.isArray(v) && v.length);
+  if (down.length !== 1 || others.length) return null;
+  const press = down[0] ?? {};
+  const actionId = press.actionId ?? press.action;
+  if (typeof actionId !== "string" || !nameOk.test(actionId) || press.delay) return null;
+  const options = press.options && typeof press.options === "object" && !Array.isArray(press.options)
+    ? press.options
+    : {};
+  if (JSON.stringify(options).length > TEXT_MAX) return null;
+  return {
+    id,
+    name: asWords(p.name).slice(0, 200) || id,
+    group: asWords(p.category).slice(0, 80),
+    actionId,
+    options,
+  };
+}

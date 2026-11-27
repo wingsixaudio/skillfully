@@ -2,7 +2,7 @@
 // plain words, drops what is only there for spacing, and never leaves a setting with no way to fill it in.
 
 import { assert, assertEquals } from "./assert.ts";
-import { asField, asWords } from "../runtimes/companion/fields.ts";
+import { asField, asReady, asWords } from "../runtimes/companion/fields.ts";
 
 Deno.test("what a module wrote as HTML is shown as words, and never as markup", () => {
   assertEquals(
@@ -78,4 +78,71 @@ Deno.test("a module's settings come out as a form a person can fill in", () => {
   // A list that is the whole answer stays a list.
   assertEquals(fields[2]!.kind, "choice");
   assertEquals(fields[2]!.help, "Select the variant of the desk.");
+});
+
+Deno.test("a preset is kept as a ready-made button only when a press is exactly one action", () => {
+  const NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
+  const look = { text: "FULL", size: "auto", color: 16777215, bgcolor: 0, png64: "iVBOR..." };
+  const press = (actionId: unknown, options: unknown = {}) => [{ down: [{ actionId, options }], up: [] }];
+  const kept = asReady(
+    {
+      type: "button",
+      category: "Levels",
+      name: "Full <i>brightness</i>",
+      style: look,
+      steps: press("level", { level: 100 }),
+      feedbacks: [{ feedbackId: "x" }],
+    },
+    "full",
+    NAME,
+  );
+  assertEquals(kept, {
+    id: "full",
+    name: "Full brightness",
+    group: "Levels",
+    actionId: "level",
+    options: { level: 100 },
+  }, "its name, its heading and its press, and none of its looks");
+
+  const no = (p: unknown, id: unknown = "x") => assertEquals(asReady(p, id, NAME), null);
+  no({
+    type: "button",
+    name: "Two",
+    steps: [{ down: [{ actionId: "a", options: {} }, { actionId: "b", options: {} }], up: [] }],
+  });
+  no({
+    type: "button",
+    name: "On release",
+    steps: [{ down: [{ actionId: "a", options: {} }], up: [{ actionId: "b", options: {} }] }],
+  });
+  no({ type: "button", name: "Two steps", steps: [...press("a"), ...press("b")] });
+  no({
+    type: "button",
+    name: "Later",
+    steps: [{ down: [{ actionId: "a", options: {}, delay: 500 }], up: [] }],
+  });
+  no({ type: "button", name: "Nothing", steps: [{ down: [], up: [] }] });
+  no({ type: "text", name: "A heading", text: "Section" });
+  no({ type: "button", name: "No such name", steps: press("bad name!") });
+  no({ type: "button", name: "Fine", steps: press("a") }, "bad id!");
+  no({ type: "button", name: "Fine", steps: press("a") }, 7);
+  no({ type: "button", name: "Huge", steps: press("a", { blob: "x".repeat(5000) }) });
+  no(null);
+  no("a string");
+
+  // Older modules write a press a little differently. It is the same press.
+  assertEquals(
+    asReady(
+      {
+        category: "Power",
+        name: "On",
+        steps: { 0: { action_sets: { down: [{ action: "on", options: {} }], up: [] } } },
+      },
+      "on",
+      NAME,
+    )?.actionId,
+    "on",
+  );
+  // Options that are not a plain set of them are no options.
+  assertEquals(asReady({ name: "On", steps: press("on", [1, 2]) }, "on", NAME)?.options, {});
 });

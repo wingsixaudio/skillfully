@@ -252,6 +252,23 @@
         const values = state.get(plugin.id) || new Map();
         const out = [];
         for (const [key, value] of values) {
+          // A ready-made button: one of the device's actions with its options already chosen by its author.
+          const made = /^generic\/ready\/([^/]+)(\/(title|group))?$/.exec(key);
+          if (made) {
+            if (made[3] === "title") {
+              const k = "generic/ready/" + made[1];
+              const group = values.get(k + "/group");
+              out.push({
+                key: k,
+                label: (group ? group + ": " : "") + value,
+                kind: "trigger",
+                writable: true,
+                fields: [],
+                first: true,
+              });
+            }
+            continue;
+          }
           const generic = /^generic\/(reading|action)\/([^/]+)(\/(title|options))?$/.exec(key);
           if (generic) {
             const [, what, name, , extra] = generic;
@@ -281,13 +298,17 @@
             max: bound(plugin, key, def.max),
           });
         }
-        return out.sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }));
+        // What the author put together comes first. Then everything, in order.
+        return out.sort((a, b) =>
+          (b.first ? 1 : 0) - (a.first ? 1 : 0) ||
+          (a.first ? a.label.localeCompare(b.label) : a.key.localeCompare(b.key, undefined, { numeric: true }))
+        );
       }
 
       const send = (plugin, key, value) => {
         asked.set(++ref, {
           row: plugin.id + "|" + key,
-          trigger: key.startsWith("generic/action/") || (defOf(key) || {}).kind === "trigger",
+          trigger: /^generic\/(action|ready)\//.test(key) || (defOf(key) || {}).kind === "trigger",
         });
         toHub({ type: "set", plugin: plugin.id, key, value, ref });
       };

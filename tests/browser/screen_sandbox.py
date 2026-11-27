@@ -343,6 +343,12 @@ async def main():
         await do_it.click(); await act()
         await owner.locator("#tryList .reading", has_text=power).locator("b", has_text="on").wait_for(timeout=15000)
         check("then a button on its page really does it, and the reading beside it moves", True)
+        tried = await owner.locator("#tryList").inner_text()
+        check("what the module's author put together comes first, under the author's headings", 0 <= tried.find("Levels") < tried.find("Full brightness") < tried.find("Power") < tried.find("Lamp on") < tried.find("Everything else") < tried.find(turn_on), tried)
+        check("and a press that is not one plain action is not offered", "Two things at once" not in tried and "not there" not in tried)
+        await owner.locator("#tryList .ready", has_text="Full brightness").get_by_role("button", name="Do it").click(); await act()
+        await owner.locator("#tryList .reading", has_text="Level").locator("b", has_text="100").wait_for(timeout=15000)
+        check("a ready-made button does its action with the options its author chose", True)
         if shots: await owner.screenshot(path=f"{shots}/7a-try-it.png", full_page=True)
         if shots: await lamp_item.scroll_into_view_if_needed(); await owner.screenshot(path=f"{shots}/7-device.png")
 
@@ -415,6 +421,8 @@ async def main():
 
         await owner.goto(base + "/s/controls"); await owner.wait_for_timeout(1500)
         cf = next((f for f in owner.frames if "/screens/controls/" in f.url), None)
+        first_rows = await cf.locator(".card", has=cf.locator("h2", has_text="Stage lamp")).locator(".row").all_inner_texts()
+        check("Controls shows a device's ready-made buttons before everything else", "Levels: Full brightness" in first_rows[0] and "Power: Lamp on" in " ".join(first_rows[:4]), str(first_rows[:5]))
         on = cf.locator(".row", has_text="generic/action/on")
         await on.get_by_role("button", name="Do it").click()
         reading = cf.locator(".row", has_text="generic/reading/power").locator(".value")
