@@ -15,7 +15,7 @@
 
 import type { Person } from "./accounts.ts";
 import type { Agent } from "./agent.ts";
-import type { Engine } from "./engine.ts";
+import type { Answered, Engine } from "./engine.ts";
 import { newId } from "./log.ts";
 
 /** Tell one connected screen something. False when it has gone. */
@@ -40,6 +40,8 @@ interface Thread {
     asked: Said;
     saying?: { messageId: string; text: string };
   };
+  /** It has stopped to ask this person a yes or a no. The questions themselves are the engine's to keep. */
+  waiting?: { asked: Said; runId: string };
 }
 
 /** How much of what was said before goes with a new question. */
@@ -104,7 +106,11 @@ export class Talks {
    *   new    forget this conversation and start another
    * Whatever the screen sends as history is ignored. The hub's own record of what was said is what counts.
    */
-  handle(who: { person: Person; via: string }, m: { do?: unknown; input?: unknown }, tell: Tell): void {
+  handle(
+    who: { person: Person; via: string; act?: boolean },
+    m: { do?: unknown; input?: unknown },
+    tell: Tell,
+  ): void {
     const { person } = who;
     const t = this.#thread(person.id);
     if (m.do === "open") {
@@ -125,10 +131,35 @@ export class Talks {
           tell({ type: "TEXT_MESSAGE_CONTENT", messageId: saying.messageId, delta: saying.text });
         }
       }
+      // Opened while it waits for a yes or a no: the question is put again, here too.
+      const open = t.waiting && this.deps.engine.waiting(person.id);
+      if (t.waiting && open?.length) {
+        tell({ type: "RUN_STARTED", threadId: t.id, runId: t.waiting.runId });
+        tell({
+          type: "CUSTOM",
+          name: "skillfully.asked",
+          value: { id: t.waiting.asked.id, content: t.waiting.asked.text },
+        });
+        tell({
+          type: "RUN_FINISHED",
+          threadId: t.id,
+          runId: t.waiting.runId,
+          outcome: { type: "interrupt", interrupts: open },
+        });
+      }
       return;
     }
+    // Stopping while it waits for a yes or a no is a no to all of it.
+    const leave = () => {
+      if (!t.waiting) return false;
+      this.deps.engine.drop(person.id);
+      t.waiting = undefined;
+      this.#tell(t, { type: "RUN_ERROR", code: "stopped", message: "Nothing was done." });
+      return true;
+    };
     if (m.do === "stop") {
       t.running?.stop.abort();
+      leave();
       return;
     }
     if (m.do === "new") {
@@ -139,6 +170,7 @@ export class Talks {
           message: "Stop it first, or wait for it to finish.",
         });
       }
+      leave();
       t.id = newId();
       t.said = [];
       this.#tell(t, this.#snapshot(t, person));
@@ -150,7 +182,69 @@ export class Talks {
     const input = (m.input && typeof m.input === "object" ? m.input : {}) as {
       runId?: unknown;
       messages?: unknown;
+      resume?: unknown;
     };
+    const runId = typeof input.runId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(input.runId)
+      ? input.runId
+      : newId();
+    const threadId = t.id;
+    const stop = new AbortController();
+    const hears = (running: NonNullable<Thread["running"]>) => (event: Record<string, unknown>) => {
+      if (event.type === "TEXT_MESSAGE_START") {
+        running.saying = { messageId: String(event.messageId), text: "" };
+      } else if (event.type === "TEXT_MESSAGE_CONTENT" && running.saying) {
+        running.saying.text += String(event.delta);
+      } else if (event.type === "TEXT_MESSAGE_END") running.saying = undefined;
+      this.#tell(t, event);
+    };
+    // How a run ends, whichever way it began: answered, waiting on the person, or come to nothing.
+    const ended = (running: NonNullable<Thread["running"]>) => (r: Answered) => {
+      if (t.running === running) t.running = undefined;
+      t.touched = Date.now();
+      if (t.id !== threadId) return;
+      if (!r.ok && r.waiting) {
+        t.waiting = { asked: running.asked, runId: running.runId };
+        return;
+      }
+      t.waiting = undefined;
+      // Only what was answered is kept. A question that came to nothing is not part of the conversation.
+      if (r.ok) {
+        t.said.push(running.asked, { id: newId(), role: "assistant", text: r.raw });
+        if (t.said.length > SAID_MAX) t.said.splice(0, t.said.length - SAID_MAX);
+      }
+    };
+
+    // The person's yes or no to what it asked to do. It goes on from where it stopped.
+    if (input.resume !== undefined) {
+      if (!t.waiting) {
+        return void tell({
+          type: "RUN_ERROR",
+          code: "nothing_waiting",
+          message: "Nothing is waiting for an answer.",
+        });
+      }
+      if (t.running) {
+        return void tell({ type: "RUN_ERROR", code: "busy", message: "It is already going on." });
+      }
+      const running = { runId, stop, asked: t.waiting.asked };
+      t.running = running;
+      this.deps.engine.resume(person, input.resume, {
+        threadId,
+        runId,
+        stop: stop.signal,
+        hear: hears(running),
+      })
+        .then((r) => {
+          // An answer that could not be taken leaves the question open, to be answered properly.
+          if (!r.ok && !r.waiting && this.deps.engine.waiting(person.id).length) {
+            if (t.running === running) t.running = undefined;
+            return;
+          }
+          ended(running)(r);
+        });
+      return;
+    }
+
     const last = Array.isArray(input.messages)
       ? input.messages.findLast((x) => x?.role === "user")
       : undefined;
@@ -159,11 +253,8 @@ export class Talks {
     // Refused before it began: only the screen that asked hears of it.
     if (no) return void tell({ type: "RUN_ERROR", ...no });
 
-    const runId = typeof input.runId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(input.runId)
-      ? input.runId
-      : newId();
     const asked: Said = { id: newId(), role: "user", text: question.trim() };
-    const running: NonNullable<Thread["running"]> = { runId, stop: new AbortController(), asked };
+    const running: NonNullable<Thread["running"]> = { runId, stop, asked };
     t.running = running;
     // The newest of what was said before, as much as fits.
     const before: Said[] = [];
@@ -176,19 +267,15 @@ export class Talks {
     // A conversation sent to a model begins with the person, not with an answer.
     while (before.length && before[0].role !== "user") before.shift();
 
-    const threadId = t.id;
+    const hear = hears(running);
     this.deps.engine.ask(person, question, who.via, {
       before,
       threadId,
       runId,
-      stop: running.stop.signal,
+      stop: stop.signal,
+      act: who.act,
       hear: (event) => {
-        if (event.type === "TEXT_MESSAGE_START") {
-          running.saying = { messageId: String(event.messageId), text: "" };
-        } else if (event.type === "TEXT_MESSAGE_CONTENT" && running.saying) {
-          running.saying.text += String(event.delta);
-        } else if (event.type === "TEXT_MESSAGE_END") running.saying = undefined;
-        this.#tell(t, event);
+        hear(event);
         // Every screen it is open on shows the question, not only the one it was typed on.
         if (event.type === "RUN_STARTED") {
           this.#tell(t, {
@@ -198,14 +285,6 @@ export class Talks {
           });
         }
       },
-    }).then((r) => {
-      if (t.running === running) t.running = undefined;
-      // Only what was answered is kept. A question that came to nothing is not part of the conversation.
-      if (r.ok && t.id === threadId) {
-        t.said.push(asked, { id: newId(), role: "assistant", text: r.raw });
-        if (t.said.length > SAID_MAX) t.said.splice(0, t.said.length - SAID_MAX);
-      }
-      t.touched = Date.now();
-    });
+    }).then(ended(running));
   }
 }

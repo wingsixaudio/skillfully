@@ -412,7 +412,8 @@ export class Screens {
         c.socket.send(JSON.stringify({ type: "agent", event }));
         return true;
       };
-      return this.talks.handle({ person: c.person, via }, m, c.hears);
+      // Having it do things is a further ability, and a screen must have said it goes that far.
+      return this.talks.handle({ person: c.person, via, act: c.access.canWrite(`${AGENT}/act`) }, m, c.hears);
     }
     // A screen's documents: given to whoever may read them, changed only by whoever may write that one.
     if (m.type === "docs" || m.type === "doc-put" || m.type === "doc-remove") {

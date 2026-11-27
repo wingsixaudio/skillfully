@@ -131,11 +131,15 @@ async function readPieces(res: Response, hear: (words: string) => void, clean: (
         blocks[e.index].signature = (blocks[e.index].signature ?? "") + e.delta.signature;
       }
     } else if (e.type === "content_block_stop" && blocks[e.index]?.type === "tool_use") {
-      try {
-        blocks[e.index].input = partial[e.index] ? JSON.parse(partial[e.index]) : {};
-      } catch {
-        blocks[e.index].input = {};
-      }
+      // What it asks for arrives as pieces of JSON. A service that sends it whole at the start is taken at its word.
+      const b = blocks[e.index];
+      if (partial[e.index]) {
+        try {
+          b.input = JSON.parse(partial[e.index]);
+        } catch {
+          b.input = {};
+        }
+      } else if (!b.input || typeof b.input !== "object") b.input = {};
     } else if (e.type === "message_delta") {
       if (typeof e.delta?.stop_reason === "string") stop = e.delta.stop_reason;
       if (typeof e.usage?.output_tokens === "number") tokensOut = e.usage.output_tokens;

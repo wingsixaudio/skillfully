@@ -2,12 +2,12 @@
   "kind": "screen",
   "id": "ask",
   "name": "Ask",
-  "description": "Talk to the hub's agent. It answers from what the hub holds, and shows a person only what that person may see for themselves on their other screens.",
+  "description": "Talk to the hub's agent. It answers from what the hub holds, and can change things when asked, after a yes each time. It shows and does for a person only what that person may see and do for themselves on their other screens.",
   "version": "0.1.0",
   "contract": "1",
   "entry": "index.html",
   "uses": {
-    "agent": "read"
+    "agent": "write"
   },
   "values": "asked",
   "abilities": [
@@ -17,6 +17,15 @@
       "description": "Ask the hub's agent questions and read its answers. It never shows this person more than their other screens do.",
       "allows": {
         "agent": "read"
+      }
+    },
+    {
+      "id": "act",
+      "title": "Have the agent do things",
+      "description": "Ask the hub's agent to set a value or press a button. It asks this person yes or no each time, showing exactly what would change, and can change only what both it and this person may change.",
+      "caution": "The agent can then change, for this person, whatever this person could already change themselves. Nothing is changed without their yes.",
+      "allows": {
+        "agent": "write"
       }
     }
   ]

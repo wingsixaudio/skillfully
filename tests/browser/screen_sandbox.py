@@ -754,6 +754,32 @@ async def main():
         await ask.locator("#fresh").click()
         await ask.locator(".start").wait_for()
         check("Start over empties it", await ask.locator(".mine, .theirs").count() == 0)
+        # --- Having it do something: it asks, in the hub's words, and only a yes does it ---
+        await owner.goto(base + "/admin/people"); await owner.wait_for_selector("#people .item")
+        await robin.get_by_role("button", name="Assign").click()
+        await owner.fill("#slot_ears", "1"); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        level = lambda: json.loads(urllib.request.build_opener(urllib.request.ProxyHandler({})).open(urllib.request.Request(base + "/api/state?plugin=sim-console", headers={"cookie": owner_cookie})).read())["console/input/1/bus/1/level"]
+        owner_cookie = "; ".join(f"{c['name']}={c['value']}" for c in await owner_ctx.cookies())
+        before = level()
+        await owner.goto(base + "/s/ask")
+        ask = owner.frame_locator("#screen")
+        await ask.locator("#name", has_text="Ask Robin").wait_for(timeout=8000)
+        await ask.locator("#q").fill("Set input 1 in bus 1 to -7.5"); await ask.locator("#send").click()
+        await ask.locator(".yesno").wait_for(timeout=15000)
+        card = await ask.locator(".yesno").inner_text()
+        check("asked to change something, it stops and the hub asks yes or no, showing exactly what would change", "Set Send level (console/input/1/bus/1/level) on Simulated board to -7.5 dB?" in card and "Yes, do it" in card and await ask.locator("#q").is_disabled() and level() == before, card)
+        if shots: await owner.screenshot(path=f"{shots}/16-ask-yes-or-no.png")
+        await ask.locator(".yesno button.no").click()
+        await ask.locator(".theirs", has_text="The person said no").wait_for(timeout=15000)
+        check("No, and nothing is changed", level() == before and "Not done: you said no" in await ask.locator("#talk").inner_text())
+        await ask.locator("#q").fill("Set input 1 in bus 1 to -7.5"); await ask.locator("#q").press("Enter")
+        await ask.locator(".yesno").wait_for(timeout=15000)
+        await ask.locator(".yesno button", has_text="Yes, do it").click()
+        await ask.locator(".theirs", has_text="it was done").wait_for(timeout=15000)
+        said = await ask.locator("#talk").inner_text()
+        check("Yes, and it is done: the board holds it and the screen says so", before != -7.5 and level() == -7.5 and "You said yes." in said and "Done: it is now -7.5" in said, f"{level()} {said}")
+        if shots: await owner.screenshot(path=f"{shots}/17-ask-done.png")
+
         sam_screens = [s["id"] for s in (await (await sam_ctx.request.get(base + "/auth/me")).json()).get("screens", [])]
         check("someone who was not given the ability has no Ask screen", "ask" not in sam_screens and len(sam_screens) > 0, str(sam_screens))
 

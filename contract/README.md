@@ -164,8 +164,9 @@ From the hub:
 ```
 
 - **uses**: capability names, each `read` or `write`. `log` is the hub's log. `documents` is the documents the
-  hub keeps for this screen (below). `agent` is the hub's agent: `read` to ask it things. `any` is every kind
-  of device, and never covers those three. This is the most the screen may ever do, for anyone.
+  hub keeps for this screen (below). `agent` is the hub's agent: `read` to ask it things, `write` to have it
+  do things for the person, each after their yes. `any` is every kind of device, and never covers those three.
+  This is the most the screen may ever do, for anyone.
 - **values**: `all` or `asked`. Left out, it is `all`: the screen is sent every value its person may see, when
   it connects and as they change. With `asked` it is sent no values until it says which ones it is showing,
   with a `watch` message, and then only those. A screen that shows a few values of a large device should ask.
@@ -233,6 +234,13 @@ A screen does not say who the person is. The hub knows from their sign-in.
   keeps what was said, in memory only, and ignores any history a screen sends. The agent shows a person only
   what that person may already see through their screens, so a screen that can ask is not a way to see more.
   Its words arrive as text and are to be shown as text.
+- Lets the agent change something for a person only on a screen that uses `agent` for `write`, for a person
+  with an ability that allows that, and only after that person's yes. A run that wants to change something
+  ends with `RUN_FINISHED` whose `outcome` is `{ type: "interrupt", interrupts }`, as AG-UI describes: each
+  interrupt has an `id`, a `message` that is the hub's own question, and the `toolCallId` it belongs to. The
+  screen answers with a `run` whose `input.resume` has one `{ interruptId, status, payload: { approved } }`
+  for every interrupt. Only `status: "resolved"` with `approved: true` is a yes. The hub does what was shown,
+  and nothing a screen sends can make it do anything else. An answer is waited for five minutes.
 - Refuses a connection from any browser page that is not the hub's own, and from anyone not signed in.
 - Disconnects the screen at once when the person's roles or slots change, or they are signed out.
 
