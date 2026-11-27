@@ -95,12 +95,18 @@ export class PluginHost {
   #auditTick = 0;
   status: HostStatus = "down";
   restarts = 0;
+  /** Goes up every time a value changes, so what was worked out from the state can be told from stale. */
+  rev = 0;
 
   #proc?: PluginProcess;
   #launching?: Promise<void>;
   #pending = new Map<string, Pending>();
   #inflight?: { id: string; items: Map<string, Pending>; timer: Timer };
   #ticker?: Timer;
+  /** How far apart commands to the device are kept, and when the last one went. */
+  #every = 33;
+  #lastFlush = 0;
+  #flushSoon = false;
   #watchdog?: Timer;
   #restartTimer?: Timer;
   #restartDelay = 250;
@@ -169,7 +175,8 @@ export class PluginHost {
   /** Start the plugin. Never throws for a plugin that fails: it is logged and retried, and the hub carries on. */
   async start(): Promise<void> {
     const perSecond = this.manifest.limits?.writesPerSecond ?? 30;
-    this.#ticker = setInterval(() => this.#flush(), Math.max(10, Math.round(1000 / perSecond)));
+    this.#every = Math.max(10, Math.round(1000 / perSecond));
+    this.#ticker = setInterval(() => this.#flush(), this.#every);
     this.#watchdog = setInterval(() => this.#watch(), this.tuning.pollMs ?? 250);
     await this.#launch();
   }
@@ -370,6 +377,7 @@ export class PluginHost {
     }
     if (full) {
       for (const key of [...this.state.keys()]) if (!(key in values)) this.state.delete(key);
+      this.rev++;
     }
     if (firstFull) {
       this.status = "running";
@@ -382,7 +390,10 @@ export class PluginHost {
       });
       for (const w of this.#readyWaiters.splice(0)) w();
     }
-    if (Object.keys(changed).length) { for (const l of this.#changeListeners) l(changed); }
+    if (Object.keys(changed).length) {
+      this.rev++;
+      for (const l of this.#changeListeners) l(changed);
+    }
   }
 
   /** Ask for a value to be set. Resolves when the device has read it back, or says why not. */
@@ -432,6 +443,25 @@ export class PluginHost {
         superseded: waiting ? waiting.superseded + 1 : 0,
         resolve,
       });
+      this.#atOnce();
+    });
+  }
+
+  /**
+   * The device is sent commands no more often than it said it can take them. But the first change after a
+   * quiet spell has nothing to wait behind, so it goes at once and the pacing starts from it: a button
+   * pressed, or the first touch of a fader, is not held for the rest of a tick it had no part in.
+   */
+  #atOnce(): void {
+    if (this.#flushSoon || this.#inflight || performance.now() - this.#lastFlush < this.#every) return;
+    this.#flushSoon = true;
+    // After everything asked for in this same moment has been taken in, so they go together.
+    queueMicrotask(() => {
+      this.#flushSoon = false;
+      if (this.#inflight || !this.#pending.size || !this.#ticker) return;
+      clearInterval(this.#ticker);
+      this.#ticker = setInterval(() => this.#flush(), this.#every);
+      this.#flush();
     });
   }
 
@@ -455,31 +485,40 @@ export class PluginHost {
     const id = newId();
     const items = new Map(this.#pending);
     this.#pending.clear();
+    this.#lastFlush = performance.now();
     const set: Values = {};
-    for (const [key, item] of items) {
-      set[key] = item.value;
-      item.sentAt = performance.now();
-      item.sentId = this.log.append({
-        type: "skillfully.command.sent",
-        source: "core",
-        subject: `${this.id}:${key}`,
-        actor: item.ctx.actor,
-        via: item.ctx.via,
-        traceid: item.ctx.traceid,
-        data: {
-          key,
-          requested: item.value,
-          before: this.state.get(key) ?? null,
-          superseded: item.superseded,
-          command: id,
-        },
-      }).id;
-    }
+    // One trip to the disk for everything that goes to the device together.
+    this.log.batch(() => {
+      for (const [key, item] of items) {
+        set[key] = item.value;
+        item.sentAt = performance.now();
+        item.sentId = this.log.append({
+          type: "skillfully.command.sent",
+          source: "core",
+          subject: `${this.id}:${key}`,
+          actor: item.ctx.actor,
+          via: item.ctx.via,
+          traceid: item.ctx.traceid,
+          data: {
+            key,
+            requested: item.value,
+            before: this.state.get(key) ?? null,
+            superseded: item.superseded,
+            command: id,
+          },
+        }).id;
+      }
+    });
     this.#inflight = { id, items, timer: setTimeout(() => this.#onTimeout(), COMMAND_TIMEOUT_MS) };
     this.#proc.send({ type: "command", id, set });
   }
 
   #onResult(id: string, values: Values, errors: Record<string, { code: string; message: string }>): void {
+    // One trip to the disk for everything the device answered together.
+    this.log.batch(() => this.#result(id, values, errors));
+  }
+
+  #result(id: string, values: Values, errors: Record<string, { code: string; message: string }>): void {
     const flight = this.#inflight;
     if (!flight || flight.id !== id) {
       this.#plog({
@@ -541,7 +580,10 @@ export class PluginHost {
         item.resolve({ ok: false, error });
       }
     }
-    if (Object.keys(changed).length) { for (const l of this.#changeListeners) l(changed); }
+    if (Object.keys(changed).length) {
+      this.rev++;
+      for (const l of this.#changeListeners) l(changed);
+    }
   }
 
   #onTimeout(): void {

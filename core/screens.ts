@@ -48,19 +48,27 @@ export class Screens {
     },
   ) {
     const { devices, approvals } = deps;
-    // Pass a driver's news on to the screens that may hear it.
+    // Pass a driver's news on to the screens that may hear it. People who may read the same things are
+    // told the same thing, so it is worked out and put into words once for all of them, not once each.
     devices.onChange((host, values) => {
+      const said = new Map<string, string | null>();
       for (const c of this.#connections) {
         if (!approvals.allowed(c.screen.id, host.id)) continue;
-        const mine = this.#only(c, values);
-        if (Object.keys(mine).length) {
-          tell(c.socket, { type: "state", plugin: host.id, full: false, values: mine });
+        let text = said.get(c.access.readsAs);
+        if (text === undefined) {
+          const mine = this.#only(c, values);
+          text = Object.keys(mine).length
+            ? JSON.stringify({ type: "state", plugin: host.id, full: false, values: mine })
+            : null;
+          said.set(c.access.readsAs, text);
         }
+        if (text && c.socket.readyState === WebSocket.OPEN) c.socket.send(text);
       }
     });
     devices.onHealth(() => this.tellPlugins());
     // Screens that were shown the old one start again and are shown the new one.
     devices.onReplaced((id) => {
+      this.#whole.delete(id);
       for (const s of this.all.values()) {
         if (approvals.allowed(s.manifest.id, id)) this.dropScreen(s.manifest.id);
       }
@@ -152,6 +160,27 @@ export class Screens {
   #only(c: Connection, values: Values): Values {
     return Object.fromEntries(Object.entries(values).filter(([k]) => c.access.canRead(k)));
   }
+  /**
+   * Everything a device holds that one person may see, as the message a screen is sent when it connects.
+   * A large device holds tens of thousands of values, and going through them for every phone is what
+   * made fifty phones connecting at once hold everything up. So it is kept for as long as the device has
+   * not changed, and shared by everyone who may read the same things.
+   */
+  #whole = new Map<string, { rev: number; by: Map<string, string> }>();
+  #everything(c: Connection, h: PluginHost): string {
+    let held = this.#whole.get(h.id);
+    if (!held || held.rev !== h.rev || held.by.size > 64) {
+      this.#whole.set(h.id, held = { rev: h.rev, by: new Map() });
+    }
+    let text = held.by.get(c.access.readsAs);
+    if (text === undefined) {
+      const values: Values = {};
+      for (const [key, value] of h.state) if (c.access.canRead(key)) values[key] = value;
+      text = JSON.stringify({ type: "state", plugin: h.id, full: true, values });
+      held.by.set(c.access.readsAs, text);
+    }
+    return text;
+  }
   /** The log as one person may see it through one screen: entries about values and drivers they can already see. */
   #logFor(c: Connection, entries: LogEntry[]): LogEntry[] {
     if (this.deps.accounts.isSuperuser(c.person)) return entries;
@@ -204,14 +233,7 @@ export class Screens {
         plugins: mine.map((h) => this.describe(h, c)),
         capabilities: this.#definitionsFor(c),
       });
-      for (const h of mine) {
-        tell(socket, {
-          type: "state",
-          plugin: h.id,
-          full: true,
-          values: this.#only(c, Object.fromEntries(h.state)),
-        });
-      }
+      for (const h of mine) socket.send(this.#everything(c, h));
     };
     socket.onclose = () => this.#connections.delete(c);
     socket.onmessage = (e) => {
@@ -274,19 +296,21 @@ export class Screens {
       via,
     });
     tell(c.socket, { type: "doc-ack", ref, id, ok: true });
-    // Everyone looking at this screen sees the change, each given only what they may read.
+    // Everyone looking at this screen who may read that document is told about it, and only it: what
+    // changed, not everything the screen keeps. It is put into words once for those who may change it
+    // and once for those who may not.
+    const said = new Map<boolean, string>();
     for (const other of this.#connections) {
-      if (other.screen.id !== c.screen.id || !other.access.sees(DOCUMENTS)) continue;
-      const mine = (await documents.list(other.screen.id)).filter((d) =>
-        other.access.canRead(`${DOCUMENTS}/${d.id}`)
-      ).map((d) => ({ ...d, write: other.access.canWrite(`${DOCUMENTS}/${d.id}`) }));
-      tell(other.socket, {
-        type: "docs",
-        ref: null,
-        ok: true,
-        docs: mine,
-        create: other.access.canWrite(`${DOCUMENTS}/new`),
-      });
+      if (other.screen.id !== c.screen.id || !other.access.canRead(`${DOCUMENTS}/${id}`)) continue;
+      const write = other.access.canWrite(`${DOCUMENTS}/${id}`);
+      let text = said.get(write);
+      if (text === undefined) {
+        text = JSON.stringify(
+          m.type === "doc-put" ? { type: "doc", id, doc: m.doc, write } : { type: "doc", id, gone: true },
+        );
+        said.set(write, text);
+      }
+      if (other.socket.readyState === WebSocket.OPEN) other.socket.send(text);
     }
   }
 

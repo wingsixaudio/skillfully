@@ -93,6 +93,17 @@ export class Access {
   canWrite(key: string): boolean {
     return matches(this.#write, key);
   }
+
+  /**
+   * One text that is the same for any two people who may read exactly the same things. Whatever is worked
+   * out for one of them from a device's values holds for the other, so it is worked out once.
+   */
+  get readsAs(): string {
+    return this.#readsAs ??= JSON.stringify(
+      [...this.#read].map(([name, patterns]) => [name, patterns.map((p) => p.join("/")).sort()]).sort(),
+    );
+  }
+  #readsAs?: string;
 }
 
 /** Fill {slots} from the person. A pattern that needs a slot the person does not have covers nothing. */
@@ -114,15 +125,24 @@ function fill(keys: string[], person: Person): Pattern[] {
   return out;
 }
 
+// This is asked once for every value, for every phone, every time something changes, and once for every
+// value a device holds each time a phone connects. So it makes nothing it can do without: the key is only
+// taken apart when a pattern needs its parts.
 function matches(map: Map<string, Pattern[]>, key: string): boolean {
   const slash = key.indexOf("/");
   const capability = slash < 0 ? key : key.slice(0, slash);
-  const patterns = [...map].filter(([name]) => covers(name, capability)).flatMap(([, p]) => p);
-  if (!patterns.length) return false;
-  const parts = slash < 0 ? [] : key.slice(slash + 1).split("/");
-  return patterns.some((p) =>
-    p[0] === "**" || (p.length === parts.length && p.every((want, i) => want === "*" || want === parts[i]))
-  );
+  let parts: string[] | undefined;
+  for (const [name, patterns] of map) {
+    if (!covers(name, capability)) continue;
+    next: for (const p of patterns) {
+      if (p[0] === "**") return true;
+      parts ??= slash < 0 ? [] : key.slice(slash + 1).split("/");
+      if (p.length !== parts.length) continue;
+      for (let i = 0; i < p.length; i++) if (p[i] !== "*" && p[i] !== parts[i]) continue next;
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Why a screen's abilities cannot be accepted, or null when they can. */

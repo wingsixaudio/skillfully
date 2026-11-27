@@ -8,6 +8,7 @@
     "conformance": "deno run --allow-net=127.0.0.1 --allow-read --allow-env=HOME,DENO_DIR,SYSTEMROOT,LOCALAPPDATA,USERPROFILE --allow-run conformance/run.ts",
     "check-plugin": "deno run --allow-read --allow-env=HOME,DENO_DIR,SYSTEMROOT,LOCALAPPDATA,USERPROFILE --allow-run core/check_plugin.ts",
     "add-module": "deno run --allow-read --allow-write=./data --allow-env=HOME,DENO_DIR,SYSTEMROOT,LOCALAPPDATA,USERPROFILE core/add_module.ts",
+    "bench": "tools/bench/run.sh",
     "plugin-report": "deno run --allow-read --allow-env=HOME,DENO_DIR,SYSTEMROOT,LOCALAPPDATA,USERPROFILE --allow-run tools/plugin_report.ts"
   },
   "fmt": {

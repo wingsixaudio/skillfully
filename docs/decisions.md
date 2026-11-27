@@ -395,7 +395,29 @@ change, as key patterns with their slots already filled in. It is theirs and nob
 screen gives nothing away, and it lets any screen dim what is not a person's to touch and say why, without
 trying and being refused. It decides nothing. The hub checks every command as before.
 
+**Performance is measured, and the measurement is kept.** `deno task bench` starts a hub, puts a room's worth
+of load on it from another process and reports what a person would feel and how long the hub's own loop was
+held up. `docs/performance.md` has what it showed and what is still true. The rule that came out of it: what
+is asked for every value, for every phone, on every change has to cost almost nothing, and anything worked out
+for one person that holds for everyone like them is worked out once.
+
+**A device is paced from its first command, not by a clock.** A device is still sent commands no faster than
+it said it can take them. But the first change after a quiet moment goes at once and the pacing starts from
+it, so a press is not held for the rest of a tick it had no part in.
+
+**A screen is told which document changed, not sent all of them again.** When anyone keeps or removes a
+document, everyone on the screen who may read it gets `doc` with that one document. Sending everything again
+was the simplest thing and grew with the number of documents times the number of phones.
+
 ## Open, and worth deciding before the next stage
+
+- **How long the log is kept.** It is append-only and nothing is removed, and a fader being moved writes sixty
+  entries a second, about 700 bytes each. A year is several gigabytes. Two things would hold it down without
+  giving up the record: write a fader's travel as what it started at and what it ended at, with how many steps
+  in between, and not as every step; and start a new log file each month, keeping older months as files that
+  can be moved off the hub. Neither is done, because both change what the log promises.
+- **Screens say which values they are showing.** Today a phone is sent every value it may see. On a large
+  board that is a megabyte to show a few dozen. It needs a message in the contract.
 
 - **Giving a role one canvas and not another.** Canvas's abilities are for the whole screen: "use everything
   on a canvas" reaches every connection Canvas was given, and a person is shown every canvas that has

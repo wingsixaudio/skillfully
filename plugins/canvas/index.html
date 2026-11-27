@@ -1600,6 +1600,21 @@
           "|",
         );
 
+      /** Every document the hub has given this person, as it gave them. The canvases are worked out from these. */
+      let kept = [];
+      function sort() {
+        canvases = kept.filter((d) => d.doc && d.doc.kind === "canvas").map((d) => ({
+          ...d,
+          problems: C.check(d.doc),
+        })).filter(forMe).sort((a, b) => String(a.doc.name || a.id).localeCompare(String(b.doc.name || b.id)));
+        if (wanted && canvases.some((c) => c.id === wanted)) {
+          chosen = wanted;
+          page = 0;
+          wanted = null;
+        }
+        draw();
+      }
+
       addEventListener("message", (ev) => {
         if (ev.source !== parent) return;
         const m = ev.data;
@@ -1645,16 +1660,14 @@
           answered = true;
           allowed = m.ok !== false;
           mayCreate = !!m.create;
-          canvases = (m.docs || []).filter((d) => d.doc && d.doc.kind === "canvas").map((d) => ({
-            ...d,
-            problems: C.check(d.doc),
-          })).filter(forMe).sort((a, b) => String(a.doc.name || a.id).localeCompare(String(b.doc.name || b.id)));
-          if (wanted && canvases.some((c) => c.id === wanted)) {
-            chosen = wanted;
-            page = 0;
-            wanted = null;
-          }
-          draw();
+          kept = m.docs || [];
+          sort();
+        }
+        // One document was kept or removed, by anyone on this screen.
+        if (m.type === "doc") {
+          kept = kept.filter((d) => d.id !== m.id);
+          if (!m.gone) kept.push({ id: m.id, doc: m.doc, write: m.write });
+          sort();
         }
         if (m.type === "doc-ack") {
           const on = asked.get(m.ref);
