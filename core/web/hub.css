@@ -538,3 +538,12 @@ button:disabled {
   opacity: .4;
   cursor: not-allowed;
 }
+
+/* What a device reports can be one long word: an address, a list as text. It breaks where it must, so a
+   reading is never wider than the phone it is read on. */
+.row.reading > b {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: right;
+}

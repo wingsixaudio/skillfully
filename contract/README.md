@@ -94,16 +94,30 @@ From the driver:
 | `result` | Once for each command                                            | `values` read back from the device, and `errors`                      |
 | `health` | After the welcome, on every change, and at least every 5 seconds | `ok`, `degraded` or `down`, with a reason                             |
 | `event`  | When something happens that is not a value                       | a name and optional data                                              |
+| `keep`   | When it learns something it needs again next time it starts      | `data`, an object of its own, at most 64,000 characters as JSON       |
+| `filled` | When it has filled in some of its own settings                   | `values` by setting id                                                |
+
+A driver stores nothing itself: it cannot write a file. What it can only learn while running, and needs again,
+it asks the hub to keep. The usual case is pairing, where a device hands over something to show next time. The
+hub keeps the newest `keep` for that device and hands it back in `welcome` as `kept`. It does nothing else
+with it. It is not shown on any page, not written to the log or to the device's file, and it goes when the
+device is removed.
+
+`filled` is for settings in the driver's own form that it can work out for itself: that it is now paired, or
+an address it found. The hub treats them as if a person had typed them into the form, with two limits a person
+does not have. A secret is never filled in this way. And a setting that decides what the driver may reach on
+the network, such as the `host` in `{host}:9999`, is never the driver's to change. The driver is not started
+again, and a person's later change to the same setting wins.
 
 From the hub:
 
-| Message    | Meaning                                                   |
-| ---------- | --------------------------------------------------------- |
-| `welcome`  | The answer to hello. Carries the mode and the settings.   |
-| `command`  | Set these values. Has an id and a `set` of values by key. |
-| `resync`   | Send a full state now.                                    |
-| `mode`     | The mode changed. For information only.                   |
-| `shutdown` | Stop within 2 seconds.                                    |
+| Message    | Meaning                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------- |
+| `welcome`  | The answer to hello. Carries the mode, the settings, and `kept`: whatever the driver last asked to have kept. |
+| `command`  | Set these values. Has an id and a `set` of values by key.                                                     |
+| `resync`   | Send a full state now.                                                                                        |
+| `mode`     | The mode changed. For information only.                                                                       |
+| `shutdown` | Stop within 2 seconds.                                                                                        |
 
 ## Rules for drivers
 

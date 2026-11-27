@@ -55,7 +55,15 @@ export interface Tuning {
   restMs?: number;
   /** A move that goes on longer than this is written and begun again. */
   longestMoveMs?: number;
+  /** What this driver last asked to have kept, and where what it asks next is put. */
+  kept?: () => Record<string, unknown> | undefined;
+  keep?: (data: Record<string, unknown>) => void;
+  /** Where settings the driver filled in for itself are put: all of them, as they now stand. */
+  filled?: (settings: Record<string, unknown>) => void;
 }
+
+/** The most a driver may ask the hub to keep, as JSON. A pairing is a few thousand characters. */
+const KEEP_MAX = 64_000;
 
 /** What the hub holds for one driver: what was chosen for it, what it was allowed, and what it was refused. */
 export interface HeldByHub extends Held {
@@ -259,6 +267,7 @@ export class PluginHost {
         dir: this.dir,
         manifest: this.manifest,
         settings: this.settings,
+        kept: this.tuning.kept?.(),
         mode: this.mode,
         granted: this.granted,
         gateway: this.gateway,
@@ -347,6 +356,22 @@ export class PluginHost {
         this.settingsForm = m.fields;
         for (const l of this.#healthListeners) l();
         return;
+      case "keep": {
+        // Kept for the driver's next start and handed to nothing else. The log says that it happened
+        // and how much, never what: this is where a pairing lives.
+        const size = JSON.stringify(m.data).length;
+        const fits = size <= KEEP_MAX;
+        if (fits) this.tuning.keep?.(m.data);
+        this.#plog({
+          type: "skillfully.plugin.kept",
+          source: this.#source,
+          subject: this.id,
+          data: fits ? { size } : { size, refused: `more than ${KEEP_MAX} characters` },
+        });
+        return;
+      }
+      case "filled":
+        return this.#onFilled(m.values);
       case "event":
         // A plugin's own words. Stored as data under its name, never acted on.
         this.#plog({
@@ -768,6 +793,53 @@ export class PluginHost {
       await Deno.truncate(path, 0).then(() => (this.#auditAt = 0), () => {});
     }
     if (asked) { for (const l of this.#healthListeners) l(); }
+  }
+
+  /**
+   * A driver filling in some of its own settings: an address it found, or that it is now paired. It is
+   * held to what a person could have typed into the same form, and to less: never a secret, and never a
+   * setting that decides what the driver may reach, since that would be a driver granting itself the
+   * network. What is accepted is kept as a person's would be, and the driver is not started again for it.
+   */
+  #onFilled(values: Record<string, Value>): void {
+    const form = this.settingsForm ?? [];
+    const reach = new Set<string>();
+    for (const entry of [...this.granted, ...this.#denied, ...(this.manifest.permissions?.network ?? [])]) {
+      for (const m of String(entry).matchAll(/\{([^{}]+)\}/g)) reach.add(m[1]);
+    }
+    const taken: Record<string, Value> = {}, refused: string[] = [];
+    for (const [id, value] of Object.entries(values)) {
+      const f = form.find((f) => f.id === id);
+      const fits = !!f && !reach.has(id) && (
+        f.kind === "text"
+          ? typeof value === "string" && value.length <= 2000
+          : f.kind === "number"
+          ? typeof value === "number" && Number.isFinite(value) && (f.min === undefined || value >= f.min) &&
+            (f.max === undefined || value <= f.max)
+          : f.kind === "toggle"
+          ? typeof value === "boolean"
+          : f.kind === "choice"
+          ? (f.choices ?? []).some((c) => c.id === value)
+          : false
+      );
+      if (!fits) refused.push(id.slice(0, 64));
+      else if (this.settings[id] !== value) taken[id] = value;
+    }
+    const changed = Object.keys(taken);
+    if (changed.length) {
+      this.settings = { ...this.settings, ...taken };
+      this.tuning.filled?.(this.settings);
+    }
+    if (changed.length || refused.length) {
+      // As when a person changes them: which settings, never what they were set to.
+      this.#plog({
+        type: "skillfully.plugin.settings",
+        source: this.#source,
+        subject: this.id,
+        data: { changed, by: "driver", ...(refused.length ? { refused: refused.slice(0, 20) } : {}) },
+      });
+      for (const l of this.#healthListeners) l();
+    }
   }
 
   /** Runs a few times a second: silence, flooding, memory and processor. */

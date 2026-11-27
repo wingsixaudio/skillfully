@@ -352,6 +352,7 @@ async def main():
         await lamp_item.get_by_role("button", name="Let people control it").click(); await act()
         await owner.locator("#deviceControl", has_text="On. People with a screen that uses it can change it.").wait_for(timeout=10000)
         check("letting people control it is one tap on its page", True)
+        check("a long value a device reports does not make its page wider than the phone", await owner.evaluate("() => document.documentElement.scrollWidth <= innerWidth"), str(await owner.evaluate("() => [document.documentElement.scrollWidth, innerWidth]")))
         do_it = owner.locator("#tryList .action", has_text=turn_on).first.get_by_role("button", name="Do it")
         await owner.wait_for_function("() => [...document.querySelectorAll('#tryList .action button')].some((b) => !b.disabled)", timeout=10000)
         await do_it.click(); await act()

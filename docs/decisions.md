@@ -121,6 +121,33 @@ is noted once. Questions about the computer get the same plain answers on every 
 the module's folder is there is answered no. A refusal that still gets through is said in words about what the
 module tried, and the device is called less than it could be, not down: the module is still running.
 
+**A driver can ask the hub to keep something for it, and nothing else can read it.** A driver stores nothing:
+it cannot write a file, and that does not change. But a device that is paired hands over something to show
+next time, and a driver that forgot it would have to be paired again after every restart, which is every time
+someone saves its settings. So a driver may send the hub one thing to keep, and is handed it back when it next
+starts. It is kept apart from the device's record, because the record is shown on pages, written to the
+device's file and told to anything listening, and this is where a pairing lives. The log says that something
+was kept and how large, never what. It goes when the device is removed.
+
+**A driver may fill in its own settings, and not the ones that decide what it reaches.** A module that pairs
+ticks its own Paired box and fills in the network card it found, and Companion shows that in the form. If the
+hub did not, the form would say Unpaired about a paired device, and saving it would unpair it. So a driver may
+fill in settings from its own form, held to what a person could type there. Two things a person may do and a
+driver may not: fill in a secret, and change a setting that a network grant is written in terms of. A driver
+that could move its own `host` would be granting itself the network. The log says which settings a driver
+filled in, as it does for a person, and which it was refused.
+
+**For a Companion module, both are what `saveConfig` becomes.** A module saves its whole settings as one
+thing. The bridge keeps all of it for the module, and fills in the form with the parts a person could have
+typed. When the module starts, the form's settings are the hub's and everything else is what the module kept.
+What a module saves as it starts, before it has been told anything, is only its defaults, and replaces
+nothing.
+
+**An action is taken as begun, not waited on.** A press waited for the module to finish the action, and gave
+up after a second and a half. An action that pairs does not finish until someone has typed a code, so pressing
+it looked like a failure while it was working. Companion does not wait on an action. After that second and a
+half a press is now answered as begun, and an action that fails later is noted in the log.
+
 **A module's own rules for its settings are held to, in the module's process.** A module can say how a setting
 must be written, as a pattern. The hub's form ignored that, so an address typed wrongly reached the module and
 failed in the module's words or none. The pattern is the module's code, and a pattern can be written to take
@@ -712,8 +739,9 @@ was the simplest thing and grew with the number of documents times the number of
   2.x load differently and are refused at install with a plain reason.
 - **What Companion does on a module's behalf.** Sending OSC and sharing a UDP port are asked of the host, not
   done by the module. The bridge refuses both and records that the module asked.
-- **A module's stored settings.** Companion keeps a module's settings and upgrades them between versions. The
-  hub hands settings over fresh at each start, so a module's upgrade scripts never run.
+- **A module's upgrade scripts.** Companion upgrades a module's saved settings between versions of the module.
+  The hub keeps what a module saves and hands it back, but starts every module as new, so its upgrade scripts
+  never run. A module whose settings changed shape between versions may need them filled in again.
 - **The Mac app is not signed.** Without an Apple developer account, a Mac has to be told once to open it
   anyway, under Privacy & Security. Signing is in the build already. Having Apple check each build, which is
   what removes that step, needs the account and is not wired up.
@@ -735,7 +763,9 @@ was the simplest thing and grew with the number of documents times the number of
 - More than a few Companion modules. A module written for the tests runs in every check. Two real ones are
   built from their source in a check that reports and does not block: the TP-Link Kasa module drives a pretend
   plug, and the Android TV module, whose library asks a great deal of the computer it is on, is shown to start
-  and report for itself on Linux and on a Mac. No module has driven real equipment through the hub in a check,
-  and the Android TV module has not been paired with a television by anyone.
+  and report for itself on Linux and on a Mac, and is paired with a pretend television that speaks a
+  television's own messages: a code read off its screen and typed in, a key sent, the hub stopped and started,
+  and still paired. No module has driven real equipment through the hub in a check, and nobody has yet paired
+  the Android TV module with a real television through the hub.
 - More than a handful of phones at once.
 - Meters. The contract has no message for them yet.

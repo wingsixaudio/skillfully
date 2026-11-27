@@ -42,10 +42,12 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
     // The module says what settings it takes, and says in plain words that they need filling in.
     await until("the device describes its settings", () => !!host().settingsForm);
     const d = await h.device(id);
-    assertEquals(d.form.map((f: { id: string; kind: string }) => [f.id, f.kind]), [["host", "text"], [
-      "port",
-      "number",
-    ]]);
+    assertEquals(d.form.map((f: { id: string; kind: string }) => [f.id, f.kind]), [
+      ["host", "text"],
+      ["port", "number"],
+      ["paired", "toggle"],
+      ["card", "text"],
+    ]);
     assertEquals(d.form[0].label, "Lamp address");
     assertEquals(d.form[1].default, 7000);
     assertEquals(d.module, { id: "skillfully-test-lamp", name: "skillfully-test-lamp", version: "1.0.0" });

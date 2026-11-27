@@ -9,6 +9,7 @@ import type {
   Mode,
   SettingsField,
   ToPlugin,
+  Value,
   Values,
 } from "../contract/types.ts";
 
@@ -18,8 +19,11 @@ export interface CommandOutcome {
 }
 
 export interface PluginHandlers {
-  /** Called once, after the hub's welcome. Connect to the device here. */
-  start(settings: Record<string, unknown>, mode: Mode): void | Promise<void>;
+  /**
+   * Called once, after the hub's welcome. Connect to the device here. `kept` is what this driver last
+   * asked the hub to keep, on an earlier run.
+   */
+  start(settings: Record<string, unknown>, mode: Mode, kept?: Record<string, unknown>): void | Promise<void>;
   /** Every value the device has right now. */
   fullState(): Values;
   /** Set values on the device and answer with what it read back. */
@@ -37,6 +41,13 @@ export interface PluginLink {
   settings(fields: SettingsField[]): void;
   event(name: string, data?: Record<string, unknown>): void;
   health(status: HealthStatus, reason?: string): void;
+  /**
+   * Ask the hub to keep something for the next start: what a device handed over when they were paired.
+   * The newest replaces the one before. The hub does not show it, log it or write it to a file.
+   */
+  keep(data: Record<string, unknown>): void;
+  /** Fill in some of this driver's own settings, as a person could have. Never a secret. */
+  fill(values: Record<string, Value>): void;
 }
 
 function arg(name: string): string {
@@ -66,7 +77,7 @@ export function runPlugin(identity: { id: string; version: string }, handlers: P
     switch (m.type) {
       case "welcome":
         try {
-          await handlers.start(m.settings, m.mode);
+          await handlers.start(m.settings, m.mode, m.kept);
         } catch (err) {
           status = "down";
           reason = String((err as Error).message ?? err).slice(0, 300);
@@ -116,6 +127,10 @@ export function runPlugin(identity: { id: string; version: string }, handlers: P
       if (started) send({ type: "state", full: true, values: handlers.fullState() });
     },
     settings: (fields) => send({ type: "settings", fields }),
+    keep: (data) => send({ type: "keep", data }),
+    fill: (values) => {
+      if (Object.keys(values).length) send({ type: "filled", values });
+    },
     event: (name, data) => send(data ? { type: "event", name, data } : { type: "event", name }),
     health: (s, r) => {
       status = s;

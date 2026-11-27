@@ -24,6 +24,9 @@ class Lamp extends InstanceBase {
 			// The module says how an address is written: numbers, for this lamp. What is typed is held to that.
 			{ type: 'textinput', id: 'host', label: 'Lamp address', default: '', width: 8, regex: '/^\\d{1,3}(\\.\\d{1,3}){3}$/' },
 			{ type: 'number', id: 'port', label: 'Port', default: 7000, min: 1, max: 65535, width: 4 },
+			// Filled in by the module itself when it pairs, the way a module for a television does.
+			{ type: 'checkbox', id: 'paired', label: 'Paired', default: false, width: 4 },
+			{ type: 'textinput', id: 'card', label: 'Network card (found when pairing)', default: '', width: 8 },
 		]
 	}
 
@@ -39,6 +42,7 @@ class Lamp extends InstanceBase {
 				callback: async (action) => this.send(`level ${Number(action.options.level)}`),
 			},
 			snoop: { name: 'Try to reach past the sandbox', options: [], callback: async () => this.snoop() },
+			pair: { name: 'Pair with the lamp', options: [], callback: async () => this.pair() },
 			lookup: { name: 'Ask about the computer, the way libraries do', options: [], callback: async () => this.lookup() },
 			'bad name!': { name: 'An action whose id a key cannot hold', options: [], callback: async () => {} },
 		})
@@ -60,9 +64,24 @@ class Lamp extends InstanceBase {
 			{ variableId: 'level', name: 'Level' },
 			{ variableId: 'snoop', name: 'Sandbox test result' },
 			{ variableId: 'lookup', name: 'What the computer said about itself' },
+			{ variableId: 'pairing', name: 'What the module was started with' },
 			{ variableId: 'Lamp_Model.v2', name: 'Model' },
 		])
-		this.setVariableValues({ power: 'unknown', level: '', snoop: '', lookup: '', 'Lamp_Model.v2': 'L-100' })
+		this.setVariableValues({
+			power: 'unknown',
+			level: '',
+			snoop: '',
+			lookup: '',
+			'Lamp_Model.v2': 'L-100',
+			// What it was handed when it started: what a person filled in, and what it saved for itself before.
+			pairing: JSON.stringify({
+				paired: config.paired === true,
+				card: config.card ?? '',
+				token: config.token?.key ? 'held' : 'none',
+				// Whether its try at moving its own address, when it paired, took.
+				moved: config.host === '203.0.113.9',
+			}),
+		})
 		if (!config.host) {
 			this.updateStatus(InstanceStatus.BadConfig, 'Lamp address not set')
 			return
@@ -118,6 +137,18 @@ class Lamp extends InstanceBase {
 		const sock = this.sock
 		this.sock = null
 		sock?.destroy()
+	}
+
+	// Pairing, as a module does it: the device hands over something to keep, and the module saves its whole
+	// settings with that in them. It also tries to move its own address, which is not its to move.
+	pair() {
+		this.saveConfig({
+			...this.config,
+			paired: true,
+			card: 'aa:bb:cc:dd:ee:ff',
+			host: '203.0.113.9',
+			token: { key: 'PRIVATE-KEY-MATERIAL', cert: 'a certificate' },
+		})
 	}
 
 	// What libraries do to learn about the computer they are on: run a program from inside a callback, where
