@@ -2,6 +2,7 @@
 // reading a definition file, and holds every driver and screen to it. Nothing
 // in the hub's own code names a capability.
 
+import { RESERVED } from "./access.ts";
 import { here } from "./paths.ts";
 import {
   ajv,
@@ -128,7 +129,7 @@ export class Capabilities {
       if (!checked.ok) {
         throw new Error(`${dir}/${name} is not a valid capability definition: ${checked.problem}`);
       }
-      if (["log", "any"].includes(checked.value.capability)) {
+      if (RESERVED.includes(checked.value.capability)) {
         throw new Error(
           `${dir}/${name}: "${checked.value.capability}" means something to the hub and cannot name a capability`,
         );

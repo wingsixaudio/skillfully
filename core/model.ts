@@ -100,12 +100,85 @@ async function readSome(res: Response): Promise<string> {
   return new TextDecoder().decode(all);
 }
 
-/** Ask the model for its next turn. */
+/**
+ * Read a turn that arrives a piece at a time, as server-sent events, and put it back together. Words are
+ * passed on as they come. What is returned is the same as if it had all come at once.
+ */
+async function readPieces(res: Response, hear: (words: string) => void, clean: (t: unknown) => string) {
+  // deno-lint-ignore no-explicit-any
+  const blocks: any[] = [];
+  const partial: string[] = [];
+  let stop = "", tokensIn = 0, tokensOut = 0, total = 0, held = "";
+  const decoder = new TextDecoder();
+  // deno-lint-ignore no-explicit-any
+  const take = (e: any) => {
+    if (e.type === "message_start") tokensIn = e.message?.usage?.input_tokens ?? 0;
+    else if (e.type === "content_block_start" && typeof e.index === "number" && e.index < 64) {
+      blocks[e.index] = { ...e.content_block };
+      partial[e.index] = "";
+    } else if (e.type === "content_block_delta" && blocks[e.index]) {
+      if (e.delta?.type === "text_delta" && typeof e.delta.text === "string") {
+        blocks[e.index].text = (blocks[e.index].text ?? "") + e.delta.text;
+        if (e.delta.text) hear(e.delta.text);
+      } else if (e.delta?.type === "input_json_delta" && typeof e.delta.partial_json === "string") {
+        partial[e.index] += e.delta.partial_json;
+      }
+    } else if (e.type === "content_block_stop" && blocks[e.index]?.type === "tool_use") {
+      try {
+        blocks[e.index].input = partial[e.index] ? JSON.parse(partial[e.index]) : {};
+      } catch {
+        blocks[e.index].input = {};
+      }
+    } else if (e.type === "message_delta") {
+      if (typeof e.delta?.stop_reason === "string") stop = e.delta.stop_reason;
+      if (typeof e.usage?.output_tokens === "number") tokensOut = e.usage.output_tokens;
+    } else if (e.type === "error") {
+      const why = clean(e.error?.message ?? "");
+      throw new ModelError(
+        "turned_away",
+        "The model's service stopped part way." + (why ? ` It said: ${why}` : ""),
+      );
+    }
+  };
+  for await (const chunk of res.body ?? []) {
+    total += chunk.length;
+    if (total > ANSWER_MAX) {
+      await res.body?.cancel().catch(() => {});
+      throw new ModelError("not_understood", "The model's answer was too large to read.");
+    }
+    held += decoder.decode(chunk, { stream: true }).replaceAll("\r\n", "\n");
+    for (let end = held.indexOf("\n\n"); end >= 0; end = held.indexOf("\n\n")) {
+      const data = held.slice(0, end).split("\n").filter((l) => l.startsWith("data:")).map((l) =>
+        l.slice(5).trim()
+      );
+      held = held.slice(end + 2);
+      if (!data.length) continue;
+      let e;
+      try {
+        e = JSON.parse(data.join("\n"));
+      } catch {
+        continue;
+      }
+      take(e);
+    }
+  }
+  return {
+    content: blocks.filter(Boolean),
+    stop_reason: stop,
+    usage: { input_tokens: tokensIn, output_tokens: tokensOut },
+  };
+}
+
+/**
+ * Ask the model for its next turn. With `hear`, its words are passed on as they are written, where the
+ * model's service can send them that way.
+ */
 export async function askModel(
   where: Where,
   asking: Asking,
   stop: AbortSignal,
   tuning: ModelTuning = {},
+  hear?: (words: string) => void,
 ): Promise<Turn> {
   // Whatever the service says back is repeated to a person and written down. The key is never in it.
   const clean = (text: unknown) => String(text ?? "").split(where.key).join("[key]").slice(0, 300);
@@ -120,12 +193,15 @@ export async function askModel(
       }
       : {}),
     messages: asking.messages,
+    ...(hear ? { stream: true } : {}),
   });
 
   for (let tries = 1;; tries++) {
     const signal = AbortSignal.any([stop, AbortSignal.timeout(tuning.timeoutMs ?? 60_000)]);
     let res: Response;
-    let text: string;
+    let text = "";
+    // deno-lint-ignore no-explicit-any
+    let said: any = null;
     try {
       res = await fetch(url, {
         method: "POST",
@@ -139,7 +215,12 @@ export async function askModel(
         // The key goes to the address a superuser chose, and to nowhere that address points on to.
         redirect: "error",
       });
-      text = await readSome(res);
+      // Its words a piece at a time, when that is how they are sent. Anything else is read whole.
+      if (hear && res.ok && (res.headers.get("content-type") ?? "").includes("text/event-stream")) {
+        said = await readPieces(res, hear, clean);
+      } else {
+        text = await readSome(res);
+      }
     } catch (err) {
       if (err instanceof ModelError) throw err;
       if (stop.aborted) throw new ModelError("stopped", "It was stopped.");
@@ -149,11 +230,11 @@ export async function askModel(
       throw new ModelError("unreachable", `The model could not be reached at ${new URL(url).host}.`);
     }
 
-    // deno-lint-ignore no-explicit-any
-    let said: any = null;
-    try {
-      said = JSON.parse(text);
-    } catch { /* said below */ }
+    if (!said) {
+      try {
+        said = JSON.parse(text);
+      } catch { /* said below */ }
+    }
 
     if (!res.ok) {
       const why = clean(said?.error?.message ?? "");
@@ -190,9 +271,13 @@ export async function askModel(
     }
     const uses: Turn["uses"] = [];
     let words = "";
+    const whole = text !== "";
     for (const b of said.content) {
-      if (b?.type === "text" && typeof b.text === "string") words += b.text;
-      else if (b?.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
+      if (b?.type === "text" && typeof b.text === "string") {
+        words += b.text;
+        // It came all at once, so it is passed on all at once.
+        if (whole && hear && b.text) hear(b.text);
+      } else if (b?.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
         const input = b.input && typeof b.input === "object" && !Array.isArray(b.input) ? b.input : {};
         uses.push({ id: b.id, name: b.name, input });
       }

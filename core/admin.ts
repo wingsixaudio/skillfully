@@ -6,6 +6,7 @@
 
 import type { Value } from "../contract/types.ts";
 import type { Accounts, Person } from "./accounts.ts";
+import { OWN } from "./access.ts";
 import type { Agent } from "./agent.ts";
 import type { Engine } from "./engine.ts";
 import type { Approvals } from "./approvals.ts";
@@ -185,7 +186,8 @@ export function adminApi(deps: AdminDeps) {
         })),
         suggested: m.roles ?? [],
         // Which connections this screen could use, and which it has been given.
-        works: Object.keys(m.uses).filter((u) => u !== "log"),
+        // The kinds of device it works with. What is the hub's own, such as its log or its agent, is not one.
+        works: Object.keys(m.uses).filter((u) => !OWN.includes(u)),
         eligible: screens.eligible(m).map((h) => ({ id: h.id, name: h.manifest.name })),
         connections: approvals.of(m.id),
         slots: [
@@ -417,7 +419,8 @@ export function adminApi(deps: AdminDeps) {
         return outcome(agent.turn(me.id, false));
       // Asking it something hands out nothing: it can only look, and a superuser already sees everything.
       case "agent/ask":
-        return outcome(await engine.ask(me, b.question));
+        // `raw` is the answer with IDs where the names are, kept to carry a conversation on. A page has no use for it.
+        return outcome(await engine.ask(me, b.question).then((r) => (r.ok ? { ...r, raw: undefined } : r)));
       case "person":
         return outcome(accounts.addPerson(me.id, b.name));
       case "person/invite":

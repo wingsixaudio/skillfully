@@ -734,6 +734,29 @@ async def main():
         check("its model heard the key in the one place it belongs, and no person's name at all", h["asked"] == 4 and set(h["keys"]) == {secret_key} and secret_key not in h["text"] and "Sam" not in h["text"] and "Evan" not in h["text"], str(h["keys"]))
         if shots: await owner.screenshot(path=f"{shots}/13-agent-asked.png", full_page=True)
 
+        # --- Talking to it, on a screen of its own ---
+        await owner.goto(base + "/s/ask")
+        ask = owner.frame_locator("#screen")
+        await ask.locator("#name", has_text="Ask Robin").wait_for(timeout=8000)
+        check("the Ask screen names the agent, says what it answers from, and offers a place to start", "Answers from what you can see" in await ask.locator("#linkText").inner_text() and await ask.locator(".start button").count() == 2 and await ask.locator("#fresh").is_hidden())
+        if shots: await owner.screenshot(path=f"{shots}/14-ask-empty.png")
+        await ask.locator("#q").fill("Is anything not working?"); await ask.locator("#q").press("Enter")
+        await ask.locator(".theirs", has_text="Nothing looks wrong.").wait_for(timeout=15000)
+        await ask.locator("#send", has_text="Ask").wait_for()
+        said = await ask.locator("#talk").inner_text()
+        check("asked, the question, what it looked at and its answer are shown in order, and the box is cleared", said.index("Is anything not working?") < said.index("Listed the devices: Simulated board") < said.index("I can see Simulated board (48 values). Nothing looks wrong.") and await ask.locator("#q").input_value() == "" and await ask.locator(".waiting").count() == 0, said)
+        check("what the agent says is shown as words and never run", await ask.locator("#talk img, #talk script, #talk a").count() == 0)
+        if shots: await owner.screenshot(path=f"{shots}/15-ask.png")
+        await owner.reload()
+        ask = owner.frame_locator("#screen")
+        await ask.locator(".theirs", has_text="Nothing looks wrong.").wait_for(timeout=8000)
+        check("come back to, the conversation is still there", await ask.locator(".mine").count() == 1 and await ask.locator("#fresh").is_visible())
+        await ask.locator("#fresh").click()
+        await ask.locator(".start").wait_for()
+        check("Start over empties it", await ask.locator(".mine, .theirs").count() == 0)
+        sam_screens = [s["id"] for s in (await (await sam_ctx.request.get(base + "/auth/me")).json()).get("screens", [])]
+        check("someone who was not given the ability has no Ask screen", "ask" not in sam_screens and len(sam_screens) > 0, str(sam_screens))
+
         check("no page errors", not unexpected, "; ".join(unexpected))
         await b.close()
 

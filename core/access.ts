@@ -21,11 +21,22 @@ export const ANY = "any";
  * "read" to be given them, "write" to change them. An ability can name which, as `keys`.
  */
 export const DOCUMENTS = "documents";
+/**
+ * In `uses` and in an ability's `allows`, this name stands for the hub's agent: "read" to ask it things,
+ * which it answers by looking, and "write" to ask it to do things. Either way the agent shows and does
+ * for a person only what that person may see and do for themselves.
+ */
+export const AGENT = "agent";
+/** What belongs to the hub itself and is always asked for by name. "any" never reaches these. */
+export const OWN = ["log", DOCUMENTS, AGENT];
 /** Names that mean something to the hub itself, so no capability may take them. */
-export const RESERVED = ["log", ANY, DOCUMENTS];
-/** "any" is every kind of device. It never reaches the hub's log or a screen's documents: those are asked for by name. */
+export const RESERVED = [ANY, ...OWN];
+/** "any" is every kind of device. It never reaches what is the hub's own. */
 const covers = (name: string, capability: string) =>
-  name === capability || (name === ANY && capability !== "log" && capability !== DOCUMENTS);
+  name === capability || (name === ANY && !OWN.includes(capability));
+/** How far a screen said it goes for one name: what it listed, or "any" when the name is a kind of device. */
+const ceilingOf = (screen: ScreenManifest, capability: string): Level | undefined =>
+  screen.uses[capability] ?? (OWN.includes(capability) ? undefined : screen.uses[ANY]);
 
 export class Access {
   /** Capability to the patterns a person may read and may write. */
@@ -45,7 +56,7 @@ export class Access {
     }
     for (const ability of granted) {
       for (const [capability, allows] of Object.entries(ability.allows)) {
-        const ceiling = screen.uses[capability] ?? (capability === "log" ? undefined : screen.uses[ANY]);
+        const ceiling = ceilingOf(screen, capability);
         if (!ceiling) continue; // an ability cannot reach past what the screen declared
         const access: Level = typeof allows === "string" ? allows : allows.access;
         const patterns = typeof allows === "string" ? ALL : fill(allows.keys, person);
@@ -152,7 +163,7 @@ export function abilitiesProblem(screen: ScreenManifest): string | null {
     if (seen.has(a.id)) return `it lists the ability "${a.id}" twice`;
     seen.add(a.id);
     for (const [capability, allows] of Object.entries(a.allows)) {
-      const ceiling = screen.uses[capability] ?? (capability === "log" ? undefined : screen.uses[ANY]);
+      const ceiling = ceilingOf(screen, capability);
       if (!ceiling) {
         return `its ability "${a.id}" allows "${capability}", which the screen does not list under uses`;
       }

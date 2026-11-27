@@ -164,7 +164,8 @@ From the hub:
 ```
 
 - **uses**: capability names, each `read` or `write`. `log` is the hub's log. `documents` is the documents the
-  hub keeps for this screen (below). This is the most the screen may ever do, for anyone.
+  hub keeps for this screen (below). `agent` is the hub's agent: `read` to ask it things. `any` is every kind
+  of device, and never covers those three. This is the most the screen may ever do, for anyone.
 - **values**: `all` or `asked`. Left out, it is `all`: the screen is sent every value its person may see, when
   it connects and as they change. With `asked` it is sent no values until it says which ones it is showing,
   with a `watch` message, and then only those. A screen that shows a few values of a large device should ask.
@@ -188,6 +189,7 @@ From the screen:
 | `{ type: "docs", ref }`                    | Ask for this screen's documents. The person needs an ability that allows `documents`.                                                                                                                                                                                                                                                                                                                                            |
 | `{ type: "doc-put", id, doc, ref }`        | Keep a document, whole, under a name. The person needs an ability that allows writing `documents`, or that document by name.                                                                                                                                                                                                                                                                                                     |
 | `{ type: "doc-remove", id, ref }`          | Remove a document. The same ability as keeping it.                                                                                                                                                                                                                                                                                                                                                                               |
+| `{ type: "agent", do, input }`             | Talk to the hub's agent. The person needs an ability that allows `agent`. `do` is `open` (show me my conversation, and what happens in it from now on), `run` (ask something: `input` is an AG-UI `RunAgentInput`, of which only the newest user message is read), `stop`, or `new` (start over).                                                                                                                                |
 
 To the screen:
 
@@ -202,6 +204,7 @@ To the screen:
 | `{ type: "docs", ref, ok, docs, create }`                                             | The answer to a `docs`: every document this person may read. Each of `docs` is `{ id, doc, write }`. `create` says whether this person may add one.                                                                                                                                                                                                                                                       |
 | `{ type: "doc", id, doc, write }` or `{ type: "doc", id, gone: true }`                | One document was kept, or removed. Sent to everyone on the screen who may read it, whenever anyone changes it. Only that document is sent.                                                                                                                                                                                                                                                                |
 | `{ type: "doc-ack", ref, id, ok }` or `{ ..., ok: false, message }`                   | The answer to a `doc-put` or a `doc-remove`                                                                                                                                                                                                                                                                                                                                                               |
+| `{ type: "agent", event }`                                                            | One AG-UI event from the person's conversation with the agent: `MESSAGES_SNAPSHOT`, `RUN_STARTED`, `TEXT_MESSAGE_START`, `TEXT_MESSAGE_CONTENT`, `TEXT_MESSAGE_END`, `TOOL_CALL_START`, `TOOL_CALL_ARGS`, `TOOL_CALL_END`, `TOOL_CALL_RESULT`, `RUN_FINISHED`, `RUN_ERROR`, and `CUSTOM` named `skillfully.asked` for the question as the hub took it.                                                    |
 
 A screen does not say who the person is. The hub knows from their sign-in.
 
@@ -223,6 +226,13 @@ A screen does not say who the person is. The hub knows from their sign-in.
   there too. An ability says who may read and who may change them, for all of them (`"documents": "write"`) or
   by name (`{ "access": "write", "keys": ["main"] }`). A change is logged with who made it, never with what it
   was.
+- Carries a conversation with the hub's agent for a screen that uses `agent`, for a person whose abilities
+  allow it. `hello` then has `agent`: its name and whether it can answer now, or null when the hub has none.
+  What goes each way is [AG-UI](https://docs.ag-ui.com): the screen sends a run's input and is told what
+  happens as events. A person has one conversation, on every phone of theirs, until they start over. The hub
+  keeps what was said, in memory only, and ignores any history a screen sends. The agent shows a person only
+  what that person may already see through their screens, so a screen that can ask is not a way to see more.
+  Its words arrive as text and are to be shown as text.
 - Refuses a connection from any browser page that is not the hub's own, and from anyone not signed in.
 - Disconnects the screen at once when the person's roles or slots change, or they are signed out.
 

@@ -5,7 +5,7 @@
 // the signed-in person's roles go.
 
 import type { Ability, ScreenManifest, Value, Values } from "../contract/mod.ts";
-import { Access, ANY, DOCUMENTS } from "./access.ts";
+import { Access, AGENT, ANY, DOCUMENTS } from "./access.ts";
 import { Documents } from "./documents.ts";
 import type { Accounts, Person } from "./accounts.ts";
 import type { Approvals } from "./approvals.ts";
@@ -14,6 +14,7 @@ import type { Devices } from "./devices.ts";
 import type { PluginHost } from "./host.ts";
 import { type Log, type LogEntry, newId } from "./log.ts";
 import { Reach } from "./reach.ts";
+import type { Talks, Tell } from "./talk.ts";
 import { readWatch, type Watch, watches } from "./watching.ts";
 
 export interface Screen {
@@ -30,6 +31,8 @@ interface Connection {
   watch?: Map<string, Watch>;
   /** The same text for any two connections that are watching the same things. */
   watchId: string;
+  /** How this connection hears what happens in its person's conversation with the agent. */
+  hears?: Tell;
 }
 
 const capabilityOf = (key: string) => key.slice(0, key.indexOf("/"));
@@ -40,6 +43,8 @@ const tell = (ws: WebSocket, m: unknown) => {
 export class Screens {
   /** Screens, by id. */
   readonly all = new Map<string, Screen>();
+  /** The conversations people have with the agent. Given once the agent's engine exists. */
+  talks?: Talks;
   #connections = new Set<Connection>();
 
   constructor(
@@ -292,6 +297,8 @@ export class Screens {
         reach: access.reach(),
         plugins: mine.map((h) => this.describe(h, c)),
         capabilities: this.#definitionsFor(c),
+        // A screen that may talk to the agent is told its name and whether it can answer now.
+        ...(access.sees(AGENT) ? { agent: this.talks?.about() ?? null } : {}),
       });
       if (!c.watch) { for (const h of mine) socket.send(this.#everything(c, h)); }
     };
@@ -387,6 +394,8 @@ export class Screens {
       limit?: unknown;
       traceid?: unknown;
       keys?: unknown;
+      do?: unknown;
+      input?: unknown;
     };
     try {
       m = JSON.parse(raw);
@@ -395,6 +404,16 @@ export class Screens {
     }
     if (m.type === "watch") return this.#watch(c, m.keys);
     const via = `screen/${c.screen.id}`;
+    // Talking to the agent, for a person whose abilities on this screen include it.
+    if (m.type === "agent") {
+      if (!c.access.sees(AGENT) || !this.talks) return;
+      c.hears ??= (event) => {
+        if (c.socket.readyState !== WebSocket.OPEN) return false;
+        c.socket.send(JSON.stringify({ type: "agent", event }));
+        return true;
+      };
+      return this.talks.handle({ person: c.person, via }, m, c.hears);
+    }
     // A screen's documents: given to whoever may read them, changed only by whoever may write that one.
     if (m.type === "docs" || m.type === "doc-put" || m.type === "doc-remove") {
       return await this.#documents(c, m, via);

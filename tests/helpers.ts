@@ -10,6 +10,7 @@ export const SIM = `${ROOT}/plugins/sim-console`;
 export const SWITCH = `${ROOT}/plugins/sim-switch`;
 export const FADER = `${ROOT}/plugins/one-fader`;
 export const CONTROLS = `${ROOT}/plugins/controls`;
+export const ASK = `${ROOT}/plugins/ask`;
 export const FIXTURES = `${ROOT}/tests/fixtures`;
 export const LEVEL = "console/input/1/bus/1/level";
 export const OWNER_PIN = "482915";
@@ -373,6 +374,19 @@ export class Phone {
 
   removeDoc(id: unknown): Promise<Msg> {
     return this.#ask({ type: "doc-remove", id });
+  }
+
+  /** Say something to the hub's agent: open the conversation, run a question, stop, or start over. */
+  agent(what: "open" | "run" | "stop" | "new", input?: unknown): void {
+    this.#ws.send(JSON.stringify({ type: "agent", do: what, ...(input === undefined ? {} : { input }) }));
+  }
+  /** Ask the agent a question the way a screen does. */
+  ask(content: string, more: Record<string, unknown> = {}): void {
+    this.agent("run", { messages: [{ id: crypto.randomUUID(), role: "user", content }], ...more });
+  }
+  /** Every AG-UI event this phone has been told, in order. */
+  get heard(): Msg[] {
+    return this.messages.filter((m) => m.type === "agent").map((m) => m.event);
   }
 
   close(): Promise<void> {
