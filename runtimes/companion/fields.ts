@@ -68,7 +68,11 @@ export function asField(f: any): SettingsField | null {
     return { ...base, kind: "choice", choices, ...withDefault };
   }
   if (type.startsWith("secret")) return { ...base, kind: "secret" };
-  if (type === "textinput" || type === "bonjour-device" || type === "colorpicker") {
+  // Companion fills this one in by searching the network for devices. The hub does not search, and a box
+  // that promises to would only be typed into wrongly. A module that has it also has somewhere to type
+  // the address, and that is what is shown.
+  if (type === "bonjour-device") return null;
+  if (type === "textinput" || type === "colorpicker") {
     return { ...base, kind: "text", ...withDefault };
   }
   return { ...base, kind: "note", help: "This setting cannot be shown here yet." };

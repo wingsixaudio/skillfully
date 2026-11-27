@@ -1,10 +1,11 @@
 # Every change that reaches main becomes a version a team's hub can update to.
 #
-# Two jobs, kept apart on purpose. The first packs the hub and proves the pack starts with nothing
-# fetched. It can read the repository and nothing else. The second holds the one secret, the key
-# versions are signed with, and does two things with it: signs the note about the version, and publishes
-# the note and the pack as a release. It builds nothing and runs nothing but the repository's own signing
-# script, at main.
+# Three jobs, kept apart on purpose. The first packs the hub and proves the pack starts with nothing
+# fetched. The second builds the Mac app around that same pack and proves the app starts it. Both can
+# read the repository and nothing else. The third holds the one secret, the key versions are signed
+# with, and does two things with it: signs the note about the version, and publishes the note, the pack
+# and the app as a release. It builds nothing and runs nothing but the repository's own signing script,
+# at main.
 #
 # Until the key exists (tools/new_key.ts says how to make it), this packs and checks, and publishes
 # nothing.
@@ -64,9 +65,35 @@ jobs:
           path: dist
           retention-days: 14
 
+  mac:
+    name: The Mac app, carrying this version
+    needs: pack
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: actions/download-artifact@v4
+        with:
+          name: version
+          path: dist
+      - name: Build the app and its disk image
+        run: apps/mac/build.sh dist/skillfully-hub-*.tgz "$RUNNER_TEMP/mac"
+      - name: The app starts the hub it carries
+        run: |
+          "$RUNNER_TEMP/mac/Skillfully.app/Contents/MacOS/Skillfully" --selftest --home="$RUNNER_TEMP/home"
+          grep -q "^${{ needs.pack.outputs.number }}-" "$RUNNER_TEMP/home/current"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: ${{ runner.temp }}/mac/Skillfully.dmg
+          retention-days: 14
+
   publish:
     name: Sign and publish
-    needs: pack
+    needs: [pack, mac]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The key is a secret of this environment, which only runs from main can use.
@@ -81,6 +108,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: version
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac
           path: dist
       - name: Sign the note about this version
         id: sign
@@ -101,4 +132,4 @@ jobs:
         run: |
           deno eval 'const l = JSON.parse(Deno.readTextFileSync("dist/latest.json")); console.log(l.notes.map((n) => "- " + n).join("\n"))' > notes.md
           gh release create "v$NUMBER" --title "Version $NUMBER" --notes-file notes.md --target "$GITHUB_SHA" \
-            "dist/skillfully-hub-$NUMBER.tgz" dist/latest.json dist/latest.json.sig
+            "dist/skillfully-hub-$NUMBER.tgz" dist/latest.json dist/latest.json.sig dist/Skillfully.dmg

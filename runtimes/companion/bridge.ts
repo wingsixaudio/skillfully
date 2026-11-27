@@ -13,6 +13,11 @@
 // This speaks the module API that Companion 3 and 4 use for modules built on @companion-module/base 1.x.
 
 import process from "node:process";
+import childProcess from "node:child_process";
+import os from "node:os";
+import fs from "node:fs";
+import { EventEmitter } from "node:events";
+import { Readable } from "node:stream";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import type { CommandError, HealthStatus, SettingsField, Values } from "../../contract/types.ts";
@@ -188,6 +193,11 @@ function fromModule(m: Wire): void {
     case "set-status": {
       const status = String(data?.status ?? "");
       const said = data?.message ? `: ${plainer(asText(data.message)).slice(0, 200)}` : "";
+      // A setting the module would not accept matters more than what the module says without it.
+      if (badSettings) {
+        link?.health("down", badSettings);
+        break;
+      }
       const health = HEALTH[status] ?? "down";
       link?.health(
         health,
@@ -319,7 +329,21 @@ function registered(m: Wire, data: any): void {
       for (const f of theirs) {
         if (secretIds.has(String(f?.id)) && "default" in f) secrets[f.id] = f.default;
       }
-      for (const [k, v] of Object.entries(settings)) (secretIds.has(k) ? secrets : config)[k] = v;
+      // What was filled in the wrong way is not handed to the module, which would only fail on it in its
+      // own words or none. The device says which setting it is until that is put right.
+      const wrong = notAccepted(theirs, settings);
+      badSettings = wrong.length
+        ? `${wrong.map((w) => `“${w}”`).join(" and ")} ${
+          wrong.length > 1 ? "are" : "is"
+        } not filled in the way this module accepts. Put that right under Settings.`
+        : undefined;
+      if (badSettings) link?.health("down", badSettings);
+      const skip = new Set(notAcceptedIds(theirs, settings));
+      // Nor is anything kept from before for a box the form no longer shows.
+      for (const f of theirs) if (asField(f) === null) skip.add(String(f?.id));
+      for (const [k, v] of Object.entries(settings)) {
+        if (!skip.has(k)) (secretIds.has(k) ? secrets : config)[k] = v;
+      }
       return minor >= 2
         ? call("updateConfigAndLabel", { label: identity.id, config, secrets })
         : call("updateConfig", config);
@@ -328,6 +352,9 @@ function registered(m: Wire, data: any): void {
 }
 
 function installHost(): void {
+  refuseRunning();
+  sayNothingOfThisComputer();
+  filesElsewhereAreNotThere();
   // The few environment values a module reads, and nothing from the real environment.
   Object.defineProperty(process, "env", {
     value: {
@@ -352,6 +379,156 @@ function installHost(): void {
   };
 }
 
+/** Set while a setting is filled in a way the module's own rule for it does not accept. */
+let badSettings: string | undefined;
+
+/**
+ * A module says how some settings must be written, as a pattern: an address, a network card's number.
+ * The pattern is the module's, so it is tried here, in the module's own process, and never in the hub.
+ * Returns the ids of the settings that are filled in and do not fit.
+ */
+// deno-lint-ignore no-explicit-any
+function notAcceptedIds(fields: any[], settings: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const f of fields) {
+    const value = settings[String(f?.id)];
+    if (typeof f?.regex !== "string" || f.regex.length > 2000) continue;
+    if (typeof value !== "string" && typeof value !== "number") continue;
+    const text = String(value);
+    if (!text || text.length > 500) continue;
+    const m = /^\/(.*)\/([a-z]*)$/s.exec(f.regex);
+    try {
+      if (m && !new RegExp(m[1], m[2].replace(/[gy]/g, "")).test(text)) out.push(String(f.id));
+    } catch { /* a pattern this runtime cannot read is not held against the person */ }
+  }
+  return out;
+}
+// deno-lint-ignore no-explicit-any
+function notAccepted(fields: any[], settings: Record<string, unknown>): string[] {
+  const ids = new Set(notAcceptedIds(fields, settings));
+  return fields.filter((f) => ids.has(String(f?.id))).map((f) =>
+    asText(f.label).slice(0, 80) || String(f.id)
+  );
+}
+
+/**
+ * A module may not run programs on the hub's computer, and some try: to ping a device, or to look up a
+ * network card's address. The sandbox refuses that in the middle of the attempt, in words about something
+ * else, where a module has no way to catch it. So the host answers first, the way a computer without that
+ * program would: an error handed to the module where it was written to expect one. What the module does
+ * without the program is then up to the module, which usually says so and carries on. Only the program's
+ * name is noted, never what was passed to it.
+ */
+function refuseRunning(): void {
+  // deno-lint-ignore no-explicit-any
+  const cp = childProcess as any;
+  // Each program is noted once: a module that keeps trying says nothing new by it.
+  const noted = new Set<string>();
+  const no = (program: unknown): Error => {
+    const name = String(program ?? "").trim().split(/\s+/)[0].split(/[\\/]/).pop()!.replace(/[^\w.+-]/g, "")
+      .slice(0, 40);
+    if (!noted.has(name) && noted.size < 50) {
+      noted.add(name);
+      link?.event("module.refused", { what: `run a program on this computer${name ? `: ${name}` : ""}` });
+    }
+    return Object.assign(
+      new Error(`A module may not run programs on the hub's computer${name ? ` (${name})` : ""}.`),
+      { code: "EPERM", errno: -1, syscall: "spawn", path: name },
+    );
+  };
+  const child = () => {
+    // deno-lint-ignore no-explicit-any
+    const c = new EventEmitter() as any;
+    Object.assign(c, {
+      pid: undefined,
+      stdin: null,
+      stdout: Readable.from([]),
+      stderr: Readable.from([]),
+      exitCode: null,
+      killed: false,
+      kill: () => false,
+      ref() {},
+      unref() {},
+    });
+    return c;
+  };
+  // Started and left to report: the error arrives as an event, to whoever is listening for one.
+  const started = (program: unknown) => {
+    const c = child(), err = no(program);
+    setTimeout(() => c.listenerCount("error") && c.emit("error", err), 0);
+    return c;
+  };
+  // Run for its output: the error arrives in the answer.
+  const asked = (program: unknown, ...rest: unknown[]) => {
+    const c = child(), err = no(program);
+    const answer = rest.findLast((r) => typeof r === "function") as ((...a: unknown[]) => void) | undefined;
+    setTimeout(() => answer ? answer(err, "", "") : c.listenerCount("error") && c.emit("error", err), 0);
+    return c;
+  };
+  cp.spawn = started;
+  cp.fork = started;
+  cp.exec = asked;
+  cp.execFile = asked;
+  cp.spawnSync = (program: unknown) => ({
+    pid: 0,
+    output: [null, "", ""],
+    stdout: "",
+    stderr: "",
+    status: null,
+    signal: null,
+    error: no(program),
+  });
+  cp.execSync = cp.execFileSync = (program: unknown) => {
+    throw no(program);
+  };
+}
+
+/**
+ * A module may not learn about the hub's computer either: its name, who is signed in to it, what it is
+ * made of, which networks it is on. Some libraries ask anyway, to tell a device who is calling. They are
+ * given the same plain answers on every hub, which say nothing about this one.
+ */
+function sayNothingOfThisComputer(): void {
+  // deno-lint-ignore no-explicit-any
+  const o = os as any;
+  Object.assign(o, {
+    hostname: () => "skillfully-hub",
+    release: () => "0.0.0",
+    version: () => "",
+    uptime: () => 0,
+    loadavg: () => [0, 0, 0],
+    totalmem: () => 8 * 1024 ** 3,
+    freemem: () => 4 * 1024 ** 3,
+    cpus: () => [{ model: "", speed: 0, times: { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 } }],
+    networkInterfaces: () => ({}),
+    userInfo: () => ({ username: "module", uid: -1, gid: -1, shell: null, homedir: packageDir }),
+    homedir: () => packageDir,
+    tmpdir: () => packageDir,
+  });
+}
+
+/**
+ * Asking whether a file is there never fails where modules were written to run: the answer is yes or no.
+ * Here, asking about a file outside the module's own folder is refused, loudly. To a module that is the
+ * same as the file not being there, so that is the answer it gets.
+ */
+function filesElsewhereAreNotThere(): void {
+  // deno-lint-ignore no-explicit-any
+  const f = fs as any;
+  const existsSync = f.existsSync.bind(f);
+  f.existsSync = (path: unknown) => {
+    try {
+      return existsSync(path);
+    } catch {
+      return false;
+    }
+  };
+  f.exists = (path: unknown, answer?: (there: boolean) => void) => {
+    const there = f.existsSync(path);
+    if (typeof answer === "function") setTimeout(() => answer(there), 0);
+  };
+}
+
 async function loadModule(): Promise<void> {
   let type = "commonjs";
   try {
@@ -361,13 +538,37 @@ async function loadModule(): Promise<void> {
   else createRequire(pathToFileURL(modulePath).href)(modulePath);
 }
 
+/** What the sandbox refused, in words about what the module was doing and not about the runtime's flags. */
+function refusal(message: string): string {
+  const m = /^Requires (\w+) access(?: to "?([^",]{1,120})"?)?/.exec(message);
+  if (!m) return message.split(",")[0].slice(0, 200);
+  const [, kind, what] = m;
+  const about = what ? `: ${what}` : "";
+  return ({
+    net: `reach somewhere on the network it was not given${about}`,
+    read: `read a file that is not its own${about}`,
+    write: `write a file${about}`,
+    run: `run a program on this computer${about}`,
+    env: "read this computer's environment",
+    sys: `ask about this computer${about}`,
+    ffi: "load a program library",
+  } as Record<string, string>)[kind] ?? `${kind}${about}`;
+}
+
 // The sandbox refusing something the module tried is worth saying plainly, and is not a reason to stop.
+// The module is still running, so its device is not called down for it: only less than it could be.
 const refusedBySandbox = (reason: unknown): boolean => {
   const e = reason as { name?: string; message?: string } | undefined;
   if (e?.name !== "NotCapable") return false;
-  const what = String(e.message ?? "").split(",")[0].slice(0, 200);
+  // Running a program is refused at its first step, which is reading the environment to hand on. What
+  // the module was doing is what is said.
+  const running = /child_process/.test(String((reason as Error)?.stack ?? ""));
+  const what = running ? "run a program on this computer" : refusal(String(e.message ?? ""));
   link?.event("module.refused", { what });
-  link?.health("down", `the hub refused something this module tried: ${what}`);
+  link?.health(
+    "degraded",
+    `This module tried to ${what}. The hub does not allow that, so part of it may not work.`,
+  );
   return true;
 };
 globalThis.addEventListener("unhandledrejection", (e) => {

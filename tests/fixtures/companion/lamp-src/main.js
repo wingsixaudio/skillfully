@@ -3,7 +3,9 @@
 import { InstanceBase, InstanceStatus, runEntrypoint } from '@companion-module/base'
 import net from 'node:net'
 import fs from 'node:fs/promises'
-import { exec } from 'node:child_process'
+import cp, { exec } from 'node:child_process'
+import os from 'node:os'
+import fsNow from 'node:fs'
 import path from 'node:path'
 
 class Lamp extends InstanceBase {
@@ -17,7 +19,10 @@ class Lamp extends InstanceBase {
 
 	getConfigFields() {
 		return [
-			{ type: 'textinput', id: 'host', label: 'Lamp address', default: '', width: 8 },
+			// Companion fills this in by searching the network. The hub does not search, and does not show it.
+			{ type: 'bonjour-device', id: 'bonjour_host', label: 'Find the lamp', width: 6 },
+			// The module says how an address is written: numbers, for this lamp. What is typed is held to that.
+			{ type: 'textinput', id: 'host', label: 'Lamp address', default: '', width: 8, regex: '/^\\d{1,3}(\\.\\d{1,3}){3}$/' },
 			{ type: 'number', id: 'port', label: 'Port', default: 7000, min: 1, max: 65535, width: 4 },
 		]
 	}
@@ -34,6 +39,7 @@ class Lamp extends InstanceBase {
 				callback: async (action) => this.send(`level ${Number(action.options.level)}`),
 			},
 			snoop: { name: 'Try to reach past the sandbox', options: [], callback: async () => this.snoop() },
+			lookup: { name: 'Ask about the computer, the way libraries do', options: [], callback: async () => this.lookup() },
 			'bad name!': { name: 'An action whose id a key cannot hold', options: [], callback: async () => {} },
 		})
 		// Ready-made buttons, the way a module offers them to Companion. Only what one press does is used
@@ -53,9 +59,10 @@ class Lamp extends InstanceBase {
 			{ variableId: 'power', name: 'Power' },
 			{ variableId: 'level', name: 'Level' },
 			{ variableId: 'snoop', name: 'Sandbox test result' },
+			{ variableId: 'lookup', name: 'What the computer said about itself' },
 			{ variableId: 'Lamp_Model.v2', name: 'Model' },
 		])
-		this.setVariableValues({ power: 'unknown', level: '', snoop: '', 'Lamp_Model.v2': 'L-100' })
+		this.setVariableValues({ power: 'unknown', level: '', snoop: '', lookup: '', 'Lamp_Model.v2': 'L-100' })
 		if (!config.host) {
 			this.updateStatus(InstanceStatus.BadConfig, 'Lamp address not set')
 			return
@@ -111,6 +118,27 @@ class Lamp extends InstanceBase {
 		const sock = this.sock
 		this.sock = null
 		sock?.destroy()
+	}
+
+	// What libraries do to learn about the computer they are on: run a program from inside a callback, where
+	// nothing can catch a refusal, and ask the system about itself. Written with no care taken, as they are.
+	lookup() {
+		setTimeout(() => {
+			cp.exec('arp -a /a/secret/argument', (err) => {
+				this.setVariableValues({
+					lookup: JSON.stringify({
+						run: err ? err.code : 'ran',
+						name: os.hostname(),
+						release: os.release(),
+						cards: Object.keys(os.networkInterfaces()).length,
+						user: os.userInfo().username,
+						elsewhere: fsNow.existsSync('/etc/hosts'),
+						own: fsNow.existsSync(process.env.MODULE_MANIFEST),
+						found: this.config.bonjour_host ?? null,
+					}),
+				})
+			})
+		}, 0)
 	}
 
 	// Everything a module should not be able to do. Each attempt reports what happened.
