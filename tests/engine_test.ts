@@ -1,5 +1,6 @@
 // The agent's engine: a question becomes an answer by looking, and only as far as it may look.
 
+import { look, type Looking } from "../core/agent_tools.ts";
 import { assert, assertEquals } from "./assert.ts";
 import { CONTROLS, hubWith, type Member, OWNER_PIN, SIM, SWITCH, type TestHub } from "./helpers.ts";
 import {
@@ -111,13 +112,23 @@ Deno.test("the agent answers by looking, and everything it did is on the record 
       "Soundboard",
     ],
   ]);
+  // Each kind of value comes with what the kind of device says about it: what it is, its range, and
+  // whether it is something to set.
   assertEquals(listed[0].holds[1], {
     values: "console/input/{input}/bus/{bus}/level",
     title: "Send level",
+    about: "How much of an input goes to a bus. The minimum means off.",
     kind: "number",
     unit: "dB",
+    min: -90,
+    max: 10,
+    can_be_set: true,
     count: 768,
   });
+  assert(listed[0].about.startsWith("A mixing console"));
+  assertEquals(listed[0].holds[0].can_be_set, undefined, "a name is read, not set");
+  // It is told which slots there are and which the person asking has, since a canvas is written with them.
+  assert(first.body.system.includes("The slots used on this hub: ears. The person asking has: none set."));
   assertEquals(results(third)[0].read, { device: "sim-console", values: { [NAME_3]: "Input 3" }, more: 0 });
   assertEquals(results(third)[1].read.values.map((v: { name: string }) => v.name), [
     "switch/outlet/1/name",
@@ -519,4 +530,46 @@ Deno.test("one question at a time each, turned off it stops where it is, and a s
   ]);
   assertEquals(OWNER_PIN.length, 6);
   await t.done();
+});
+
+Deno.test("the agent is told about buttons, which hold nothing, by what a device keeps beside them", async () => {
+  const hub = await hubWith([{ dir: SIM }]);
+  // A device of the general kind: two ready-made buttons with names, a reading, and nothing else.
+  const lamp = {
+    id: "lamp",
+    mode: "act",
+    health: { status: "ok" },
+    manifest: { name: "Stage lamp", capabilities: { generic: {} } },
+    state: new Map<string, string>([
+      ["generic/ready/lamp_on/title", "Lamp on"],
+      ["generic/ready/lamp_on/group", "Power"],
+      ["generic/ready/lamp_off/title", "Lamp off"],
+      ["generic/reading/power", "off"],
+    ]),
+  };
+  const l = {
+    hosts: () => [lamp],
+    sees: () => true,
+    seer: () => () => true,
+    writesThrough: () => "controls",
+    readsLog: false,
+    entry: () => false,
+    capabilities: hub.capabilities,
+    log: hub.log,
+    kept: { screens: () => [] },
+  } as unknown as Looking;
+  const device = JSON.parse((await look(l, "devices", {})).content).devices[0];
+  // deno-lint-ignore no-explicit-any
+  const buttons = device.holds.find((k: any) => k.values === "generic/ready/{name}");
+  assertEquals([buttons.kind, buttons.can_be_pressed, buttons.count, device.values], ["button", true, 2, 4]);
+  assert(String(buttons.about).length > 10);
+  // Searched for by what it is called, the value that holds the name says which button it belongs to.
+  const found =
+    JSON.parse((await look(l, "find_values", { device: "lamp", words: "lamp on" })).content).values;
+  // "on" is a word of its own here: it does not find "Lamp off" by way of the word "button".
+  assertEquals(found.map((v: Record<string, unknown>) => [v.name, v.holds, v.belongs_to_button]), [
+    ["generic/ready/lamp_on/title", "Lamp on", "generic/ready/lamp_on"],
+    ["generic/ready/lamp_on/group", "Power", "generic/ready/lamp_on"],
+  ]);
+  await hub.stop();
 });

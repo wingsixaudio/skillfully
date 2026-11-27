@@ -151,6 +151,7 @@ export class Engine {
     docs: "none" | "read" | "save" = "none",
   ): string {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const slots = this.deps.screens.slotNames();
     return [
       `You are ${agent.name}, the agent of a Skillfully hub. The hub connects a team's equipment, such as soundboards, video switchers and lights, to the people who use it, and keeps a log of what happens.`,
       "Someone signed in to the hub is asking you something. Answer it from what the hub holds, using your tools.",
@@ -163,6 +164,18 @@ export class Engine {
           ? " You can also ask for one to be kept, new or changed, with save_document. Read how that screen's documents are written first, with document_format, and find the real names of the values you tie anything to. The person is shown what you wrote, on that screen, and asked yes or no, like any other change."
           : ""),
       ]),
+      ...(slots.length
+        ? [
+          `Some things are each person's own, such as which mix is theirs. That is a slot: a short name with a number or a word, written in braces in a value's name or in a document. The slots used on this hub: ${
+            slots.join(", ")
+          }. The person asking has: ${
+            slots.filter((n) => asker.slots[n] !== undefined).map((n) => `${n} = ${asker.slots[n]}`).join(
+              ", ",
+            ) ||
+            "none set"
+          }.`,
+        ]
+        : []),
       "What you can see is what you have been given, and never more than the person asking may see for themselves. When a tool does not show you something, you cannot see it. Say so, and do not guess at what it holds.",
       readsLog
         ? "You may read the hub's log, as far as it is about things you can see."

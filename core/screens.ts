@@ -392,6 +392,22 @@ export class Screens {
     }
   }
 
+  /** The per-person slots the abilities of the hub's screens refer to, such as the one for whose mix is whose. */
+  slotNames(): string[] {
+    const names = new Set<string>();
+    for (const m of this.manifests()) {
+      for (const a of m.abilities) {
+        for (const allowed of Object.values(a.allows)) {
+          if (typeof allowed === "string") continue;
+          for (const key of allowed.keys) {
+            for (const x of key.matchAll(/\{([a-z][a-z0-9]*)\}/g)) names.add(x[1]);
+          }
+        }
+      }
+    }
+    return [...names].sort();
+  }
+
   /** Does this person have this screen open somewhere right now? */
   isAt(person: string, screen: string): boolean {
     for (const c of this.#connections) {
