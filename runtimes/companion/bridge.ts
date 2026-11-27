@@ -37,6 +37,8 @@ const identity = { id: arg("id"), version: arg("version") };
 const NAME = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$/;
 const TEXT_MAX = 2000;
 const ACTION_TIMEOUT_MS = 1500;
+/** After this long an action that never finished is forgotten, so nothing waits on it for ever. */
+const ACTION_LONGEST_MS = 10 * 60 * 1000;
 
 // --- The message channel a module expects from Companion ---
 
@@ -254,13 +256,46 @@ function fromModule(m: Wire): void {
       replaced();
       break;
     }
+    case "saveConfig": {
+      // A module saving its own settings: that it is now paired and with what, or an address it found.
+      // All of it is kept for its next start. What a person could have typed into the form is also
+      // filled in there, so the form says what is so. The hub decides which of those it takes: never one
+      // that decides what this module may reach.
+      // Started fresh, a module saves its defaults before it has been told anything. That is not news,
+      // and must not replace what it saved when it knew more.
+      if (!handed) {
+        answer(m);
+        break;
+      }
+      const saved: Record<string, unknown> = data?.config && typeof data.config === "object"
+        ? data.config
+        : {};
+      kept = {
+        config: saved,
+        ...(data?.secrets && typeof data.secrets === "object" ? { secrets: data.secrets } : {}),
+      };
+      const as = JSON.stringify(kept);
+      if (as !== keptAs) {
+        keptAs = as;
+        link?.keep(kept);
+      }
+      const mine: Record<string, string | number | boolean> = {};
+      for (const [k, v] of Object.entries(saved)) {
+        if (!fillable.has(k) || settings[k] === v || (v === "" && settings[k] === undefined)) continue;
+        if (typeof v !== "string" && typeof v !== "number" && typeof v !== "boolean") continue;
+        mine[k] = v;
+        settings[k] = v;
+      }
+      if (Object.keys(mine).length) link?.fill(mine);
+      answer(m);
+      break;
+    }
     case "upgradedItems":
-    case "saveConfig":
     case "setFeedbackDefinitions":
     case "updateFeedbackValues":
     case "recordAction":
     case "setCustomVariable":
-      // Parts of Companion that have no place in this hub: button looks and its own stored settings.
+      // Parts of Companion that have no place in this hub: button looks, and recording what a person does.
       answer(m);
       break;
     default:
@@ -288,6 +323,17 @@ function setValues(values: unknown, tell: boolean): void {
 // --- Starting the module the way Companion does ---
 
 let settings: Record<string, unknown> = {};
+/**
+ * What the module saved for itself on an earlier run: what a device handed it when they were paired, what
+ * it found out. Companion keeps that for a module. Here the hub does, and hands it back to this process
+ * and to nothing else.
+ */
+let kept: { config?: Record<string, unknown>; secrets?: Record<string, unknown> } = {};
+let keptAs = "";
+/** True once the module has been handed its settings. What it saves before that is only its own defaults. */
+let handed = false;
+/** The settings a person can fill in, by id. The module may fill these in for itself too, through the hub. */
+const fillable = new Set<string>();
 let ready: (() => void) | undefined;
 let failed: ((e: Error) => void) | undefined;
 function registered(m: Wire, data: any): void {
@@ -320,7 +366,10 @@ function registered(m: Wire, data: any): void {
     })
     .then((r: any) => {
       const theirs: any[] = Array.isArray(r?.fields) ? r.fields : [];
-      link?.settings(theirs.map(asField).filter((f): f is SettingsField => f !== null).slice(0, 100));
+      const form = theirs.map(asField).filter((f): f is SettingsField => f !== null).slice(0, 100);
+      link?.settings(form);
+      fillable.clear();
+      for (const f of form) if (f.kind !== "secret" && f.kind !== "note") fillable.add(f.id);
       // What the module calls a secret travels apart from the rest of its settings.
       const secretIds = new Set(
         theirs.filter((f) => String(f?.type).startsWith("secret")).map((f) => String(f.id)),
@@ -341,9 +390,17 @@ function registered(m: Wire, data: any): void {
       const skip = new Set(notAcceptedIds(theirs, settings));
       // Nor is anything kept from before for a box the form no longer shows.
       for (const f of theirs) if (asField(f) === null) skip.add(String(f?.id));
+      // What the module saved for itself last time. Not what the form holds: those settings are the
+      // hub's, where a person and the module both change them, and they arrive with the rest below.
+      for (const [k, v] of Object.entries(kept.config ?? {})) {
+        if (secretIds.has(k)) secrets[k] = v;
+        else if (!fillable.has(k) && !skip.has(k)) config[k] = v;
+      }
+      Object.assign(secrets, kept.secrets ?? {});
       for (const [k, v] of Object.entries(settings)) {
         if (!skip.has(k)) (secretIds.has(k) ? secrets : config)[k] = v;
       }
+      handed = true;
       return minor >= 2
         ? call("updateConfigAndLabel", { label: identity.id, config, secrets })
         : call("updateConfig", config);
@@ -597,7 +654,10 @@ async function command(set: Values): Promise<CommandOutcome> {
     if (pressed) Object.assign(options, pressed.options);
     else if (typeof value === "string") Object.assign(options, unpack(value) ?? {});
     try {
-      const r = await call("executeAction", {
+      // A module's action may take as long as it likes: one that pairs with a device does not finish
+      // until someone has read a code off a screen. Companion does not wait for it, and after a moment
+      // neither does a press here. It is taken as begun, and if it fails later that is noted.
+      const doing = call("executeAction", {
         action: {
           id: crypto.randomUUID(),
           controlId: "skillfully",
@@ -607,8 +667,26 @@ async function command(set: Values): Promise<CommandOutcome> {
           disabled: false,
         },
         surfaceId: undefined,
-      }, ACTION_TIMEOUT_MS) as { success?: boolean; errorMessage?: string } | undefined;
-      if (r && r.success === false) throw new Error(r.errorMessage ?? "the module said the action failed");
+      }, ACTION_LONGEST_MS) as Promise<{ success?: boolean; errorMessage?: string } | undefined>;
+      const said = (r: { success?: boolean; errorMessage?: string } | undefined) =>
+        r && r.success === false
+          ? asText(r.errorMessage ?? "the module said the action failed").slice(0, 300)
+          : "";
+      const first = await Promise.race([
+        doing.then(
+          (r) => ({ done: true, failed: said(r) }),
+          (e) => ({ done: true, failed: String(e.message) }),
+        ),
+        new Promise<{ done: false; failed: "" }>((r) =>
+          setTimeout(() => r({ done: false, failed: "" }), ACTION_TIMEOUT_MS)
+        ),
+      ]);
+      if (first.failed) throw new Error(first.failed);
+      if (!first.done) {
+        doing.then(said, (e) => String(e.message)).then((failed) => {
+          if (failed) link?.event("module.action", { action: id, failed: failed.slice(0, 300) });
+        });
+      }
       values[key] = true;
     } catch (err) {
       errors[key] = { code: "internal", message: String((err as Error).message).slice(0, 300) };
@@ -618,8 +696,10 @@ async function command(set: Values): Promise<CommandOutcome> {
 }
 
 link = runPlugin(identity, {
-  async start(given) {
-    settings = given;
+  async start(given, _mode, was) {
+    settings = { ...given };
+    kept = was ?? {};
+    keptAs = JSON.stringify(kept);
     installHost();
     const started = new Promise<void>((resolve, reject) => {
       ready = resolve;

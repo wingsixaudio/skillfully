@@ -4,6 +4,7 @@
 import { assert, assertEquals, assertThrows } from "./assert.ts";
 import { FIXTURES, gzipped, hubWith, ofType, pretendLamp, tar, unpacked, until } from "./helpers.ts";
 import type { DriverChoices } from "../core/devices.ts";
+import { startHub } from "../core/hub.ts";
 import { networkNotes, readTar } from "../core/packages.ts";
 import { runtimeOf } from "../core/runtimes.ts";
 import { resolveNetwork } from "../core/process.ts";
@@ -202,6 +203,85 @@ Deno.test("a setting filled in a way the module does not accept is said, and not
     assertEquals(ids.includes("host"), true);
   } finally {
     await close();
+    lamp.close();
+  }
+});
+
+Deno.test("what a module saves for itself is kept for it, and what it fills in is held to a person's limits", async () => {
+  const lamp = pretendLamp();
+  const dataDir = await Deno.makeTempDir({ prefix: "skillfully-data-" });
+  const installed = await unpacked(PACKAGE, dataDir, {
+    granted: ["{host}:{port}"],
+    settings: { host: "127.0.0.1", port: lamp.port },
+    mode: "act",
+  });
+  const db = `${dataDir}/hub.db`;
+  const first = await hubWith([installed.config], db, { dataDir });
+  // Started again later, it already has its owner.
+  let hub: { hosts: typeof first.hosts; devices: typeof first.devices; stop(): Promise<void> } = first;
+  try {
+    let host = hub.hosts.get(ID)!;
+    const started = () => JSON.parse(String(host.state.get(READING("pairing")) ?? "{}"));
+    await until("the module is connected", () => host.state.get(READING("power")) === "off");
+    assertEquals(started(), { paired: false, card: "", token: "none", moved: false });
+    // Starting, a module saves its own defaults. That is not something to keep.
+    assertEquals(ofType(first, "skillfully.plugin.kept").length, 0);
+
+    // It pairs: it saves a token the device handed it, ticks its own Paired box, fills in the network
+    // card it found, and tries to move its own address.
+    assert((await host.set(ACTION("pair"), true, { via: "test" })).ok);
+    await until("the hub has kept it", () => ofType(first, "skillfully.plugin.kept").length === 1);
+    await until("the form is filled in", () => hub.devices.record(ID).settings.paired === true);
+    assertEquals(hub.devices.record(ID).settings, {
+      host: "127.0.0.1", // not its to move: its address decides what it may reach
+      port: lamp.port,
+      paired: true,
+      card: "aa:bb:cc:dd:ee:ff",
+    });
+    const said = ofType(first, "skillfully.plugin.settings").at(-1)!;
+    assertEquals([said.source, said.data], [`plugin/${ID}`, {
+      changed: ["paired", "card"],
+      by: "driver",
+      refused: ["host"],
+    }]);
+    // Filling in its own settings does not start it again, as a person saving them does.
+    assertEquals(ofType(first, "skillfully.plugin.started").length, 1);
+    // What it kept is nowhere a person or a page reads: not the log, not what the Hub place is told,
+    // not the device's file.
+    const everywhere = JSON.stringify(first.log.read({ limit: 1000 })) +
+      await (await first.get("/admin/api/all")).text() +
+      await Deno.readTextFile(`${dataDir}/config/devices/${ID}.json`).catch(() => "");
+    assert(!everywhere.includes("PRIVATE-KEY-MATERIAL"), "what the module kept was shown somewhere");
+    assert(
+      everywhere.includes("aa:bb:cc:dd:ee:ff"),
+      "what it filled in is an ordinary setting, and is shown",
+    );
+
+    // The hub is stopped and started. The module is handed back what it saved, and what was filled in.
+    await hub.stop();
+    hub = await startHub({ dbPath: db, dataDir, plugins: [installed.config] });
+    host = hub.hosts.get(ID)!;
+    await until("the module is connected again", () => host.state.get(READING("power")) !== undefined);
+    assertEquals(started(), { paired: true, card: "aa:bb:cc:dd:ee:ff", token: "held", moved: false });
+
+    // A person unticks Paired. Theirs is the last word on a setting.
+    await hub.devices.setSettings(ID, { ...hub.devices.record(ID).settings, paired: false }, ["paired"], {
+      actor: "test",
+      via: "test",
+    });
+    host = hub.hosts.get(ID)!;
+    await until("it starts again unpaired", () => started().paired === false && started().token === "held");
+
+    // Removed, nothing of it is left.
+    await hub.devices.remove(ID, { actor: "test", via: "test" });
+    await hub.stop();
+    hub = await startHub({ dbPath: db, dataDir, plugins: [] });
+    const left = new (await import("node:sqlite")).DatabaseSync(db);
+    assertEquals((left.prepare("SELECT count(*) AS n FROM driver_kept").get() as { n: number }).n, 0);
+    left.close();
+  } finally {
+    await hub.stop().catch(() => {});
+    await Deno.remove(dataDir, { recursive: true }).catch(() => {});
     lamp.close();
   }
 });

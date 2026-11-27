@@ -148,6 +148,5 @@ To add something, read `CONTRIBUTING.md`. To see how it fits together, read `doc
 
 ## Not built yet
 
-A real device driver, the team roster and saved mixes, a place for plugins to keep data, HTTPS, plugin install
-and uninstall, record and replay of driver traffic, meters, and access for agents. See `docs/architecture.md`
-and `docs/decisions.md`.
+The team roster and saved mixes, HTTPS, record and replay of driver traffic, and meters. See
+`docs/architecture.md` and `docs/decisions.md`.
