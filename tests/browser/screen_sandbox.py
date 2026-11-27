@@ -61,7 +61,10 @@ async def main():
         if engine == "chromium" and os.environ.get("CHROME_PATH"): opts["executable_path"] = os.environ["CHROME_PATH"]
         b = await getattr(p, engine).launch(**opts)
         print(f"browser: {engine} {b.version}")
-        phone = dict(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, device_scale_factor=2)
+        # One device pixel to a CSS pixel. A sandboxed screen is drawn by a separate process, and Chromium does
+        # not always carry a pretended pixel density into it: after a screenshot, a click meant for a screen
+        # could land at half its coordinates. With nothing to carry, there is nothing to get out of step.
+        phone = dict(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, device_scale_factor=1)
         errors = []
 
         # --- The owner sets up the hub ---
