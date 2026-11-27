@@ -85,7 +85,7 @@ Deno.test("the agent answers by looking, and everything it did is on the record 
     KEY,
     "2023-06-01",
   ]);
-  assertEquals([first.body.model, first.body.max_tokens], [hub.agent.about().model, 1500]);
+  assertEquals([first.body.model, first.body.max_tokens], [hub.agent.about().model, 4096]);
   assertEquals(first.body.messages, [{ role: "user", content: [{ type: "text", text: QUESTION }] }]);
   // It is offered looking and nothing else. The log is not on offer until a superuser says so.
   assertEquals(first.body.tools.map((x: { name: string }) => x.name), [

@@ -81,6 +81,11 @@ class Namer {
 }
 
 const QUESTION_MAX = 2000;
+/**
+ * The most its model may write in one turn. A model that thinks before it speaks spends from the same
+ * allowance, so this has room for both.
+ */
+const MAX_TOKENS = 4096;
 const ANSWER_MAX = 8000;
 /** How many questions are worked on at once. A hub is one small computer with a show to run. */
 const AT_ONCE = 2;
@@ -274,7 +279,7 @@ export class Engine {
       try {
         turn = await askModel(
           { address: about.address, key, model: about.model },
-          { system, tools, messages, maxTokens: 1500 },
+          { system, tools, messages, maxTokens: MAX_TOKENS },
           stop,
           this.tuning,
           talk.hear ? (words) => say(names.take(words)) : undefined,

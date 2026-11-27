@@ -122,6 +122,13 @@ async function readPieces(res: Response, hear: (words: string) => void, clean: (
         if (e.delta.text) hear(e.delta.text);
       } else if (e.delta?.type === "input_json_delta" && typeof e.delta.partial_json === "string") {
         partial[e.index] += e.delta.partial_json;
+      } else if (e.delta?.type === "thinking_delta" && typeof e.delta.thinking === "string") {
+        // A model that thinks first sends its thinking as a block of its own, in pieces like its words,
+        // and signs it at the end. It is never shown or read here, but it has to go back with the turn
+        // exactly as it came, or the service will not take the conversation back.
+        blocks[e.index].thinking = (blocks[e.index].thinking ?? "") + e.delta.thinking;
+      } else if (e.delta?.type === "signature_delta" && typeof e.delta.signature === "string") {
+        blocks[e.index].signature = (blocks[e.index].signature ?? "") + e.delta.signature;
       }
     } else if (e.type === "content_block_stop" && blocks[e.index]?.type === "tool_use") {
       try {

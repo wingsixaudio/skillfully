@@ -122,5 +122,6 @@ These are not fixed. They are in the order they would bite.
 - More than two devices at once, or any Companion module under load.
 - A small computer such as a Raspberry Pi. Disk writes there are slower, which is what change 2 is for.
 - More than 66 phones.
-- The agent against a real model. Every test uses a pretend one on the same computer, so how long a real
-  answer takes, and what it costs, is not known yet.
+- The agent against a real model, beyond one try. The first real question found a fault no pretend model had:
+  a model that thinks before it speaks sends its thinking as a block of its own, and it was sent back empty.
+  That is fixed and tested. How long a real answer takes, and what it costs, is still not known.
