@@ -2,8 +2,12 @@
   "capability": "generic",
   "version": 1,
   "title": "Readings and actions",
-  "description": "A device described only in its own words: the readings it reports and the actions it offers, under whatever names it gives them. Drivers dropped in from other ecosystems land here. A capability with a shared vocabulary, such as switch, is better wherever one fits, because screens can then work with any device of that kind.",
-  "options": { "type": "object", "additionalProperties": false, "properties": {} },
+  "description": "A device described only in its own words: the readings it reports, the actions it offers and the ready-made buttons its author put together, under whatever names it gives them. Drivers dropped in from other ecosystems land here. A capability with a shared vocabulary, such as switch, is better wherever one fits, because screens can then work with any device of that kind.",
+  "options": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
   "values": [
     {
       "key": "reading/{name}",
@@ -11,14 +15,18 @@
       "description": "Something the device reports, as text.",
       "kind": "text",
       "writable": false,
-      "names": ["name"]
+      "names": [
+        "name"
+      ]
     },
     {
       "key": "reading/{name}/title",
       "title": "Reading name",
       "kind": "text",
       "writable": false,
-      "names": ["name"]
+      "names": [
+        "name"
+      ]
     },
     {
       "key": "action/{name}",
@@ -26,14 +34,18 @@
       "description": "Something the device can be told to do. Send true to do it with its usual options, or text holding a JSON object of options.",
       "kind": "trigger",
       "writable": true,
-      "names": ["name"]
+      "names": [
+        "name"
+      ]
     },
     {
       "key": "action/{name}/title",
       "title": "Action name",
       "kind": "text",
       "writable": false,
-      "names": ["name"]
+      "names": [
+        "name"
+      ]
     },
     {
       "key": "action/{name}/options",
@@ -41,7 +53,38 @@
       "description": "The options the action takes, as a JSON list of fields, each with an id, a label, a type and a default.",
       "kind": "text",
       "writable": false,
-      "names": ["name"]
+      "names": [
+        "name"
+      ]
+    },
+    {
+      "key": "ready/{name}",
+      "title": "Ready-made button",
+      "description": "One of the device's actions with its options already chosen by whoever wrote the driver. Send true to press it.",
+      "kind": "trigger",
+      "writable": true,
+      "names": [
+        "name"
+      ]
+    },
+    {
+      "key": "ready/{name}/title",
+      "title": "Ready-made button name",
+      "kind": "text",
+      "writable": false,
+      "names": [
+        "name"
+      ]
+    },
+    {
+      "key": "ready/{name}/group",
+      "title": "Ready-made button group",
+      "description": "The heading its author filed it under.",
+      "kind": "text",
+      "writable": false,
+      "names": [
+        "name"
+      ]
     }
   ]
 }

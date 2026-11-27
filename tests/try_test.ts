@@ -89,9 +89,38 @@ Deno.test("a device is seen working from its page, and is told to do something o
     await until("and says so", () => host().state.get("generic/reading/power") === "on");
     assertEquals((await tryIt("power")).readings[0].value, "on");
 
+    // Ready-made buttons: what the module's author put together comes first, under the author's headings.
+    // Only a press that is exactly one of the module's own actions is kept. Its looks are not.
+    const all = await tryIt();
+    assertEquals(
+      all.ready.map((r: { key: string; label: string; group: string }) => [r.group, r.label, r.key]),
+      [
+        ["Levels", "Full brightness", "generic/ready/full"],
+        ["Levels", "Half brightness", "generic/ready/half"],
+        ["Power", "Lamp off", "generic/ready/lamp_off"],
+        ["Power", "Lamp on", "generic/ready/lamp_on"],
+      ],
+      "a press that does two things, one whose action is not there, and one a key cannot hold are left out",
+    );
+    assert(!JSON.stringify(all).includes("<b>"), "what a module wrote as markup is words");
+    assert(!JSON.stringify(all).includes("bgcolor"), "a button's looks are not kept");
+    assertEquals((await tryIt("levels")).ready.length, 2, "found by its heading");
+    // Pressing one does its action with the options its author chose, and nothing the press carries.
+    assert((await act("generic/ready/full")).body.ok);
+    await until("the lamp goes to full", () => lamp.heard.includes("level 100"));
+    assert((await act("generic/ready/lamp_off")).body.ok);
+    await until("the lamp turns off", () => lamp.heard.includes("off"));
+    assertEquals((await act("generic/ready/both")).status, 400, "what was left out cannot be pressed");
+    assertEquals((await act("generic/ready/ghost")).status, 400);
+    const pressed = h.hub.log.read({ limit: 200, newest: true }).filter((e) =>
+      e.subject === `${id}:generic/ready/lamp_off`
+    );
+    assert(pressed.length > 0, "a press is in the log like any other command");
+    assertEquals([pressed[0].actor, pressed[0].via], [h.owner.id, "admin"]);
+
     // Typing narrows it, and finding nothing is an answer. Somewhere that is not a device is refused.
     const none = await tryIt("no such thing");
-    assertEquals([none.readings, none.actions, none.total], [[], [], first.total]);
+    assertEquals([none.ready, none.readings, none.actions, none.total], [[], [], [], first.total]);
     assertEquals((await h.get("/admin/api/driver/try?id=nothing")).status, 400);
     // Nobody but a superuser.
     const stranger = await fetch(`http://127.0.0.1:${h.hub.port}/admin/api/driver/try?id=${id}`);

@@ -17,7 +17,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import type { CommandError, HealthStatus, SettingsField, Values } from "../../contract/types.ts";
 import { type CommandOutcome, type PluginLink, runPlugin } from "../../sdk/plugin.ts";
-import { asField, asText } from "./fields.ts";
+import { asField, asReady, asText, type Ready } from "./fields.ts";
 
 const arg = (name: string): string => {
   const hit = Deno.args.find((a) => a.startsWith(`--${name}=`));
@@ -95,6 +95,9 @@ interface OptionField {
   [more: string]: unknown;
 }
 const actions = new Map<string, { name: string; options: OptionField[] }>();
+/** Ready-made buttons the module's author put together. Only ones whose action the module really has are shown. */
+const readyMade = new Map<string, Ready>();
+const READY_MOST = 2000;
 const readingTitles = new Map<string, string>();
 const readings = new Map<string, string>();
 let unnamed = 0;
@@ -129,6 +132,11 @@ function fullState(): Values {
     }));
     const text = JSON.stringify(fields);
     out[`generic/action/${id}/options`] = text.length <= TEXT_MAX ? text : "[]";
+  }
+  for (const [id, r] of readyMade) {
+    if (!actions.has(r.actionId)) continue;
+    out[`generic/ready/${id}/title`] = r.name;
+    out[`generic/ready/${id}/group`] = r.group;
   }
   return out;
 }
@@ -217,14 +225,32 @@ function fromModule(m: Wire): void {
       // This hub has no variables of its own to fill in. The text goes back as it came.
       answer(m, { text: asText(data?.text), variableIds: [] });
       break;
+    case "setPresetDefinitions": {
+      // The useful half of a preset: its name, its heading, and the one action a press does. Its looks are
+      // for a grid of buttons this hub does not have.
+      readyMade.clear();
+      const given = data?.presets;
+      const list: [unknown, any][] = Array.isArray(given)
+        ? given.map((p: any) => [p?.id, p])
+        : given && typeof given === "object"
+        ? Object.entries(given)
+        : [];
+      for (const [id, p] of list) {
+        if (readyMade.size >= READY_MOST) break;
+        const r = asReady(p, id, NAME);
+        if (r) readyMade.set(r.id, r);
+      }
+      answer(m);
+      replaced();
+      break;
+    }
     case "upgradedItems":
     case "saveConfig":
     case "setFeedbackDefinitions":
-    case "setPresetDefinitions":
     case "updateFeedbackValues":
     case "recordAction":
     case "setCustomVariable":
-      // Parts of Companion that have no place in this hub: button looks, presets, its own stored settings.
+      // Parts of Companion that have no place in this hub: button looks and its own stored settings.
       answer(m);
       break;
     default:
@@ -354,7 +380,10 @@ globalThis.addEventListener("error", (e) => {
 async function command(set: Values): Promise<CommandOutcome> {
   const values: Values = {}, errors: Record<string, CommandError> = {};
   for (const [key, value] of Object.entries(set)) {
-    const id = /^generic\/action\/([^/]+)$/.exec(key)?.[1];
+    // A ready-made button is one of the module's actions with its options already chosen. Pressing it is
+    // doing that action with those options, and nothing the press itself carries is added to them.
+    const pressed = readyMade.get(/^generic\/ready\/([^/]+)$/.exec(key)?.[1] ?? "");
+    const id = pressed?.actionId ?? /^generic\/action\/([^/]+)$/.exec(key)?.[1];
     const action = id ? actions.get(id) : undefined;
     if (!id || !action) {
       errors[key] = { code: "unknown_key", message: `the module has no action called ${id ?? key}` };
@@ -364,7 +393,8 @@ async function command(set: Values): Promise<CommandOutcome> {
     for (const o of action.options) {
       if (typeof o?.id === "string" && "default" in o) options[o.id] = o.default;
     }
-    if (typeof value === "string") Object.assign(options, unpack(value) ?? {});
+    if (pressed) Object.assign(options, pressed.options);
+    else if (typeof value === "string") Object.assign(options, unpack(value) ?? {});
     try {
       const r = await call("executeAction", {
         action: {

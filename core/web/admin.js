@@ -997,7 +997,7 @@ async function drawTry(id) {
   if (mine !== tryAsked || !$("tryList") || here().device !== id || !r.ok) return;
   const list = $("tryList");
   list.innerHTML = "";
-  const shown = r.readings.length + r.actions.length;
+  const shown = r.ready.length + r.readings.length + r.actions.length;
   $("tryFind").hidden = !(typed || r.total > shown);
   $("tryNote").textContent = !r.running
     ? "It is not running, so there is nothing to show."
@@ -1006,6 +1006,31 @@ async function drawTry(id) {
     : r.control
     ? "What it reports, as it changes, and what it can be told to do."
     : "What it reports, as it changes. Its buttons work once people can control it.";
+  const doIt = (key, label, off) => {
+    const b = el("button", { type: "button", className: "small quiet", textContent: "Do it", disabled: off });
+    b.onclick = () =>
+      sureDo("Tell it to: " + label + "?", () => sureCall("/admin/api/driver/do", { id, key }));
+    return b;
+  };
+  // Ready-made buttons first, under the headings their author filed them under.
+  let group = null;
+  for (const m of r.ready) {
+    if (m.group !== group) {
+      group = m.group;
+      list.append(el("p", { className: "letter", textContent: group || "Ready-made" }));
+    }
+    list.append(
+      el(
+        "div",
+        { className: "row action ready" },
+        el("span", { style: "flex:1", textContent: m.label }),
+        doIt(m.key, m.label, !r.control),
+      ),
+    );
+  }
+  if (r.ready.length && (r.readings.length || r.actions.length)) {
+    list.append(el("p", { className: "letter", textContent: "Everything else" }));
+  }
   for (const x of r.readings) {
     list.append(
       el(
@@ -1017,14 +1042,7 @@ async function drawTry(id) {
     );
   }
   for (const a of r.actions) {
-    const b = el("button", {
-      type: "button",
-      className: "small quiet",
-      textContent: "Do it",
-      disabled: !r.control || a.options,
-    });
-    b.onclick = () =>
-      sureDo("Tell it to: " + a.label + "?", () => sureCall("/admin/api/driver/do", { id, key: a.key }));
+    const b = doIt(a.key, a.label, !r.control || a.options);
     list.append(
       el(
         "div",

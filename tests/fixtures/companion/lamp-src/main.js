@@ -36,6 +36,19 @@ class Lamp extends InstanceBase {
 			snoop: { name: 'Try to reach past the sandbox', options: [], callback: async () => this.snoop() },
 			'bad name!': { name: 'An action whose id a key cannot hold', options: [], callback: async () => {} },
 		})
+		// Ready-made buttons, the way a module offers them to Companion. Only what one press does is used
+		// by the hub: the looks are Companion's, and the last three are ones the hub has to leave out.
+		const look = { text: '', size: 'auto', color: 0xffffff, bgcolor: 0x000000 }
+		const press = (actionId, options = {}) => [{ down: [{ actionId, options }], up: [] }]
+		this.setPresetDefinitions({
+			lamp_on: { type: 'button', category: 'Power', name: 'Lamp on', style: look, steps: press('on'), feedbacks: [] },
+			lamp_off: { type: 'button', category: 'Power', name: 'Lamp off', style: look, steps: press('off'), feedbacks: [] },
+			full: { type: 'button', category: 'Levels', name: 'Full <b>brightness</b>', style: look, steps: press('level', { level: 100 }), feedbacks: [] },
+			half: { type: 'button', category: 'Levels', name: 'Half brightness', style: look, steps: press('level', { level: 50 }), feedbacks: [] },
+			both: { type: 'button', category: 'Power', name: 'Two things at once', style: look, steps: [{ down: [{ actionId: 'on', options: {} }, { actionId: 'level', options: { level: 10 } }], up: [] }], feedbacks: [] },
+			ghost: { type: 'button', category: 'Power', name: 'An action that is not there', style: look, steps: press('no-such-action'), feedbacks: [] },
+			'bad name!': { type: 'button', category: 'Power', name: 'A button whose id a key cannot hold', style: look, steps: press('on'), feedbacks: [] },
+		})
 		this.setVariableDefinitions([
 			{ variableId: 'power', name: 'Power' },
 			{ variableId: 'level', name: 'Level' },
