@@ -43,7 +43,12 @@ soundboard and a simulated switch.
 
 ## Run it
 
-You need [Deno](https://deno.com) 2.2 or newer. Nothing else is installed.
+**On a Mac**, download
+[Skillfully.dmg](https://github.com/wingsixaudio/skillfully/releases/latest/download/Skillfully.dmg), drag
+Skillfully to Applications and open it. It starts the hub, opens it in your browser and keeps it up to date.
+`docs/mac.md` has the rest.
+
+**From the source**, you need [Deno](https://deno.com) 2.2 or newer. Nothing else is installed.
 
 ```sh
 deno task hub          # then open http://127.0.0.1:8080
@@ -113,6 +118,7 @@ people.
 ## Layout
 
 ```
+apps/          What a team installs: the Mac app that starts the hub and keeps it running
 capabilities/  What each kind of device is, as data
 contract/      The contract: schemas (v1/), types, validators, and a plain-language guide
 core/          The hub. Its own pages are ordinary files in core/web/
@@ -136,7 +142,9 @@ To add something, read `CONTRIBUTING.md`. To see how it fits together, read `doc
 - **Memory and processor limits are checked a few times a second, not enforced by the operating system.** A
   driver can go over for a moment before it is stopped. On Windows they are not enforced, and the log says so.
 - **No license has been chosen.** Until one is added, nobody else has the right to reuse this code.
-- **Run only on Linux so far.** macOS should work. Windows very likely does not yet.
+- **The Mac app is not signed with an Apple developer account yet.** The first time it is opened, the Mac has
+  to be told to open it anyway. `docs/mac.md` says how.
+- **Run on Linux and on a Mac so far.** Windows very likely does not work yet.
 
 ## Not built yet
 

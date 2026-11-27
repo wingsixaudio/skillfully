@@ -61,8 +61,10 @@ A launcher is the small fixed part that is not itself updated: the Mac app, the 
    from `backups/before-<n>.db`, make the version before the current one again, write `went-back`, and run.
 
 It reads `status.json` to learn the hub is up, where to point a browser, and what code to show the first
-owner. It bundles the runtime. A version that needs a newer runtime than the app has says so on the Update
-button, and the answer is a newer app.
+owner. Started with `--stay-with-app`, the hub stops when its input closes, so an app holds that open for as
+long as it lives and a hub is never left running by an app that died. It bundles the runtime. The Mac app is
+`apps/mac/main.swift`, and `docs/mac.md` is what it is like to use. A version that needs a newer runtime than
+the app has says so on the Update button, and the answer is a newer app.
 
 ## Setting up the key
 
