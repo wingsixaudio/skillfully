@@ -70,6 +70,10 @@ export interface Hub {
   agent: Agent;
   /** How the agent answers what it is asked. */
   engine: Engine;
+  /** The documents the hub keeps for screens. */
+  documents: Documents;
+  /** Everything about screens and the people at them. */
+  screening: Screens;
   /** Which connections each screen may use. */
   approvals: Approvals;
   capabilities: Capabilities;
@@ -157,12 +161,13 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     note: (type, who, data) => log.append({ type, source: "core", ...who, data }),
   });
   registry.onChange((id, before, after) => config.recordChanged(id, before, after));
+  const documents = new Documents(dataDir);
   const screens: Screens = new Screens({
     accounts,
     approvals,
     capabilities,
     devices,
-    documents: new Documents(dataDir),
+    documents,
     log,
   });
   const hosts = devices.hosts;
@@ -426,6 +431,8 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     accounts,
     agent,
     engine,
+    documents,
+    screening: screens,
     approvals,
     capabilities,
     config,

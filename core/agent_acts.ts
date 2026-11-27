@@ -39,17 +39,22 @@ export const SET: Tool = {
   },
 };
 
-/** A change that could be made, waiting for a person's yes. */
+/** A change that could be made, waiting for a person's yes: a value to set, or a document to keep. */
 export interface Proposal {
-  host: PluginHost;
-  key: string;
-  to: Value;
-  /** What it holds now. A button holds nothing. */
-  from?: Value;
   /** The question put to the person, in the hub's words. */
   message: string;
-  /** The screen through which the agent may change this. What it does is on the record as done through it. */
-  through: string;
+  /** What it is about, the way the log names things: device:value, or screen:document. */
+  subject: string;
+  /** The device or screen it is on, by the name people know it by. */
+  where: string;
+  /** What is written down about it when it is asked for: what it would become, and through which screen. */
+  data: Record<string, unknown>;
+  /** Exactly what would be done, as one text. Worked out again at the yes, it has to come out the same. */
+  same: string;
+  /** A screen's document as it would be kept, for the person to look at before they answer. */
+  preview?: { screen: string; id: string; doc: Record<string, unknown> };
+  /** Do it, as the agent, and say how it went. */
+  carry(who: { agent: string; traceid: string }): Promise<{ content: string; words: string; done: boolean }>;
 }
 
 export type Proposed =
@@ -108,27 +113,43 @@ export function propose(l: Looking, input: Record<string, unknown>): Proposed {
     // A button may have a label of its own beside it, in the device's words.
     const label = host.state.get(`${key}/title`);
     const what = typeof label === "string" && label ? `“${label.slice(0, 80)}”` : `${def.title} (${key})`;
-    return { ok: true, proposal: { host, key, to, through, message: `Press ${what} on ${name}?` } };
+    return { ok: true, proposal: change(host, key, to, undefined, through, `Press ${what} on ${name}?`) };
   }
   const from = host.state.get(key);
   return {
     ok: true,
-    proposal: {
+    proposal: change(
       host,
       key,
       to,
       from,
       through,
-      message: `Set ${def.title} (${key}) on ${name} to ${shown(to, def.unit)}? It is ${
-        shown(from, def.unit)
-      } now.`,
-    },
+      `Set ${def.title} (${key}) on ${name} to ${shown(to, def.unit)}? It is ${shown(from, def.unit)} now.`,
+    ),
+  };
+}
+
+function change(
+  host: PluginHost,
+  key: string,
+  to: Value,
+  from: Value | undefined,
+  through: string,
+  message: string,
+): Proposal {
+  return {
+    message,
+    subject: `${host.id}:${key}`,
+    where: host.manifest.name,
+    data: { to, through },
+    same: JSON.stringify([host.id, key, to]),
+    carry: (who) => carryOut({ host, key, to, from, through }, who),
   };
 }
 
 /** Do what a person said yes to, as the agent, and say how it went. */
-export async function carryOut(
-  p: Proposal,
+async function carryOut(
+  p: { host: PluginHost; key: string; to: Value; from?: Value; through: string },
   who: { agent: string; traceid: string },
 ): Promise<{ content: string; words: string; done: boolean }> {
   const r = await p.host.set(p.key, p.to, {

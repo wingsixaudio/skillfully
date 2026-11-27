@@ -335,7 +335,12 @@ export class Screens {
     if (m.type === "docs") {
       if (!c.access.sees(DOCUMENTS)) return tell(c.socket, { type: "docs", ref, ok: false, docs: [] });
       // Whether this person could make a new one: asked of a name nothing has yet.
-      return tell(c.socket, { type: "docs", ref, ok: true, docs: await given(), create: mayWrite("new") });
+      tell(c.socket, { type: "docs", ref, ok: true, docs: await given(), create: mayWrite("new") });
+      // Anything waiting on this person's yes for this screen is shown again, to a screen opened since.
+      for (const [id, doc] of this.#proposed.get(c.person.id)?.get(c.screen.id) ?? []) {
+        tell(c.socket, { type: "doc-proposed", id, doc });
+      }
+      return;
     }
     const id = typeof m.id === "string" ? m.id : "";
     const refuse = (message: string) => tell(c.socket, { type: "doc-ack", ref, id, ok: false, message });
@@ -365,21 +370,93 @@ export class Screens {
       via,
     });
     tell(c.socket, { type: "doc-ack", ref, id, ok: true });
-    // Everyone looking at this screen who may read that document is told about it, and only it: what
-    // changed, not everything the screen keeps. It is put into words once for those who may change it
-    // and once for those who may not.
+    this.#toldDocument(c.screen.id, id, m.type === "doc-put" ? m.doc as Record<string, unknown> : null);
+  }
+
+  /**
+   * Everyone looking at a screen who may read one of its documents is told about it, and only it: what
+   * changed, not everything the screen keeps. It is put into words once for those who may change it and
+   * once for those who may not.
+   */
+  #toldDocument(screen: string, id: string, doc: Record<string, unknown> | null): void {
     const said = new Map<boolean, string>();
     for (const other of this.#connections) {
-      if (other.screen.id !== c.screen.id || !other.access.canRead(`${DOCUMENTS}/${id}`)) continue;
+      if (other.screen.id !== screen || !other.access.canRead(`${DOCUMENTS}/${id}`)) continue;
       const write = other.access.canWrite(`${DOCUMENTS}/${id}`);
       let text = said.get(write);
       if (text === undefined) {
-        text = JSON.stringify(
-          m.type === "doc-put" ? { type: "doc", id, doc: m.doc, write } : { type: "doc", id, gone: true },
-        );
+        text = JSON.stringify(doc ? { type: "doc", id, doc, write } : { type: "doc", id, gone: true });
         said.set(write, text);
       }
       if (other.socket.readyState === WebSocket.OPEN) other.socket.send(text);
+    }
+  }
+
+  /** Does this person have this screen open somewhere right now? */
+  isAt(person: string, screen: string): boolean {
+    for (const c of this.#connections) {
+      if (c.person.id === person && c.screen.id === screen && c.socket.readyState === WebSocket.OPEN) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Every document a screen keeps. Who may read which is for whoever asks to decide. */
+  listDocuments(screen: string): Promise<{ id: string; doc: Record<string, unknown> }[]> {
+    return this.deps.documents.list(screen);
+  }
+
+  /**
+   * Keep a document for a screen on someone's behalf who is not at it: the agent, after a person's yes.
+   * Whether they may is decided before this is called. It is written down and told like any other save.
+   */
+  async saveDocument(
+    screen: string,
+    id: string,
+    doc: Record<string, unknown>,
+    by: { actor: string; via: string; traceid?: string },
+  ): Promise<void> {
+    await this.deps.documents.put(screen, id, doc);
+    this.deps.log.append({
+      type: "skillfully.document.saved",
+      source: "core",
+      subject: `${screen}:${id}`,
+      actor: by.actor,
+      via: by.via,
+      ...(by.traceid ? { traceid: by.traceid } : {}),
+    });
+    this.#toldDocument(screen, id, doc);
+  }
+
+  /** Documents that have been put to a person for a yes or a no and are not yet kept: person, then screen, then name. */
+  #proposed = new Map<string, Map<string, Map<string, Record<string, unknown>>>>();
+
+  /**
+   * Show one person a document as it would be kept, on the screen it is for, before they say yes or no.
+   * `doc` null takes it away again: `saved` says whether that is because it has now been kept. Only that
+   * person is shown it, wherever they have that screen open, and only for as long as the question is.
+   */
+  propose(
+    person: string,
+    screen: string,
+    id: string,
+    doc: Record<string, unknown> | null,
+    saved = false,
+  ): void {
+    const mine = this.#proposed.get(person) ?? new Map();
+    const there = mine.get(screen) ?? new Map();
+    if (doc) there.set(id, doc);
+    else there.delete(id);
+    there.size ? mine.set(screen, there) : mine.delete(screen);
+    mine.size ? this.#proposed.set(person, mine) : this.#proposed.delete(person);
+    const text = JSON.stringify(
+      doc ? { type: "doc-proposed", id, doc } : { type: "doc-proposed", id, gone: true, saved },
+    );
+    for (const c of this.#connections) {
+      if (c.person.id === person && c.screen.id === screen && c.socket.readyState === WebSocket.OPEN) {
+        c.socket.send(text);
+      }
     }
   }
 

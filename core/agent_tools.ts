@@ -10,6 +10,7 @@
 // says to it.
 
 import type { Value, ValueDef } from "../contract/mod.ts";
+import type { Keeping } from "./agent_docs.ts";
 import type { Capabilities } from "./capabilities.ts";
 import type { PluginHost } from "./host.ts";
 import type { Log, LogEntry } from "./log.ts";
@@ -32,6 +33,8 @@ export interface Looking {
   entry(e: LogEntry): boolean;
   capabilities: Capabilities;
   log: Log;
+  /** What this run may do with the documents screens keep. */
+  kept: Keeping;
 }
 
 export interface Looked {

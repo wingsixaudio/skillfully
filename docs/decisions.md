@@ -512,6 +512,26 @@ person could already change themselves on their other screens, and only what its
 device the hub is only watching is not changed by anyone, the agent included. The change is on the record as
 the agent's, made through the screen that lets the agent make it, with the person's yes beside it as theirs.
 
+**The agent writes a screen's documents the way it changes anything: it asks, and the person sees it first.**
+A canvas is a document the hub keeps for the Canvas screen, so building one is saving a document. The agent
+can list and read the documents of screens in reach, and where it may act, ask for one to be kept. The hub
+checks it against the schema the screen ships, and a document that is not right goes back to the agent with
+what is wrong, without troubling anyone. One that is right is put to the person as a yes or no, and for as
+long as the question is open the hub shows it to that person, on the screen it is for, marked as not saved and
+with nothing on it able to act. With Ask open beside Canvas that is a canvas appearing next to the
+conversation. Yes keeps it, as the agent's doing through that screen, and everyone looking at the screen is
+told as for any save. No, or no answer, and it is gone.
+
+**How a screen's documents are written is the screen's to say, and reaches the model as data.** A screen may
+name a JSON Schema and a description in words in its manifest. The hub gives both to an agent that asks, as
+the result of a tool, never as part of what the hub itself tells the model. The hub's own code still knows
+nothing about canvases: the tools are about "documents of a screen", and Canvas is one screen that has them.
+
+**A screen's documents are reached only through that screen.** To read a canvas for someone, the agent needs
+an ability on Canvas that reads documents and so does that person. To save one, both need the ability that
+writes them. A canvas never widens reach: a control on it works for whoever is looking only as far as their
+own abilities go, so an agent cannot hand anyone a button they could not already press.
+
 **Looking through a large board takes turns.** Going through thirty thousand values to list what a device
 holds would keep everything else on the hub waiting. Whatever goes through a lot stops every few thousandths
 of a second and lets a fader move. `docs/performance.md` has the numbers.
@@ -615,8 +635,11 @@ was the simplest thing and grew with the number of documents times the number of
   They are out of the log and off the page, and they are not encrypted at rest.
 - **Parts of a module's settings form.** A setting that picks several things at once is not shown, and a
   module's rule for when to show a setting is ignored: every setting is always shown.
-- **The agent sets values and presses buttons, and that is all it does.** It cannot write a canvas, propose a
-  change to a device's settings, or do several things as one step. Each needs its own careful way of asking.
+- **The agent sets values, presses buttons and writes screens' documents, and that is all it does.** It cannot
+  remove a document, propose a change to a device's settings, add a device, or do several things as one step.
+- **A canvas the agent writes is checked against the schema, not against the screen's own deeper rules.** One
+  that passes the schema and still cannot be drawn is shown as such in the preview, with what is wrong, and
+  the person can say no. The agent is not told why unless the person tells it.
 - **Every yes is asked for, every time.** There is no "yes to this kind of thing from now on".
 - **Nothing limits what the agent spends.** Every use of its model is in the log with its tokens, and one
   question is at most eight turns. There is no cap by the day or the month.

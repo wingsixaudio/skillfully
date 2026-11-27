@@ -16,7 +16,8 @@
 
 import type { Accounts, Person } from "./accounts.ts";
 import type { Agent } from "./agent.ts";
-import { carryOut, type Proposal, propose, SET } from "./agent_acts.ts";
+import { type Proposal, propose, type Proposed, SET } from "./agent_acts.ts";
+import { docTools, lookDocs, proposeDoc, SAVE } from "./agent_docs.ts";
 import { look, type Looking, toolsFor } from "./agent_tools.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { type Log, newId } from "./log.ts";
@@ -142,14 +143,26 @@ export class Engine {
   ) {}
 
   /** What the hub itself says to the model. Nothing a device or a plugin wrote is in it. */
-  #system(agent: Person, asker: Person, readsLog: boolean, acts = false): string {
+  #system(
+    agent: Person,
+    asker: Person,
+    readsLog: boolean,
+    acts = false,
+    docs: "none" | "read" | "save" = "none",
+  ): string {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     return [
       `You are ${agent.name}, the agent of a Skillfully hub. The hub connects a team's equipment, such as soundboards, video switchers and lights, to the people who use it, and keeps a log of what happens.`,
       "Someone signed in to the hub is asking you something. Answer it from what the hub holds, using your tools.",
       acts
-        ? "You can look, and you can ask for one value to be set or one button to be pressed with set_value. You never change anything yourself: the hub shows the person exactly what would change and asks them yes or no. Ask for a change only when the person asking has asked you for it, in this conversation, and only that change. If they say no, leave it. You cannot do anything else: not save, not add, not remove."
+        ? "You can look, and you can ask for one value to be set or one button to be pressed with set_value. You never change anything yourself: the hub shows the person exactly what would change and asks them yes or no. Ask for a change only when the person asking has asked you for it, in this conversation, and only that change. If they say no, leave it. You cannot do anything else: not add, not remove, not change how a device is set up."
         : "You can only look: you cannot change anything, press anything or save anything. If you are asked to, say plainly that you cannot here.",
+      ...(docs === "none" ? [] : [
+        "Some screens are made of documents the hub keeps for them, such as a layout of controls. You can list and read the ones in your reach." +
+        (docs === "save"
+          ? " You can also ask for one to be kept, new or changed, with save_document. Read how that screen's documents are written first, with document_format, and find the real names of the values you tie anything to. The person is shown what you wrote, on that screen, and asked yes or no, like any other change."
+          : ""),
+      ]),
       "What you can see is what you have been given, and never more than the person asking may see for themselves. When a tool does not show you something, you cannot see it. Say so, and do not guess at what it holds.",
       readsLog
         ? "You may read the hub's log, as far as it is about things you can see."
@@ -196,6 +209,19 @@ export class Engine {
       entry: (e) => mine.entry(e, false) && (!theirs || theirs.entry(e, true)),
       capabilities,
       log,
+      kept: {
+        // A screen's documents are reached only through that screen: by the agent's abilities on it, and
+        // by the person's.
+        screens: () =>
+          [...screens.all.values()].filter((s) =>
+            mine.docRead(s.manifest.id, "any") && (!theirs || theirs.docRead(s.manifest.id, "any"))
+          ),
+        reads: (screen, id) => mine.docRead(screen, id) && (!theirs || theirs.docRead(screen, id)),
+        writes: (screen, id) => mine.docWrite(screen, id) && (!theirs || theirs.docWrite(screen, id)),
+        list: (screen) => screens.listDocuments(screen),
+        open: (screen) => screens.isAt(asker.id, screen),
+        save: (screen, id, doc, by) => screens.saveDocument(screen, id, doc, by),
+      },
     };
   }
 
@@ -300,8 +326,23 @@ export class Engine {
     const about = this.deps.agent.about();
     const acts = !!first.act;
     let looking = this.looking(agent, asker);
-    const tools = [...toolsFor(looking), ...(acts ? [SET] : [])];
-    const system = this.#system(agent, asker, looking.readsLog, acts);
+    const tools = [...toolsFor(looking), ...docTools(looking, acts), ...(acts ? [SET] : [])];
+    const proposing = (
+      l: Looking,
+      use: { name: string; input: Record<string, unknown> },
+    ): Promise<Proposed> =>
+      use.name === SAVE.name ? proposeDoc(l, use.input) : Promise.resolve(propose(l, use.input));
+    const system = this.#system(
+      agent,
+      asker,
+      looking.readsLog,
+      acts,
+      tools.some((t) => t.name === SAVE.name)
+        ? "save"
+        : tools.some((t) => t.name === "documents")
+        ? "read"
+        : "none",
+    );
     const maxSteps = this.tuning.maxSteps ?? 8;
     const tokens = { in: 0, out: 0 };
     const looked: string[] = [];
@@ -457,16 +498,15 @@ export class Engine {
           hear({ type: "TOOL_CALL_END", toolCallId: use.id });
           const subject = (device: unknown) =>
             typeof device === "string" && looking.hosts().some((h) => h.id === device) ? device : agent.id;
-          if (acts && use.name === SET.name) {
-            const p = propose(looking, use.input);
+          if (acts && (use.name === SET.name || use.name === SAVE.name)) {
+            const p = await proposing(looking, use);
             if (p.ok) {
               open.push({ use, id: newId(), proposal: p.proposal });
-              note("skillfully.agent.proposed", {
-                step,
-                tool: use.name,
-                to: p.proposal.to,
-                through: p.proposal.through,
-              }, `${p.proposal.host.id}:${p.proposal.key}`);
+              note(
+                "skillfully.agent.proposed",
+                { step, tool: use.name, ...p.proposal.data },
+                p.proposal.subject,
+              );
               continue;
             }
             looked.push(p.words);
@@ -481,7 +521,8 @@ export class Engine {
             result(use.id, p.content, true);
             continue;
           }
-          const found = await look(looking, use.name, use.input);
+          const found = (await lookDocs(looking, use.name, use.input)) ??
+            (await look(looking, use.name, use.input));
           looked.push(found.words);
           note("skillfully.agent.looked", { step, ...found.note }, subject(found.note.device));
           // The person is told what was looked at, in a few words. What was found is theirs to ask about.
@@ -527,15 +568,23 @@ export class Engine {
           },
           expiresAt: new Date(expires).toISOString(),
           // The hub does it, and only the hub. A screen sends a yes or a no and nothing else.
-          metadata: { "ag-ui:tool-execution": "server", device: p.host.manifest.name },
+          metadata: { "ag-ui:tool-execution": "server", [p.preview ? "screen" : "device"]: p.where },
         }));
+        // A document that would be kept is shown to the person on its own screen, marked as not yet
+        // saved, for as long as the question is open.
+        const showing = (on: boolean, saved = new Set<string>()) => {
+          for (const o of open) {
+            const v = o.proposal.preview;
+            if (v) this.deps.screens.propose(asker.id, v.screen, v.id, on ? v.doc : null, saved.has(o.id));
+          }
+        };
+        showing(true);
         this.#paused.set(asker.id, {
           interrupts,
           expires,
           gaveUp: (why) => {
-            for (const o of open) {
-              note("skillfully.agent.declined", { why }, `${o.proposal.host.id}:${o.proposal.key}`, asker.id);
-            }
+            showing(false);
+            for (const o of open) note("skillfully.agent.declined", { why }, o.proposal.subject, asker.id);
             note("skillfully.agent.failed", {
               code: why,
               message: "It was waiting for a yes or a no, and none came.",
@@ -555,19 +604,17 @@ export class Engine {
             const now = this.deps.agent.about();
             const still = now.ready && this.deps.accounts.person(asker.id);
             if (still && !still.disabled) looking = this.looking(now.person!, still);
+            const done = new Set<string>();
             for (const o of open) {
-              const subject = `${o.proposal.host.id}:${o.proposal.key}`;
-              let told: { content: string; words: string };
+              const subject = o.proposal.subject;
+              let told: { content: string; words: string; done?: boolean };
               if (!answers.get(o.id)) {
                 note("skillfully.agent.declined", {}, subject, asker.id);
                 told = { content: "The person said no. It was not done.", words: "Not done: you said no" };
               } else {
-                const again = still && !still.disabled ? propose(looking, o.use.input) : null;
-                if (
-                  !again?.ok || again.proposal.host !== o.proposal.host ||
-                  again.proposal.key !== o.proposal.key ||
-                  again.proposal.to !== o.proposal.to
-                ) {
+                const again = still && !still.disabled ? await proposing(looking, o.use) : null;
+                // Worked out again, it has to be exactly what the person was shown.
+                if (!again?.ok || again.proposal.same !== o.proposal.same) {
                   note("skillfully.agent.declined", { why: "no_longer_allowed" }, subject, asker.id);
                   told = {
                     content: "The person said yes, but it may no longer be done, so it was not.",
@@ -575,8 +622,10 @@ export class Engine {
                   };
                 } else {
                   // The yes is the person's, and on the record as theirs. The change is the agent's.
-                  note("skillfully.agent.approved", { to: o.proposal.to }, subject, asker.id);
-                  told = await carryOut(again.proposal, { agent: agent.id, traceid });
+                  const { through: _through, ...what } = o.proposal.data;
+                  note("skillfully.agent.approved", what, subject, asker.id);
+                  told = await again.proposal.carry({ agent: agent.id, traceid });
+                  if (told.done) done.add(o.id);
                 }
               }
               looked.push(told.words);
@@ -589,6 +638,7 @@ export class Engine {
               });
               result(o.use.id, told.content);
             }
+            showing(false, done);
             onward();
             return go(Math.min(step + 1, maxSteps));
           },
