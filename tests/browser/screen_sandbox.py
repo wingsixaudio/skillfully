@@ -734,6 +734,10 @@ async def main():
         check("its model heard the key in the one place it belongs, and no person's name at all", h["asked"] == 4 and set(h["keys"]) == {secret_key} and secret_key not in h["text"] and "Sam" not in h["text"] and "Evan" not in h["text"], str(h["keys"]))
         if shots: await owner.screenshot(path=f"{shots}/13-agent-asked.png", full_page=True)
 
+        # --- Which version this is ---
+        await place("Hub"); await owner.wait_for_selector("#version .item")
+        check("the Hub place says which version is running, and a hub run from its source says it is not updated by a button", "started from its source" in await owner.locator("#secVersion").inner_text() and await owner.locator("#versionGo").count() == 0)
+
         # --- Choosing its model from what its key can use ---
         await place("Hub"); await owner.wait_for_selector("#agentModelSet")
         await owner.click("#agentModelSet")

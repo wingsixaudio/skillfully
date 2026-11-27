@@ -1,0 +1,104 @@
+# Every change that reaches main becomes a version a team's hub can update to.
+#
+# Two jobs, kept apart on purpose. The first packs the hub and proves the pack starts with nothing
+# fetched. It can read the repository and nothing else. The second holds the one secret, the key
+# versions are signed with, and does two things with it: signs the note about the version, and publishes
+# the note and the pack as a release. It builds nothing and runs nothing but the repository's own signing
+# script, at main.
+#
+# Until the key exists (tools/new_key.ts says how to make it), this packs and checks, and publishes
+# nothing.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  pack:
+    name: Pack this version
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      number: ${{ steps.pack.outputs.number }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Every change, to count them: the count is the version's number.
+          fetch-depth: 0
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Pack it with everything it needs to start
+        id: pack
+        run: |
+          deno run --allow-read --allow-write=dist --allow-run --allow-env --allow-net tools/bundle.ts
+          echo "number=$(deno eval 'console.log(JSON.parse(Deno.readTextFileSync("dist/latest.json")).number)')" >> "$GITHUB_OUTPUT"
+      - name: It starts from the pack, with nothing fetched and nothing cached
+        run: |
+          home="$RUNNER_TEMP/home"
+          name=$(deno eval 'const l = JSON.parse(Deno.readTextFileSync("dist/latest.json")); console.log(l.number + "-" + l.commit.slice(0, 7))')
+          mkdir -p "$home/versions/$name"
+          tar -xzf dist/skillfully-hub-*.tgz -C "$home/versions/$name"
+          echo "$name" > "$home/current"
+          cd "$RUNNER_TEMP"
+          DENO_DIR="$RUNNER_TEMP/empty-cache" deno run --cached-only --allow-read --allow-write="$home" --allow-run --allow-env \
+            "$home/versions/$name/launcher/launch.ts" --home="$home" -- --port=7399 --no-store --no-updates > hub.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:7399/auth/me > /dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:7399/auth/me | grep -q '"claimed":false' || { cat hub.log; exit 1; }
+          grep -q "\"number\":${{ steps.pack.outputs.number }}" "$home/status.json" || { cat "$home/status.json"; exit 1; }
+          kill %1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: version
+          path: dist
+          retention-days: 14
+
+  publish:
+    name: Sign and publish
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The key is a secret of this environment, which only runs from main can use.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - uses: actions/download-artifact@v4
+        with:
+          name: version
+          path: dist
+      - name: Sign the note about this version
+        id: sign
+        env:
+          HUB_SIGNING_KEY: ${{ secrets.HUB_SIGNING_KEY }}
+        run: |
+          if deno run --allow-read=dist,core --allow-write=dist --allow-env=HUB_SIGNING_KEY tools/sign_release.ts; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::No signing key yet, so version ${{ needs.pack.outputs.number }} was packed and checked but not published. See tools/new_key.ts."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish it
+        if: steps.sign.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ needs.pack.outputs.number }}
+        run: |
+          deno eval 'const l = JSON.parse(Deno.readTextFileSync("dist/latest.json")); console.log(l.notes.map((n) => "- " + n).join("\n"))' > notes.md
+          gh release create "v$NUMBER" --title "Version $NUMBER" --notes-file notes.md --target "$GITHUB_SHA" \
+            "dist/skillfully-hub-$NUMBER.tgz" dist/latest.json dist/latest.json.sig

@@ -127,9 +127,12 @@ const confirmField = (parent) =>
 
 async function load() {
   const r = await call("/admin/api/all");
+  // A hub that is away for a moment is waited for where the person is, not left for the front page.
+  if (r.away) return;
   if (!r.ok) return location.replace("/");
   ({ people, roles, offered, drivers } = r);
   drawAgent(r.agent);
+  drawVersion(r.version);
   proposed = r.config || proposed;
   meId = r.me;
   unlockedUntil = r.unlocked ? Date.now() + r.unlocked * 1000 : 0;
@@ -812,6 +815,105 @@ function applyConfig(title, list, approve, okText) {
  * The agent: who it is, the key it reaches a model with, and whether it is on. The key goes one way. Once
  * kept it is never shown again, here or anywhere.
  */
+// Which version of the hub this is, and the one button that moves it to a newer one.
+let updating = false;
+function drawVersion(v) {
+  const box = $("version");
+  if (!box || !v) return;
+  $("homeUpdate").hidden = !(v.newer && !v.newer.needsApp);
+  if (updating) return;
+  box.innerHTML = "";
+  const line = (label, words, ...buttons) =>
+    box.append(
+      el(
+        "div",
+        { className: "item" },
+        el("h3", { textContent: label }),
+        el("p", { className: "dim", style: "white-space:pre-line", textContent: words }),
+        ...(buttons.length ? [el("div", { className: "row", style: "margin-top:8px" }, ...buttons)] : []),
+      ),
+    );
+  const day = (iso) =>
+    new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+  if (!v.running) return line("Version", v.why);
+  line("Version", "Version " + v.running.number + ", from " + day(v.running.built) + ".");
+  if (!v.can) return line("Updates", v.why);
+  const look = el("button", {
+    className: "small quiet",
+    type: "button",
+    id: "versionLook",
+    textContent: "Look now",
+  });
+  look.onclick = async () => {
+    look.disabled = true;
+    const r = await call("/admin/api/update/look", {});
+    if (r.ok) drawVersion(r.version);
+  };
+  if (!v.newer) {
+    const when = v.looked
+      ? " Last looked at " +
+        new Date(v.looked).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "."
+      : "";
+    return line(
+      "Updates",
+      (v.trouble || (v.looked ? "This is the newest version." : "Not looked yet.")) + when,
+      look,
+    );
+  }
+  const go = el("button", { className: "small", type: "button", id: "versionGo", textContent: "Update" });
+  go.onclick = () =>
+    ask(
+      "Update Skillfully",
+      (x) => {
+        x.append(
+          el("p", {
+            className: "help",
+            textContent: "The hub stops for about a minute and comes back as version " + v.newer.number +
+              ". Everyone's screens reconnect by themselves. What the hub knows is copied first, and if the new version will not start, the hub goes back to this one. Not during a service.",
+          }),
+        );
+        confirmField(x);
+      },
+      async () => {
+        const r = await sureCall("/admin/api/update/go", {});
+        if (r.ok) waitForVersion(v.running.number);
+        return r;
+      },
+      "Update now",
+    );
+  line(
+    "Version " + v.newer.number + " is ready",
+    "From " + day(v.newer.built) + "." +
+      (v.newer.notes.length ? "\n" + v.newer.notes.map((n) => "- " + n).join("\n") : "") +
+      (v.newer.needsApp
+        ? "\nIt needs a newer Skillfully app. Download it and open it, and this hub's data comes with it."
+        : ""),
+    ...(v.newer.needsApp ? [look] : [go, look]),
+  );
+}
+// The hub is away for a moment. This page waits for it and says how it went.
+async function waitForVersion(was) {
+  updating = true;
+  say("versionMsg", "Updating. The hub is away for a moment, and this page comes back by itself.");
+  for (let i = 0; i < 120; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const r = await fetch("/admin/api/all").then((x) => x.json()).catch(() => null);
+    if (!r || !r.version || !r.version.running) continue;
+    updating = false;
+    const now = r.version.running.number;
+    drawVersion(r.version);
+    return say(
+      "versionMsg",
+      now !== was
+        ? "Updated. This is version " + now + "."
+        : "The new version would not start, so the hub went back to version " + was + ". Nothing was lost.",
+      now === was ? "bad" : "ok",
+    );
+  }
+  updating = false;
+  say("versionMsg", "The hub has not come back. Open the Skillfully app on its computer to see why.", "bad");
+}
+
 // Asking the agent something. It stays put while the rest of the card is drawn again, so a question
 // being typed and an answer being read are not swept away.
 $("agentAsk").onsubmit = async (e) => {

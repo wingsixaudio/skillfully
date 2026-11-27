@@ -21,6 +21,7 @@ function secretFields(rule, first, second) {
 }
 async function start() {
   me = await call("/auth/me");
+  if (me.away) return say("msg", me.message, "bad");
   if (mode === "setup") {
     if (me.claimed) return location.replace("/");
     $("lead").textContent =

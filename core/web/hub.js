@@ -3,12 +3,17 @@
 // deno-lint-ignore-file no-unused-vars
 const $ = (id) => document.getElementById(id);
 async function call(path, body) {
+  // A hub that is restarting, a phone that walked out of range, a page being left: the request is cut
+  // short. That is an answer like any other, and never an error nobody hears.
   const res = await fetch(
     path,
     body === undefined
       ? {}
       : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
-  );
+  ).catch(() => null);
+  if (!res) {
+    return { ok: false, away: true, message: "The hub did not answer. Check it is running, then try again." };
+  }
   let data = {};
   try {
     data = await res.json();

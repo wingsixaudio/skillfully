@@ -9,12 +9,24 @@ import { type PluginConfig, startHub } from "./hub.ts";
 import { NewerData } from "./shape.ts";
 import { here } from "./paths.ts";
 import { STORE_KEYS, STORE_URL } from "./store.ts";
+import { RESTART, type Version } from "./update.ts";
 
 const root = here("..", import.meta.url).replace(/\/$/, "");
 const lan = Deno.args.includes("--lan");
 const portArg = Deno.args.find((a) => a.startsWith("--port="));
 // --data=<folder> keeps this hub's log and people somewhere other than ./data.
-const dataDir = Deno.args.find((a) => a.startsWith("--data="))?.slice(7) ?? `${root}/data`;
+// --home=<folder> is how an installed hub is started: the folder holds every version of the hub, its
+// data, and its backups. A hub started that way can be updated by its Update button.
+const home = Deno.args.find((a) => a.startsWith("--home="))?.slice(7).replace(/[\\/]$/, "");
+const dataDir = Deno.args.find((a) => a.startsWith("--data="))?.slice(7) ??
+  (home ? `${home}/data` : `${root}/data`);
+// A packed version says which one it is. A hub run from its source says nothing, and is not updated.
+const running: Version | null = await Deno.readTextFile(`${root}/bundle.json`).then((t) => {
+  const v = JSON.parse(t);
+  return Number.isInteger(v.number) && typeof v.commit === "string" && typeof v.built === "string"
+    ? { number: v.number, commit: v.commit, built: v.built }
+    : null;
+}).catch(() => null);
 
 // A driver starts in Listen unless whoever starts the hub says otherwise. The simulators that come with
 // the hub are named in the hub task, so there is something to move on a first run.
@@ -61,6 +73,21 @@ const hub = await startHub({
   // --store-every=<seconds> says how often its list is read again. Five minutes unless told otherwise.
   ...(Deno.args.includes("--no-store") ? {} : store()),
   storeEverySeconds: Number(Deno.args.find((a) => a.startsWith("--store-every="))?.slice(14)) || undefined,
+  updates: {
+    home,
+    running,
+    // --updates=<address> and --update-key=<public key> point a hub at somewhere else that publishes
+    // versions, for someone trying the release step out. --no-updates never looks.
+    ...(Deno.args.find((a) => a.startsWith("--updates="))
+      ? {
+        url: Deno.args.find((a) => a.startsWith("--updates="))!.slice(10),
+        packsFrom: Deno.args.find((a) => a.startsWith("--updates="))!.slice(10),
+        keys: Deno.args.filter((a) => a.startsWith("--update-key=")).map((a) => a.slice(13)),
+      }
+      : {}),
+    ...(Deno.args.includes("--no-updates") ? { everyMs: 0 } : {}),
+    restart: () => void leave(RESTART),
+  },
 }).catch((err) => {
   // Data from a newer hub: said plainly, with nothing after it that looks like a crash.
   if (err instanceof NewerData) {
@@ -84,9 +111,29 @@ if (hub.accounts.claimCode) {
   console.log(`\n    ${hub.accounts.claimCode}\n`);
 }
 
-const stop = async () => {
+// Whatever started an installed hub is told where it is and how it is doing, in one small file: the
+// address to open, and the code its first owner needs, which nobody is watching a terminal to read.
+const status = home ? `${home}/status.json` : null;
+if (status) {
+  await Deno.writeTextFile(
+    status,
+    JSON.stringify({
+      pid: Deno.pid,
+      port: hub.port,
+      url: `http://127.0.0.1:${hub.port}`,
+      version: running,
+      claimCode: hub.accounts.claimCode ?? null,
+      started: new Date().toISOString(),
+    }) + "\n",
+    { mode: 0o600 },
+  );
+}
+
+async function leave(code: number) {
+  if (status) await Deno.remove(status).catch(() => {});
   await hub.stop();
-  Deno.exit(0);
-};
+  Deno.exit(code);
+}
+const stop = () => leave(0);
 Deno.addSignalListener("SIGINT", stop);
 if (Deno.build.os !== "windows") Deno.addSignalListener("SIGTERM", stop); // Windows has no such signal

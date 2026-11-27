@@ -9,6 +9,7 @@ import type { Accounts, Person } from "./accounts.ts";
 import { OWN } from "./access.ts";
 import type { Agent } from "./agent.ts";
 import type { Engine } from "./engine.ts";
+import type { Updates } from "./update.ts";
 import type { Approvals } from "./approvals.ts";
 import { aboutWords, advised, attemptWords, grantWords } from "./asks.ts";
 import type { Config } from "./config.ts";
@@ -36,6 +37,7 @@ export interface AdminDeps {
   accounts: Accounts;
   agent: Agent;
   engine: Engine;
+  updates: Updates;
   approvals: Approvals;
   config: Config;
   devices: Devices;
@@ -46,7 +48,7 @@ export interface AdminDeps {
 }
 
 export function adminApi(deps: AdminDeps) {
-  const { accounts, agent, approvals, config, devices, engine, screens, store } = deps;
+  const { accounts, agent, approvals, config, devices, engine, screens, store, updates } = deps;
   /** The package each superuser is looking at, checked but not yet added. One each, for a few minutes. */
   const looking = new Map<string, { pkg: Package; at: number; from?: StoreModule }>();
   const kinds = (pkg: Package) => Object.keys((pkg.manifest.capabilities ?? {}) as Record<string, unknown>);
@@ -123,6 +125,8 @@ export function adminApi(deps: AdminDeps) {
       // The seconds this session may still make changes without saying who it is again.
       unlocked: accounts.unlocked(session),
       // Who the agent is and whether it is on. Never its key: only whether one is set.
+      // Which version of the hub this is, and whether there is a newer one.
+      version: updates.about(),
       agent: {
         ...agent.about(),
         // The devices it can see anything of, by what its roles give it. Not what the person looking can.
@@ -417,6 +421,12 @@ export function adminApi(deps: AdminDeps) {
         return (await sure()) ?? outcome(agent.turn(me.id, true));
       case "agent/off":
         return outcome(agent.turn(me.id, false));
+      // Look for a newer version of the hub now.
+      case "update/look":
+        return json({ ok: true, version: await updates.look() });
+      // Move to it. This replaces the code the hub runs, so it is confirmed, and it stops the hub for a moment.
+      case "update/go":
+        return (await sure()) ?? outcome(await updates.update(me.id));
       // Which models its key may use, asked of the model's service. The key goes where it already goes.
       case "agent/models":
         return outcome(await engine.models(me));

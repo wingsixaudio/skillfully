@@ -171,6 +171,9 @@ Nobody pushes to `main`, including the maintainers. Every change is a pull reque
    - a report, in plain words, of what each plugin you changed asks for and what it asks for that it did not
      before
 4. When the checks pass, a maintainer merges it. A pull request whose checks fail cannot be merged.
+5. Once merged, the change is packed as the next version of the hub and offered to every installed hub by its
+   Update button. So `main` is always something a team could be running. [docs/updates.md](docs/updates.md)
+   says how.
 
 The checks run with read-only access and no secrets, so a pull request from someone the project has never met
 is safe to run.
