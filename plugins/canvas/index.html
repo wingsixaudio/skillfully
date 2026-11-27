@@ -408,6 +408,164 @@
       transform: translate(-50%, -50%);
     }
 
+    /* A meter: a number shown as a bar */
+    .meter,
+    .light,
+    .choice,
+    .stepper {
+      --on: var(--accent);
+      background: var(--well);
+    }
+    .meter {
+      display: grid;
+      gap: 6px;
+    }
+    .meter.up {
+      grid-template-rows: auto 1fr auto;
+      justify-items: center;
+      text-align: center;
+      padding: 8px 2px;
+    }
+    .meter.across {
+      grid-template-columns: 1fr auto;
+      grid-template-rows: auto 1fr;
+      align-items: center;
+      padding: 6px 12px;
+      column-gap: 10px;
+    }
+    .meter .track {
+      overflow: hidden;
+    }
+    .meter .fill {
+      background: var(--on);
+      transition: width 120ms, height 120ms;
+    }
+    .meter .num {
+      font-size: 13px;
+    }
+
+    /* A light */
+    .light {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      transition: background 150ms;
+    }
+    .light.tall {
+      flex-direction: column;
+      justify-content: center;
+      text-align: center;
+    }
+    .light .dot {
+      flex: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--rail);
+      transition: background 150ms, box-shadow 150ms;
+    }
+    .light.tall .dot {
+      width: 22px;
+      height: 22px;
+    }
+    .light .name {
+      font-size: 14px;
+      color: var(--text);
+    }
+    .light.lit {
+      background: color-mix(in srgb, var(--on) 22%, var(--well));
+    }
+    .light.lit .dot {
+      background: var(--on);
+      box-shadow: 0 0 12px var(--on);
+    }
+
+    /* One of a few */
+    .choice {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 6px;
+      padding: 6px;
+    }
+    .choice .name {
+      padding: 0 6px;
+    }
+    .choice .options {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: minmax(0, 1fr);
+      gap: 4px;
+      min-height: 0;
+    }
+    .choice.up .options {
+      grid-auto-flow: row;
+      grid-auto-rows: minmax(0, 1fr);
+    }
+    .choice button {
+      min-height: 0;
+      padding: 4px;
+      font-size: 13px;
+      line-height: 1.15;
+      overflow-wrap: anywhere;
+      touch-action: manipulation;
+      border: 2px solid transparent;
+    }
+    .choice button.lit {
+      background: var(--on);
+      color: #000;
+    }
+    .choice button.went {
+      border-color: var(--text);
+    }
+    .choice button.failed {
+      border-color: var(--bad);
+    }
+
+    /* A number with a button each side */
+    .stepper {
+      display: grid;
+      grid-template-columns: minmax(40px, 1fr) minmax(0, 1.4fr) minmax(40px, 1fr);
+      gap: 4px;
+      padding: 6px;
+    }
+    .stepper button {
+      min-height: 0;
+      padding: 0;
+      font-size: 22px;
+      font-weight: 500;
+      touch-action: manipulation;
+      border: 2px solid transparent;
+    }
+    .stepper button:active {
+      transform: scale(.96);
+    }
+    .stepper button.went {
+      border-color: var(--text);
+    }
+    .stepper button.failed {
+      border-color: var(--bad);
+    }
+    .stepper .mid {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      min-width: 0;
+    }
+    .stepper .num {
+      font-size: 18px;
+    }
+
+    /* A countdown */
+    .countdown.soon .num {
+      color: var(--accent);
+    }
+    .countdown.past .num {
+      color: var(--bad);
+    }
+
     /* A piece that cannot be used says so by how it looks, and in words when touched */
     .piece.off {
       opacity: .45;
@@ -1235,6 +1393,227 @@
         return e;
       }
 
+      /** A number, from a device that may report one as words. Anything else is not a number. */
+      const asNumber = (v) =>
+        typeof v === "number" && Number.isFinite(v)
+          ? v
+          : typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))
+          ? Number(v)
+          : null;
+      /** A piece's name, once it has one, is what a screen reader calls it. */
+      function calledBy(e, name) {
+        const set = () => e.setAttribute("aria-label", name.textContent);
+        new MutationObserver(set).observe(name, { childList: true, characterData: true, subtree: true });
+        set();
+      }
+      /** For a piece tied to an action: the value that says what it is now. For one tied to a value: that value. */
+      const standing = (p, t) =>
+        p.sends ? (p.shows ? tie(p.shows.key, p.shows.device ?? p.device, p.missing) : null) : t;
+
+      // A number shown as a bar. Nothing can be changed from it: it is for looking at.
+      function meter(p) {
+        const t = tie(p.key, p.device, p.missing);
+        const up = p.tall > p.wide;
+        const name = el("span", { className: "name" }), num = el("span", { className: "num", textContent: "—" });
+        const fill = el("i", { className: "fill" });
+        const track = el("div", { className: "track" }, fill);
+        const e = el(
+          "div",
+          { className: "meter " + (up ? "up" : "across") + (p.color ? " " + p.color : "") },
+          name,
+          ...(up ? [track, num] : [num, track]),
+        );
+        title(name, p, t);
+        if (!t.plugin) return off(e, t);
+        const info = t.info || {};
+        const r = { min: p.min ?? info.min ?? 0, max: p.max ?? info.max ?? 100, unit: info.unit };
+        e.setAttribute("role", "meter");
+        e.setAttribute("aria-valuemin", r.min);
+        e.setAttribute("aria-valuemax", r.max);
+        calledBy(e, name);
+        t.watch((v) => {
+          const n = asNumber(v);
+          const at = n === null ? "0%" : C.toPlace(Math.min(r.max, Math.max(r.min, n)), r) * 100 + "%";
+          if (up) fill.style.height = at;
+          else fill.style.width = at;
+          num.textContent = n === null ? "—" : shown(n, info);
+          if (n !== null) e.setAttribute("aria-valuenow", n);
+        });
+        return e;
+      }
+
+      // A light: lit while a value is one thing. On air, recording, live, muted.
+      function light(p) {
+        const t = tie(p.key, p.device, p.missing);
+        const name = el("span", { className: "name" });
+        const e = el(
+          "div",
+          { className: "light" + (p.tall > 1 ? " tall" : "") + (p.color ? " " + p.color : "") },
+          el("i", { className: "dot" }),
+          name,
+        );
+        title(name, p, t);
+        if (!t.plugin) return off(e, t);
+        const is = p.is === undefined ? true : p.is;
+        e.setAttribute("role", "status");
+        t.watch((v) => {
+          const lit = same(v, is);
+          e.classList.toggle("lit", lit);
+          e.setAttribute("aria-label", name.textContent + (lit ? ": on" : ": off"));
+        });
+        return e;
+      }
+
+      // One of a few, with the one in use lit: an input, a scene, a mode.
+      function choice(p) {
+        const t = tie(p.key, p.device, p.missing);
+        const up = p.tall > p.wide;
+        const name = el("span", { className: "name" });
+        const row = el("div", { className: "options" });
+        const e = el(
+          "div",
+          { className: "choice " + (up ? "up" : "across") + (p.color ? " " + p.color : "") },
+          name,
+          row,
+        );
+        title(name, p, t);
+        if (!t.plugin) return off(e, t);
+        e.setAttribute("role", "radiogroup");
+        calledBy(e, name);
+        const segments = p.options.map((o) => {
+          const b = el("button", { type: "button", textContent: o.title ?? String(o.value) });
+          b.setAttribute("role", "radio");
+          b.setAttribute("aria-checked", "false");
+          row.append(b);
+          return { o, b };
+        });
+        const mark = (v) => {
+          for (const { o, b } of segments) {
+            const on = same(v, o.value);
+            b.classList.toggle("lit", on);
+            b.setAttribute("aria-checked", String(on));
+          }
+        };
+        const by = standing(p, t);
+        if (by && by.plugin) by.watch(mark);
+        for (const { o, b } of segments) {
+          b.onclick = () => {
+            if (t.cant) return say(t.cant);
+            // With nothing to say which is in use, the one pressed is taken to be.
+            if (p.sends && !p.shows) mark(o.value);
+            send(t, p.sends ? JSON.stringify({ [p.sends]: o.value }) : o.value, answer(b));
+          };
+        }
+        if (t.cant) e.classList.add("off");
+        return e;
+      }
+
+      // A number with a button each side, to take it down or up by a step.
+      function stepper(p) {
+        const t = tie(p.key, p.device, p.missing);
+        const name = el("span", { className: "name" }), num = el("span", { className: "num", textContent: "—" });
+        const less = el("button", { type: "button", textContent: "−" });
+        const more = el("button", { type: "button", textContent: "+" });
+        const e = el("div", { className: "stepper" }, less, el("div", { className: "mid" }, name, num), more);
+        title(name, p, t);
+        if (!t.plugin) return off(e, t);
+        const info = t.info || {};
+        const r = { min: p.min ?? info.min, max: p.max ?? info.max, step: p.step ?? 1 };
+        let value = null, held = null;
+        const paint = () => (num.textContent = value === null ? "—" : shown(value, info));
+        const by = standing(p, t);
+        if (by && by.plugin) {
+          by.watch((v) => {
+            const n = asNumber(v);
+            if (n === null) return;
+            value = held = n;
+            paint();
+          });
+        }
+        const go = (step, b) => {
+          if (t.cant) return say(t.cant);
+          // Not known yet: it starts from the end it is moving away from.
+          const from = value ?? (step > 0 ? r.min : r.max) ?? 0;
+          let next = Number((from + step).toFixed(6));
+          if (r.min !== undefined) next = Math.max(r.min, next);
+          if (r.max !== undefined) next = Math.min(r.max, next);
+          if (next === value) return;
+          value = next;
+          paint();
+          const told = answer(b);
+          send(t, p.sends ? JSON.stringify({ [p.sends]: next }) : next, {
+            ok: told.ok,
+            fail: (m) => {
+              told.fail(m);
+              value = held;
+              paint();
+            },
+          });
+        };
+        less.onclick = () => go(-r.step, less);
+        more.onclick = () => go(r.step, more);
+        const named_ = () => {
+          less.setAttribute("aria-label", "Less " + name.textContent);
+          more.setAttribute("aria-label", "More " + name.textContent);
+        };
+        new MutationObserver(named_).observe(name, { childList: true, characterData: true, subtree: true });
+        named_();
+        if (t.cant) e.classList.add("off");
+        paint();
+        return e;
+      }
+
+      // A countdown to a time of day, such as when a service starts. After it, it counts up.
+      function countdown(p) {
+        const num = el("span", { className: "num" });
+        const e = el("div", { className: "clock countdown" }, num);
+        if (p.title !== undefined) {
+          const name = el("span", { className: "name" });
+          words(name, p.title);
+          e.prepend(name);
+        }
+        e.style.setProperty("--letters", 8);
+        const [h, m] = p.until.split(":").map(Number);
+        clocks.push(() => {
+          const now = new Date();
+          const at = new Date(now);
+          at.setHours(h, m, 0, 0);
+          let left = Math.round((at - now) / 1000);
+          // Long past the time, it is counting to the same time tomorrow.
+          if (left < -2 * 3600) {
+            at.setDate(at.getDate() + 1);
+            left = Math.round((at - now) / 1000);
+          }
+          const past = left < 0, s = Math.abs(left);
+          const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+          num.textContent = (past ? "+" : "") + (hh ? hh + ":" + String(mm).padStart(2, "0") : String(mm)) +
+            ":" + String(ss).padStart(2, "0");
+          e.classList.toggle("past", past);
+          e.classList.toggle("soon", !past && left <= 300);
+        });
+        return e;
+      }
+
+      // A button that goes to another page of this canvas.
+      function goto(p) {
+        const name = el("span");
+        const e = el(
+          "button",
+          { type: "button", className: "goto" + (p.color ? " tinted " + p.color : "") },
+          name,
+        );
+        if (p.title !== undefined) words(name, p.title);
+        else name.textContent = p.page;
+        e.onclick = () => {
+          const c = current();
+          const i = c ? c.doc.pages.findIndex((pg) => pg.name === p.page) : -1;
+          if (i < 0) return say(`This canvas has no page called ${p.page}.`);
+          page = i;
+          draw();
+        };
+        return e;
+      }
+
       function clock(p) {
         const num = el("span", { className: "num" });
         const e = el("div", { className: "clock" }, num);
@@ -1259,7 +1638,21 @@
         words(e, p.title);
         return e;
       }
-      const MAKE = { label, readout, button, toggle, slider, clock, group: backdrop };
+      const MAKE = {
+        label,
+        readout,
+        button,
+        toggle,
+        slider,
+        meter,
+        light,
+        choice,
+        stepper,
+        countdown,
+        goto,
+        clock,
+        group: backdrop,
+      };
       setInterval(() => clocks.forEach((tick) => tick()), 1000);
 
       // --- Drawing ---

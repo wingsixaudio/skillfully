@@ -13,12 +13,29 @@
     button: "Button",
     toggle: "Toggle",
     slider: "Slider",
+    meter: "Meter",
+    light: "Light",
+    choice: "Choice",
+    stepper: "Stepper",
+    countdown: "Countdown",
+    goto: "Page button",
     readout: "Readout",
     label: "Label",
     clock: "Clock",
     group: "Group",
   };
-  const ADD = ["button", "toggle", "slider", "readout", "label", "clock"];
+  const ADD = [
+    "button",
+    "toggle",
+    "slider",
+    "stepper",
+    "readout",
+    "meter",
+    "light",
+    "label",
+    "clock",
+    "countdown",
+  ];
 
   /** What someone typed for a value: true, false, a number, the options of an action, or words. */
   function parse(text) {
@@ -228,8 +245,10 @@
             ? item.writable
             : kind === "toggle"
             ? item.writable && item.kind !== "trigger"
-            : kind === "slider"
+            : kind === "slider" || kind === "stepper"
             ? item.writable && item.kind === "number"
+            : kind === "choice"
+            ? item.writable
             : item.kind !== "trigger";
           if (fits) out.push({ ...item, plugin });
         }
@@ -340,7 +359,7 @@
         const made = E.add(session.doc, session.page, into, { ...E.fresh(type, columns), ...more });
         if (made.path) commit(made.doc, made.path);
       };
-      if (type === "label" || type === "clock") return put({});
+      if (type === "label" || type === "clock" || type === "countdown") return put({});
       pick(type, `What the ${WORDS[type].toLowerCase()} is tied to`, (i) =>
         put({
           key: i.key,
@@ -636,9 +655,62 @@
           );
         }
       }
-      if (["button", "toggle", "slider", "readout"].includes(p.type)) {
+      if (["button", "toggle", "slider", "readout", "meter", "light", "choice", "stepper"].includes(p.type)) {
         tied(p, p.type, box);
         titled(p, box, "What the device calls it");
+      }
+      if (p.type === "countdown") {
+        titled(p, box, "None");
+        box.append(
+          field(
+            "Counts down to",
+            text(
+              p.until,
+              (v) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(v.trim()) && change((x) => (x.until = v.trim())),
+              {
+                id: "setUntil",
+                placeholder: "10:30",
+                inputMode: "numeric",
+              },
+            ),
+          ),
+          el("p", {
+            className: "hint",
+            textContent: "A time of day on a 24-hour clock. After it, it counts up.",
+          }),
+        );
+      }
+      if (p.type === "light") {
+        box.append(
+          field(
+            "Lit while it is",
+            text(
+              unparse(p.is ?? true),
+              (v) => change((x) => setOrDrop(x, "is", parse(v) === true ? undefined : parse(v))),
+              {
+                id: "setIs",
+                autocapitalize: "off",
+              },
+            ),
+          ),
+          colors(p),
+        );
+      }
+      if (p.type === "meter") box.append(colors(p));
+      // What an action's option a piece sends, and the options of a choice, are written by the agent or in
+      // the canvas's file. Here they are said, so nobody wonders where they went.
+      if (p.sends || p.type === "choice" || p.type === "goto") {
+        const said = p.type === "goto"
+          ? `Goes to the page “${p.page}”.`
+          : p.type === "choice"
+          ? `Offers ${p.options.map((o) => o.title ?? String(o.value)).join(", ")}.`
+          : `Does its action with the number in “${p.sends}”.`;
+        box.append(
+          el("p", {
+            className: "hint",
+            textContent: said + " Ask for a change, or change it in the canvas's file.",
+          }),
+        );
       }
       if (p.type === "clock") {
         titled(p, box, "None");
@@ -726,8 +798,8 @@
           colors(p),
         );
       }
-      if (p.type === "slider") {
-        const least = "The device's";
+      if (p.type === "slider" || p.type === "meter" || p.type === "stepper") {
+        const least = p.type === "stepper" ? "None" : "The device's";
         box.append(
           el(
             "div",
@@ -740,12 +812,14 @@
               "Highest",
               number(p.max, (v) => change((x) => setOrDrop(x, "max", v)), { placeholder: least }),
             ),
-            field(
-              "Step",
-              number(p.step, (v) => change((x) => setOrDrop(x, "step", v > 0 ? v : undefined)), {
-                placeholder: least,
-              }),
-            ),
+            ...(p.type === "meter" ? [] : [
+              field(
+                "Step",
+                number(p.step, (v) => change((x) => setOrDrop(x, "step", v > 0 ? v : undefined)), {
+                  placeholder: p.type === "stepper" ? "1" : least,
+                }),
+              ),
+            ]),
           ),
         );
       }

@@ -550,6 +550,61 @@ async def main():
         check("let go, the action is done once with the number it was let go at", (await now.inner_text()).strip() == "80" and await knob.get_attribute("aria-valuenow") == "80", f"{await now.inner_text()} {await knob.get_attribute('aria-valuenow')}")
         if shots: await owner.screenshot(path=f"{shots}/12-canvas-action-slider.png")
 
+        # --- Every other kind of piece, on a canvas of two pages ---
+        import datetime
+        soon = (datetime.datetime.now() + datetime.timedelta(minutes=3)).strftime("%H:%M")
+        with open(os.path.join(canvas_dir, "every-piece.json"), "w") as f:
+            json.dump({"kind": "canvas", "name": "Every piece", "pages": [
+                {"name": "Main", "pieces": [
+                    {"type": "light", "at": [1, 1, 2, 1], "key": "generic/reading/power", "device": lamp_id, "is": "on", "color": "red", "title": "Lamp is on"},
+                    {"type": "meter", "at": [3, 1, 2, 1], "key": "generic/reading/level", "device": lamp_id, "min": 0, "max": 100, "title": "Level"},
+                    {"type": "choice", "at": [1, 2, 4, 1], "key": "generic/action/level", "device": lamp_id, "sends": "level", "shows": {"key": "generic/reading/level"}, "title": "Preset",
+                     "options": [{"value": 10, "title": "Low"}, {"value": 50, "title": "Half"}, {"value": 90, "title": "High"}]},
+                    {"type": "stepper", "at": [1, 3, 2, 1], "key": "generic/action/level", "device": lamp_id, "sends": "level", "shows": {"key": "generic/reading/level"}, "min": 0, "max": 100, "step": 10, "title": "Level"},
+                    {"type": "choice", "at": [3, 3, 2, 1], "key": "switch/outlet/4/on", "options": [{"value": True, "title": "On"}, {"value": False, "title": "Off"}], "title": "Outlet 4"},
+                    {"type": "countdown", "at": [1, 4, 4, 2], "until": soon, "title": "Starts"},
+                    {"type": "goto", "at": [1, 6, 2, 1], "page": "Lights", "color": "blue"}]},
+                {"name": "Lights", "pieces": [{"type": "goto", "at": [1, 1, 2, 1], "page": "Main", "title": "Back"}]}]}, f)
+        await owner.goto(base + "/s/canvas")
+        cv = owner.frame_locator("#screen")
+        await cv.locator("#pick option", has_text="Every piece").wait_for(state="attached", timeout=8000)
+        await cv.locator("#pick").select_option("every-piece")
+        await cv.locator("#board .stepper").wait_for()
+        await owner.wait_for_timeout(600)
+        check("every new kind of piece is drawn, and none says it cannot be used", await cv.locator("#board .piece").count() == 7 and await cv.locator("#board .piece.off").count() == 0, f"{await cv.locator('#board .piece').count()} drawn, {await cv.locator('#board .piece.off').count()} off")
+        lamp_power = (await state(lamp_id)).get("generic/reading/power")
+        check("a light is lit while its value is what lights it", ("lit" in (await cv.locator("#board .light").get_attribute("class"))) == (lamp_power == "on"), f"{lamp_power} {await cv.locator('#board .light').get_attribute('class')}")
+        preset = cv.locator("#board .choice", has_text="Preset")
+        await preset.get_by_role("radio", name="High").click()
+        meter_num = cv.locator("#board .meter .num")
+        for _ in range(50):
+            if (await meter_num.inner_text()).strip() == "90": break
+            await owner.wait_for_timeout(100)
+        check("a choice tied to an action does it with the option pressed, and a meter shows what the device then reports", (await meter_num.inner_text()).strip() == "90" and await preset.get_by_role("radio", name="High").get_attribute("aria-checked") == "true" and await preset.get_by_role("radio", name="Half").get_attribute("aria-checked") == "false", f"{await meter_num.inner_text()}")
+        await cv.locator("#board .stepper").get_by_role("button", name="Less Level").click()
+        for _ in range(50):
+            if (await meter_num.inner_text()).strip() == "80": break
+            await owner.wait_for_timeout(100)
+        check("a stepper takes it down by a step, from what the device holds", (await meter_num.inner_text()).strip() == "80" and (await cv.locator("#board .stepper .num").inner_text()).strip() == "80", await meter_num.inner_text())
+        outlet = cv.locator("#board .choice", has_text="Outlet 4")
+        was_on = (await state("sim-switch"))["switch/outlet/4/on"]
+        await outlet.get_by_role("radio", name="Off" if was_on else "On").click()
+        for _ in range(50):
+            if (await state("sim-switch"))["switch/outlet/4/on"] != was_on: break
+            await owner.wait_for_timeout(100)
+        check("a choice tied to a value sets it, and the one the device now holds is lit", (await state("sim-switch"))["switch/outlet/4/on"] == (not was_on) and await outlet.get_by_role("radio", name="Off" if was_on else "On").get_attribute("aria-checked") == "true")
+        left = (await cv.locator("#board .countdown .num").inner_text()).strip()
+        check("a countdown counts down to its time, marked as close in the last five minutes", left[0] in "234" and ":" in left and "soon" in await cv.locator("#board .countdown").get_attribute("class"), left)
+        if shots: await owner.screenshot(path=f"{shots}/14-canvas-every-piece.png")
+        await cv.locator("#board button.goto", has_text="Lights").click()
+        await cv.locator("#board button.goto", has_text="Back").wait_for(timeout=5000)
+        await cv.locator("#board button.goto", has_text="Back").click()
+        await cv.locator("#board .stepper").wait_for(timeout=5000)
+        check("a page button goes to its page, and one there comes back", True)
+        await cv.locator("#pick").select_option("lamp-level")
+        knob = cv.locator("#board .slider"); now = cv.locator("#board .readout .num")
+        await knob.wait_for()
+
         # --- On a wide screen a canvas uses the room there is ---
         narrow = (await cv.locator("#board").bounding_box())["width"]
         await owner.set_viewport_size({"width": 1440, "height": 900})
@@ -710,9 +765,14 @@ async def main():
         await cv.locator("#panel .parts select").nth(1).select_option("{n}") if await cv.locator("#panel .parts select").count() > 1 else None
         await cv.locator("#addPage").click(); await cv.locator("#setPage").fill("Lamp"); await cv.locator("#setPage").blur()
         await cv.locator("#addPiece").select_option("clock")
+        # A countdown is added by hand too, and says what it counts down to where it can be changed.
+        await cv.locator("#addPiece").select_option("countdown")
+        await cv.locator("#setUntil").fill("18:45"); await cv.locator("#setUntil").press("Tab")
         if shots: await owner.screenshot(path=f"{shots}/11b-canvas-new.png")
         await cv.locator("#done").click(); await cv.locator("#arrange").wait_for()
         made = on_disk("video-desk")
+        added = made["pages"][1]["pieces"]
+        check("a countdown added by hand counts down to the time typed for it", any(x["type"] == "countdown" and x["until"] == "18:45" for x in added), json.dumps(added))
         row = made["pages"][0]["pieces"][0]
         check("a new canvas is kept under a file name made from its name", made["name"] == "Video desk" and [p["name"] for p in made["pages"]] == ["Page 1", "Lamp"] and made["pages"][1]["pieces"][0]["type"] == "clock", json.dumps(made)[:300])
         check("a piece put in a group and repeated is written once, with the item's name in its key", row["type"] == "group" and row["repeat"] == {"as": "n", "from": 1, "to": 4} and row["pieces"][0]["key"] == "switch/outlet/{n}/on", json.dumps(row))

@@ -12,7 +12,21 @@
 //
 // To this file a canvas is data. Nothing in one is ever run.
 (() => {
-  const TYPES = ["label", "readout", "button", "toggle", "slider", "clock", "group"];
+  const TYPES = [
+    "label",
+    "readout",
+    "button",
+    "toggle",
+    "slider",
+    "meter",
+    "light",
+    "choice",
+    "stepper",
+    "countdown",
+    "goto",
+    "clock",
+    "group",
+  ];
   const COLORS = ["orange", "red", "green", "blue", "yellow", "white"];
   const LIMITS = { pages: 20, pieces: 200, drawn: 600, columns: 24, rows: 200, depth: 4, repeat: 64 };
 
@@ -23,6 +37,12 @@
     button: ["key", "device", "title", "value", "lit", "color"],
     toggle: ["key", "device", "title", "on", "off", "color"],
     slider: ["key", "device", "title", "min", "max", "step", "sends", "shows"],
+    meter: ["key", "device", "title", "min", "max", "color"],
+    light: ["key", "device", "title", "is", "color"],
+    choice: ["key", "device", "title", "options", "sends", "shows", "color"],
+    stepper: ["key", "device", "title", "min", "max", "step", "sends", "shows"],
+    countdown: ["title", "until"],
+    goto: ["title", "page", "color"],
     clock: ["title", "seconds"],
     group: ["title", "pieces", "repeat"],
   };
@@ -103,7 +123,9 @@
         out.push(`${where}: "size" is small, normal or large`);
       }
     }
-    if (["readout", "button", "toggle", "slider"].includes(p.type)) key(p.key);
+    if (["readout", "button", "toggle", "slider", "meter", "light", "choice", "stepper"].includes(p.type)) {
+      key(p.key);
+    }
     if (p.type === "button") {
       if (p.value !== undefined && !isScalar(p.value) && !isObject(p.value)) {
         out.push(
@@ -130,7 +152,7 @@
         }
       }
     }
-    if (p.type === "slider") {
+    if (["slider", "meter", "stepper"].includes(p.type)) {
       for (const k of ["min", "max", "step"]) {
         if (p[k] !== undefined && !Number.isFinite(p[k])) out.push(`${where}: "${k}" is a number`);
       }
@@ -138,22 +160,60 @@
         out.push(`${where}: "min" has to be less than "max"`);
       }
       if (p.step !== undefined && !(p.step > 0)) out.push(`${where}: "step" has to be more than nothing`);
-      // Tied to an action that takes a number: which option the number goes in, and what says where it rests.
+    }
+    // Tied to an action: which of its options the piece's value goes in, and what says where it stands.
+    if (["slider", "choice", "stepper"].includes(p.type)) {
       if (p.sends !== undefined) {
         if (typeof p.sends !== "string" || !p.sends || p.sends.length > 64) {
-          out.push(`${where}: "sends" is the id of the action's option the slider's number goes in`);
+          out.push(`${where}: "sends" is the id of the action's option the ${p.type}'s value goes in`);
         }
-        if (!Number.isFinite(p.min) || !Number.isFinite(p.max)) {
+        if (p.type !== "choice" && (!Number.isFinite(p.min) || !Number.isFinite(p.max))) {
           out.push(
-            `${where}: a slider that "sends" needs "min" and "max": an action has no range of its own`,
+            `${where}: a ${p.type} that "sends" needs "min" and "max": an action has no range of its own`,
           );
         }
       }
       if (p.shows !== undefined) {
         if (p.sends === undefined) out.push(`${where}: "shows" goes with "sends"`);
         if (!isObject(p.shows) || Object.keys(p.shows).some((k) => !["key", "device"].includes(k))) {
-          out.push(`${where}: "shows" is { "key": ... }: the value that says where the slider rests`);
+          out.push(`${where}: "shows" is { "key": ... }: the value that says what it is now`);
         } else key(p.shows.key, "its shows");
+      }
+    }
+    if (p.type === "light" && p.is !== undefined && !isScalar(p.is)) {
+      out.push(`${where}: "is" is the value that lights it: text, a number, true or false`);
+    }
+    if (p.type === "choice") {
+      const o = p.options;
+      if (!Array.isArray(o) || o.length < 2 || o.length > 12) {
+        out.push(`${where} needs "options": 2 to 12 of { "value": ..., "title": "..." }`);
+      } else {
+        const seen = new Set();
+        o.forEach((x, n) => {
+          const bad = !isObject(x) || !isScalar(x.value) ||
+            Object.keys(x).some((k) => !["value", "title"].includes(k)) ||
+            (x.title !== undefined && (typeof x.title !== "string" || x.title.length > 40));
+          if (bad) {
+            out.push(
+              `${where}: option ${
+                n + 1
+              } is { "value": ..., "title": "..." }: what it sends, and up to 40 characters of words`,
+            );
+          } else if (seen.has(String(x.value))) out.push(`${where}: two of its options send ${x.value}`);
+          else seen.add(String(x.value));
+        });
+      }
+    }
+    if (p.type === "countdown") {
+      if (typeof p.until !== "string" || !/^([01]?\d|2[0-3]):[0-5]\d$/.test(p.until)) {
+        out.push(`${where} needs "until": the time of day it counts down to, such as "10:30" or "18:00"`);
+      }
+    }
+    if (p.type === "goto") {
+      if (typeof p.page !== "string" || !p.page) {
+        out.push(`${where} needs "page": the name of a page of this canvas`);
+      } else if (count.pages && !count.pages.includes(p.page)) {
+        out.push(`${where} goes to the page "${p.page}", which this canvas does not have`);
       }
     }
     if (p.type === "clock" && p.seconds !== undefined && typeof p.seconds !== "boolean") {
@@ -218,7 +278,7 @@
         out.push(`${where} needs a "name" of 40 characters at most`);
       }
       if (!Array.isArray(page.pieces)) return out.push(`${where} needs "pieces": a list`);
-      const count = { n: 0 };
+      const count = { n: 0, pages: doc.pages.map((pg) => isObject(pg) ? pg.name : undefined) };
       page.pieces.forEach((p, j) =>
         pieceProblems(p, `${where}, piece ${j + 1}`, whole(columns) ? columns : 4, 0, out, count)
       );
