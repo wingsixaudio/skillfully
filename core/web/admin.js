@@ -129,6 +129,7 @@ async function load() {
   const r = await call("/admin/api/all");
   if (!r.ok) return location.replace("/");
   ({ people, roles, offered, drivers } = r);
+  drawAgent(r.agent);
   proposed = r.config || proposed;
   meId = r.me;
   unlockedUntil = r.unlocked ? Date.now() + r.unlocked * 1000 : 0;
@@ -165,16 +166,28 @@ function drawPeople() {
     for (const [k, v] of Object.entries(p.slots)) {
       chips.append(el("span", { className: "chip", textContent: k + ": " + v }));
     }
+    const isAgent = p.kind === "agent";
+    if (isAgent) chips.prepend(el("span", { className: "chip on", textContent: "Agent" }));
     if (p.disabled) chips.append(el("span", { className: "chip", textContent: "Turned off" }));
-    if (!p.hasSecret) chips.append(el("span", { className: "chip", textContent: "Has not joined yet" }));
+    if (!p.hasSecret && !isAgent) {
+      chips.append(el("span", { className: "chip", textContent: "Has not joined yet" }));
+    }
     if (p.mustChange) {
       chips.append(el("span", { className: "chip", textContent: "Must choose a new PIN or password" }));
     }
-    chips.append(
-      el("span", { className: "chip", textContent: p.devices + (p.devices === 1 ? " device" : " devices") }),
-    );
+    if (!isAgent) {
+      chips.append(
+        el("span", {
+          className: "chip",
+          textContent: p.devices + (p.devices === 1 ? " device" : " devices"),
+        }),
+      );
+    }
     const row = el("div", { className: "row", style: "margin-top:8px" });
+    // The agent has no way to sign in, so there is nothing to invite, reset or sign out.
+    const signsIn = ["Invite", "Reset sign-in", "Sign out everywhere"];
     const btn = (text, fn) => {
+      if (isAgent && signsIn.includes(text)) return;
       const b = el("button", { className: "small quiet", type: "button", textContent: text });
       b.onclick = fn;
       row.append(b);
@@ -791,6 +804,193 @@ function applyConfig(title, list, approve, okText) {
     return r;
   }, okText);
 }
+/**
+ * The agent: who it is, the key it reaches a model with, and whether it is on. The key goes one way. Once
+ * kept it is never shown again, here or anywhere.
+ */
+function drawAgent(a) {
+  const box = $("agent");
+  if (!box || !a) return;
+  box.innerHTML = "";
+  const line = (label, words, ...buttons) =>
+    box.append(
+      el(
+        "div",
+        { className: "item" },
+        el("h3", { textContent: label }),
+        el("p", { className: "dim", textContent: words }),
+        ...(buttons.length ? [el("div", { className: "row", style: "margin-top:8px" }, ...buttons)] : []),
+      ),
+    );
+  const button = (text, fn, id) => {
+    const b = el("button", { className: "small quiet", type: "button", textContent: text });
+    if (id) b.id = id;
+    b.onclick = fn;
+    return b;
+  };
+  const done = (r) => {
+    say("agentMsg", r && r.ok === false ? r.message : "", "bad");
+    load();
+  };
+  if (!a.person) {
+    box.append(
+      el("p", {
+        className: "dim",
+        textContent:
+          "An agent is someone on the team who is not a person. It has a name and roles like anyone, and can see and do only what its roles allow. It thinks with a model that you pay for, reached with a key of your own.",
+      }),
+      button("Set up the agent", () =>
+        ask("Set up the agent", (x) => {
+          input(x, "agentName", "What it is called", { value: "Agent", required: true, maxLength: 40 });
+          x.append(
+            el("p", {
+              className: "help",
+              textContent:
+                "It starts with no roles, so it can see and do nothing until you give it some under People.",
+            }),
+          );
+          confirmField(x);
+        }, () => sureCall("/admin/api/agent/make", { name: $("agentName").value })), "agentMake"),
+    );
+    return;
+  }
+  box.append(
+    el("p", {
+      className: "status" + (a.ready ? " ok" : a.on ? " bad" : ""),
+      id: "agentStatus",
+      textContent: a.ready ? "On." : a.on ? "On, but it cannot work. " + a.needs : "Off.",
+    }),
+  );
+  const named = roles.filter((r) => a.person.roles.includes(r.id)).map((r) => r.name);
+  line(
+    a.person.name,
+    named.length
+      ? "Its roles: " + named.join(", ") + ". It can see and do what they allow, and nothing else."
+      : "It has no roles yet, so it can see and do nothing.",
+    el("a", { className: "open", href: "/admin/people", textContent: "Its roles are set under People" }),
+  );
+  const setKey = () =>
+    ask(a.keySet ? "Change the agent's key" : "Set the agent's key", (x) => {
+      input(x, "agentKey", "The key", { type: "password", required: true, autocomplete: "off" });
+      x.append(
+        el("p", {
+          className: "help",
+          textContent:
+            "Kept in the hub's database and nowhere else. It is never shown again, never written to a file and never put in the log.",
+        }),
+      );
+      confirmField(x);
+    }, () => sureCall("/admin/api/agent/key", { key: $("agentKey").value }));
+  line(
+    "Its key",
+    a.keySet
+      ? "A key is set, since " + new Date(a.keySetAt).toLocaleDateString() + ". It cannot be read back."
+      : "No key yet. It reaches its model with a key from whoever provides the model.",
+    button(a.keySet ? "Change the key" : "Set the key", setKey, "agentKeySet"),
+    ...(a.keySet
+      ? [
+        button("Remove the key", async () =>
+          done(await call("/admin/api/agent/key/remove", {})), "agentKeyRemove"),
+      ]
+      : []),
+  );
+  line(
+    "Its model",
+    a.model + ", at " + a.address.replace(/^https:\/\//, ""),
+    button(
+      "Change",
+      () =>
+        ask(
+          "The agent's model",
+          (x) => {
+            input(x, "agentModel", "Model", {
+              value: a.model,
+              required: true,
+              autocapitalize: "off",
+              spellcheck: false,
+            });
+            input(x, "agentAddress", "Where it is asked", {
+              value: a.address,
+              required: true,
+              autocapitalize: "off",
+              spellcheck: false,
+            });
+            x.append(
+              el("p", {
+                className: "help",
+                textContent:
+                  "The key is sent to this address with everything the agent is asked. Change it only to somewhere you trust with both.",
+              }),
+            );
+            confirmField(x);
+          },
+          () =>
+            sureCall("/admin/api/agent/set", {
+              model: $("agentModel").value,
+              address: $("agentAddress").value,
+            }),
+        ),
+      "agentModelSet",
+    ),
+  );
+  line(
+    "The log",
+    a.readsLog
+      ? "It may read the hub's log. What it reads is sent to its model."
+      : "It may not read the hub's log.",
+    button(a.readsLog ? "Stop it reading the log" : "Let it read the log", () => {
+      if (a.readsLog) return call("/admin/api/agent/set", { readsLog: false }).then(done);
+      ask(
+        "Let the agent read the log?",
+        (x) => {
+          x.append(
+            el("p", {
+              className: "dim",
+              textContent:
+                "What it reads is sent to its model, outside this hub. People are IDs in the log, never names. But names typed into your equipment are in it: an input called after a person, for one.",
+            }),
+          );
+          confirmField(x);
+        },
+        () => sureCall("/admin/api/agent/set", { readsLog: true }),
+        "Let it",
+      );
+    }, "agentLog"),
+  );
+  const turn = button(a.on ? "Turn the agent off" : "Turn the agent on", async () => {
+    if (a.on) return done(await call("/admin/api/agent/off", {}));
+    ask(
+      "Turn the agent on?",
+      (x) => {
+        x.append(
+          el("p", {
+            className: "dim",
+            textContent: named.length
+              ? "It will be able to see and do what its roles allow: " + named.join(", ") + "."
+              : "It has no roles yet, so it will be able to see and do nothing until you give it some.",
+          }),
+        );
+        confirmField(x);
+      },
+      () => sureCall("/admin/api/agent/on", {}),
+      "Turn it on",
+    );
+  }, "agentTurn");
+  if (!a.on && a.needs) {
+    turn.disabled = true;
+    turn.title = a.needs;
+  }
+  box.append(
+    el("div", { className: "row", style: "margin-top:12px" }, turn),
+    el("p", {
+      className: "help",
+      textContent: !a.on && a.needs
+        ? a.needs
+        : "This is who the agent is. Nothing can be asked of it yet: that is the next thing to be built.",
+    }),
+  );
+}
+
 async function drawConfig() {
   configDrawn = Date.now();
   const r = await call("/admin/api/config");

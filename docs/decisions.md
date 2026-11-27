@@ -409,6 +409,22 @@ happens whole or not at all, and data in a shape newer than the hub knows is ref
 message. It is shape 1 and there are no steps yet. This is here before the first hub is in anyone's hands,
 because afterwards is too late to add it cleanly. `core/shape.ts` says how to add a step.
 
+**The agent is someone, not a second kind of permission.** It has an account like a person's, with a name of
+its own, and it is given roles under People like anyone on the team. What it may see and do is worked out from
+those roles by the same code that works it out for a person, so there is one set of rules and one place to
+look. Two things are different, and the hub holds both: nobody can sign in as it (it has no PIN or password,
+cannot be given one, and cannot be invited), and it is never a superuser. It starts with no roles, so a new
+agent can see and do nothing. Everything it does goes in the log under its own ID.
+
+**The agent's key goes one way.** The agent thinks with a model that runs somewhere else, reached with a key a
+superuser pastes in. The key is kept in the database, in a table nothing else reads, and nowhere else. It is
+not written to a config file, it is not in the log (which records who set it and when), and it is never sent
+back to a page, not even to the superuser who typed it: the hub says only whether one is set. It is handed to
+the part of the hub that talks to the model only while the agent is on, has a key and has not been turned off.
+Where the model is can be changed, and since the key is sent there, only to an address that starts with https,
+or one on the hub's own computer. Making the agent, giving it a key, switching it on, letting it read the log
+and pointing it somewhere else each need the superuser's own PIN. Taking any of those away never does.
+
 **A screen can say which values it is showing, and is then sent only those.** The hub holds every value of
 every device and decides what each phone is sent, so narrowing that can only be done by the hub: a screen
 could otherwise only ignore what had already crossed the wifi. A screen's manifest may say

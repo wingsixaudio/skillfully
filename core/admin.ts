@@ -6,6 +6,7 @@
 
 import type { Value } from "../contract/types.ts";
 import type { Accounts, Person } from "./accounts.ts";
+import type { Agent } from "./agent.ts";
 import type { Approvals } from "./approvals.ts";
 import { aboutWords, advised, attemptWords, grantWords } from "./asks.ts";
 import type { Config } from "./config.ts";
@@ -31,6 +32,7 @@ const PROVEN: Record<string, string> = {
 
 export interface AdminDeps {
   accounts: Accounts;
+  agent: Agent;
   approvals: Approvals;
   config: Config;
   devices: Devices;
@@ -41,7 +43,7 @@ export interface AdminDeps {
 }
 
 export function adminApi(deps: AdminDeps) {
-  const { accounts, approvals, config, devices, screens, store } = deps;
+  const { accounts, agent, approvals, config, devices, screens, store } = deps;
   /** The package each superuser is looking at, checked but not yet added. One each, for a few minutes. */
   const looking = new Map<string, { pkg: Package; at: number; from?: StoreModule }>();
   const kinds = (pkg: Package) => Object.keys((pkg.manifest.capabilities ?? {}) as Record<string, unknown>);
@@ -117,6 +119,8 @@ export function adminApi(deps: AdminDeps) {
       me: me.id,
       // The seconds this session may still make changes without saying who it is again.
       unlocked: accounts.unlocked(session),
+      // Who the agent is and whether it is on. Never its key: only whether one is set.
+      agent: agent.about(),
       people: accounts.people().map((p) => ({ ...p, devices: accounts.sessions(p.id).length })),
       roles: accounts.roles(),
       policy: accounts.policy(),
@@ -387,6 +391,24 @@ export function adminApi(deps: AdminDeps) {
         config.setTrust(b.mode, { actor: me.id, via: "admin" });
         return json({ ok: true, trust: config.trust() });
       }
+      // --- The agent. Making it, giving it a key and switching it on hand out power, so each is confirmed. ---
+      case "agent/make":
+        return (await sure()) ?? outcome(agent.make(me.id, b.name));
+      case "agent/key":
+        return (await sure()) ?? outcome(agent.setKey(me.id, b.key));
+      case "agent/key/remove":
+        return outcome(agent.removeKey(me.id));
+      case "agent/set": {
+        // Letting it read the log, or pointing it at another address, is confirmed. Choosing a model is not.
+        const about = agent.about();
+        const more = (b.readsLog === true && !about.readsLog) ||
+          (b.address !== undefined && String(b.address).trim() !== about.address);
+        return (more ? await sure() : null) ?? outcome(agent.set(me.id, b));
+      }
+      case "agent/on":
+        return (await sure()) ?? outcome(agent.turn(me.id, true));
+      case "agent/off":
+        return outcome(agent.turn(me.id, false));
       case "person":
         return outcome(accounts.addPerson(me.id, b.name));
       case "person/invite":

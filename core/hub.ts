@@ -30,6 +30,7 @@ import { PluginGateway } from "./process.ts";
 import { Registry } from "./registry.ts";
 import { type Screen, Screens } from "./screens.ts";
 import { bringToShape } from "./shape.ts";
+import { Agent } from "./agent.ts";
 import { Store } from "./store.ts";
 
 /** One plugin folder to start the hub with. What is chosen here for a driver is used the first time the hub sees it. */
@@ -61,6 +62,8 @@ export interface Hub {
   port: number;
   log: Log;
   accounts: Accounts;
+  /** The agent: who it is to the hub, and whether it is switched on. */
+  agent: Agent;
   /** Which connections each screen may use. */
   approvals: Approvals;
   capabilities: Capabilities;
@@ -128,6 +131,8 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   });
   // What is decided about each device is also kept as text, for people and agents to read and propose from.
   const kept = new Kept(db);
+  // The agent: an account of its own, and the key it reaches a model with.
+  const agent = new Agent(db, kept, accounts, log);
   const config = new Config(dataDir, {
     ids: () => [...devices.hosts.keys()],
     record: (id) => registry.get(id),
@@ -183,7 +188,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     get: () => kept.get(newest),
     set: (made) => kept.set(newest, made),
   }, opts.storeEverySeconds);
-  const admin = adminApi({ accounts, approvals, config, devices, screens, store, taken });
+  const admin = adminApi({ accounts, agent, approvals, config, devices, screens, store, taken });
 
   const publicRule = (superuser: boolean) => {
     const p = accounts.policy();
@@ -406,6 +411,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     port: server.addr.port,
     log,
     accounts,
+    agent,
     approvals,
     capabilities,
     config,
