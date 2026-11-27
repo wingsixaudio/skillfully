@@ -134,8 +134,8 @@ Deno.test("phones that share what they are told are still told only what is thei
 });
 
 Deno.test("the first change after a quiet moment goes at once, and the device is still never hurried", async () => {
-  // A value counts as at rest after 20 ms here, so each change below is written on its own and can be counted.
-  const hub = await hubWith([{ dir: SIM, mode: "act", tuning: { restMs: 20 } }]);
+  // A value counts as at rest almost at once here, so each change below is written on its own and can be counted.
+  const hub = await hubWith([{ dir: SIM, mode: "act", tuning: { restMs: 1 } }]);
   const phone = await Phone.connect(hub, "Evan");
   await until("the board is there", () => LEVEL in phone.state);
 

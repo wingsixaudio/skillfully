@@ -6,7 +6,8 @@ import { board, CONTROLS, hubWith, LEVEL, ofType, Phone, SIM, sleep, SWITCH, unt
 
 Deno.test("a move is its steps by one hand, and is written once when it ends", async () => {
   const written: Move[] = [];
-  const moves = new Moves({ restMs: 40, longestMs: 150, write: (m) => written.push(m) });
+  // The waits here are long beside the gaps between steps, so a slow machine does not end a move early.
+  const moves = new Moves({ restMs: 200, longestMs: 300, write: (m) => written.push(m) });
   const sam = { actor: "p_sam", via: "screen/one-fader" }, kim = { actor: "p_kim", via: "screen/one-fader" };
   const first = (from: number, value: number) => ({
     from,
@@ -19,7 +20,7 @@ Deno.test("a move is its steps by one hand, and is written once when it ends", a
   // One change and nothing after it: its first step said everything, so nothing more is written.
   assert(!moves.continues("a", sam));
   moves.begin("a", sam, first(0, 1));
-  await sleep(80);
+  await sleep(500);
   assertEquals(written, []);
   assert(!moves.has("a"));
 
@@ -31,7 +32,7 @@ Deno.test("a move is its steps by one hand, and is written once when it ends", a
     await sleep(10);
   }
   assertEquals(written, []);
-  await sleep(80);
+  await sleep(500);
   assertEquals(written.length, 1);
   const { startedAt, lastAt, ...said } = written[0];
   assertEquals(said, {
@@ -62,16 +63,16 @@ Deno.test("a move is its steps by one hand, and is written once when it ends", a
   // A step on its way to the device keeps the move open however long the device takes.
   moves.begin("b", kim, first(0, 1));
   assert(moves.continues("b", kim));
-  await sleep(90);
+  await sleep(450);
   assert(moves.has("b"), "it does not end while a step is in flight");
   moves.step("b", 2);
 
   // A move that goes on and on is written and begun again, so the log is never far behind.
   moves.begin("c", kim, first(0, 1));
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 14; i++) {
     if (moves.continues("c", kim)) moves.step("c", i);
     else moves.begin("c", kim, first(i, i));
-    await sleep(30);
+    await sleep(40);
   }
   assert(written.some((m) => m.key === "c"), "it was written before it ever came to rest");
 
@@ -80,17 +81,17 @@ Deno.test("a move is its steps by one hand, and is written once when it ends", a
   assert(written.some((m) => m.key === "b" && m.value === 2));
   assert(!moves.has("b") && !moves.has("c"));
   const count = written.length;
-  await sleep(80);
+  await sleep(500);
   assertEquals(written.length, count, "and nothing is written twice");
 });
 
 Deno.test("one change is written as it always was, and a second person's change ends the first one's move", async () => {
-  const hub = await hubWith([{ dir: SIM, mode: "act", tuning: { restMs: 120 } }]);
+  const hub = await hubWith([{ dir: SIM, mode: "act", tuning: { restMs: 600 } }]);
   const a = await Phone.connect(hub, await hub.member("A", { slots: { ears: 1 } }));
   const b = await Phone.connect(hub, await hub.member("B", { slots: { ears: 1 } }));
 
   assert((await a.set(LEVEL, -20)).ok);
-  await sleep(250);
+  await sleep(1000);
   const kinds = () =>
     hub.log.read({ limit: 5000 }).filter((e) => e.type.startsWith("skillfully.command.")).map((e) =>
       e.type.slice(19)
@@ -118,7 +119,7 @@ Deno.test("one change is written as it always was, and a second person's change 
   await hub.stop();
 });
 
-Deno.test("what ends a move is written in full after it, and a long move is never far behind in the log", async () => {
+Deno.test("a long move is never far behind in the log", async () => {
   const hub = await hubWith([
     { dir: SIM, mode: "act", settings: { answerDelayMs: 10 }, tuning: { restMs: 400, longestMoveMs: 250 } },
   ]);
@@ -137,13 +138,26 @@ Deno.test("what ends a move is written in full after it, and a long move is neve
     "each new stretch starts with a step written in full",
   );
 
-  // Switched to watched-only in the middle of a move: the move is written at once, not when it would have rested.
-  assert((await phone.set(LEVEL, -10)).ok);
-  assert((await phone.set(LEVEL, -9)).ok);
+  await phone.close();
+  await hub.stop();
+});
+
+Deno.test("a move cut short by a switch to watched-only is written at once, before what cut it short", async () => {
+  // Half a second of stillness would end the move. Nothing here waits that long, so only the switch can.
+  const hub = await hubWith([{ dir: SIM, mode: "act", tuning: { restMs: 5000, longestMoveMs: 60000 } }]);
+  const phone = await Phone.connect(hub, "Evan");
+  const types = () =>
+    hub.log.read({ limit: 5000 }).map((e) => e.type).filter((t) => /command|plugin\.mode/.test(t));
+  for (const v of [-10, -9, -8]) assert((await phone.set(LEVEL, v)).ok);
+  assertEquals(
+    types(),
+    ["skillfully.command.sent", "skillfully.command.confirmed"],
+    "still moving: only its first step",
+  );
   board(hub).setMode("listen", { actor: hub.owner.id, via: "test" });
-  const after = types();
-  assertEquals(after.at(-2), "skillfully.command.moved");
-  assertEquals(after.at(-1), "skillfully.plugin.mode");
+  assertEquals(types().slice(2), ["skillfully.command.moved", "skillfully.plugin.mode"]);
+  const moved = ofType(hub, "skillfully.command.moved")[0].data as Record<string, unknown>;
+  assertEquals([moved.from, moved.value, moved.steps], [-90, -8, 3]);
   const refused = await phone.set(LEVEL, 0);
   assertEquals(refused.error.code, "listen_mode");
   assertEquals(types().at(-1), "skillfully.command.blocked", "and what was refused is written in full");
@@ -161,7 +175,7 @@ Deno.test("a fader ridden at the desk is one change and where it came to rest", 
     dir: SIM,
     mode: "act",
     settings: { boardChanges: ride },
-    tuning: { restMs: 150 },
+    tuning: { restMs: 400 },
   }]);
   const phone = await Phone.connect(hub, "Evan");
   await until("the ride has come to rest", () => ofType(hub, "skillfully.state.moved").length === 1, 8000);
