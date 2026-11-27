@@ -39,10 +39,16 @@ export interface LogEntry {
 
 export const newId = () => crypto.randomUUID();
 
+/** How many of the newest entries are kept in memory, for the question screens ask most: what just happened. */
+const TAIL = 1000;
+
 export class Log {
   #db: DatabaseSync;
   #insert;
   #listeners = new Set<(e: LogEntry) => void>();
+  /** The newest entries, oldest first. What is here is also in the database. */
+  #tail: LogEntry[] = [];
+  #batching = 0;
 
   /** Give a file path, or a database another part of the hub already opened. */
   constructor(where: string | DatabaseSync) {
@@ -73,6 +79,29 @@ export class Log {
       `INSERT INTO log (id, time, type, source, subject, actor, via, traceid, parentid, data)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
+    this.#tail = this.#query({ limit: TAIL, newest: true });
+  }
+
+  /**
+   * Write everything `fn` appends in one trip to the disk instead of one trip each. Sixteen people moving
+   * faders is thirty-two entries thirty times a second, and the trip is most of what an entry costs.
+   * Whatever was appended is kept, even when `fn` throws: the log says what happened.
+   */
+  batch<T>(fn: () => T): T {
+    if (this.#batching > 0) return fn();
+    try {
+      this.#db.exec("BEGIN");
+    } catch {
+      // Someone who shares this database is already in the middle of something. It will be written with theirs.
+      return fn();
+    }
+    this.#batching++;
+    try {
+      return fn();
+    } finally {
+      this.#batching--;
+      this.#db.exec("COMMIT");
+    }
   }
 
   append(input: LogInput): LogEntry {
@@ -107,6 +136,8 @@ export class Log {
       datacontenttype: "application/json",
       data,
     };
+    this.#tail.push(entry);
+    if (this.#tail.length > TAIL * 2) this.#tail = this.#tail.slice(-TAIL);
     for (const l of this.#listeners) l(entry);
     return entry;
   }
@@ -114,6 +145,19 @@ export class Log {
   /** Read entries, oldest first. */
   read(
     q: { type?: string; traceid?: string; afterSeq?: number; limit?: number; newest?: boolean } = {},
+  ): LogEntry[] {
+    // The newest few, with nothing else asked: answered from memory. Every screen that shows what just
+    // happened asks this after every change, and reading and unpacking a thousand rows each time was
+    // the most expensive thing the hub did.
+    const limit = Math.min(Math.max(q.limit ?? 200, 1), 5000);
+    if (q.newest && !q.type && !q.traceid && q.afterSeq === undefined && limit <= TAIL) {
+      return this.#tail.slice(-limit);
+    }
+    return this.#query(q);
+  }
+
+  #query(
+    q: { type?: string; traceid?: string; afterSeq?: number; limit?: number; newest?: boolean },
   ): LogEntry[] {
     const where: string[] = [];
     const args: (string | number)[] = [];

@@ -2,7 +2,7 @@
 
 import { assert, assertEquals } from "./assert.ts";
 import { Documents } from "../core/documents.ts";
-import { FADER, hubWith, ofType, Phone, SIM } from "./helpers.ts";
+import { FADER, hubWith, ofType, Phone, SIM, until } from "./helpers.ts";
 
 /** A screen that keeps notes: some people read them, some change one of them, some change any. */
 async function notesScreen(): Promise<string> {
@@ -86,8 +86,20 @@ Deno.test("a screen's documents are read and changed only by those its abilities
   // Someone who may change any of them keeps one. Everyone who may read it is told, without asking.
   const saved = await arranger.putDoc("main", { title: "Sunday", items: [{ b: 2, a: 1 }] });
   assertEquals([saved.ok, saved.id], [true, "main"]);
-  const told = reader.messages.filter((m) => m.type === "docs" && m.ref === null).at(-1);
-  assertEquals(told.docs, [{ id: "main", doc: { title: "Sunday", items: [{ a: 1, b: 2 }] }, write: false }]);
+  // They are told about that one document, not sent everything the screen keeps all over again.
+  await until(
+    "both are told",
+    () => [reader, arranger].every((p) => p.messages.some((m) => m.type === "doc")),
+  );
+  const told = reader.messages.filter((m) => m.type === "doc").at(-1);
+  assertEquals(told, {
+    type: "doc",
+    id: "main",
+    doc: { title: "Sunday", items: [{ a: 1, b: 2 }] },
+    write: false,
+  });
+  assertEquals(arranger.messages.filter((m) => m.type === "doc").at(-1).write, true);
+  assertEquals(reader.messages.filter((m) => m.type === "docs" && m.ref === null).length, 0);
   const logged = ofType(hub, "skillfully.document.saved")[0];
   assertEquals([logged.subject, logged.actor, logged.via], ["notes:main", arranger.id, "screen/notes"]);
   assert(!JSON.stringify(logged).includes("Sunday"), "what was kept is not in the log");
