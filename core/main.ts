@@ -6,6 +6,7 @@
 // Everything else about a driver is decided on the admin page and kept in the hub's own record of it.
 
 import { type PluginConfig, startHub } from "./hub.ts";
+import { NewerData } from "./shape.ts";
 import { here } from "./paths.ts";
 import { STORE_KEYS, STORE_URL } from "./store.ts";
 
@@ -60,6 +61,13 @@ const hub = await startHub({
   // --store-every=<seconds> says how often its list is read again. Five minutes unless told otherwise.
   ...(Deno.args.includes("--no-store") ? {} : store()),
   storeEverySeconds: Number(Deno.args.find((a) => a.startsWith("--store-every="))?.slice(14)) || undefined,
+}).catch((err) => {
+  // Data from a newer hub: said plainly, with nothing after it that looks like a crash.
+  if (err instanceof NewerData) {
+    console.error(err.message);
+    Deno.exit(1);
+  }
+  throw err;
 });
 
 await Promise.all([...hub.hosts.values()].map((h) => h.whenReady().catch(() => {})));
