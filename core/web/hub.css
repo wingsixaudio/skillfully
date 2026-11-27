@@ -276,6 +276,26 @@ dialog::backdrop {
 .status.wait {
   color: var(--accent);
 }
+.asking {
+  margin: 0 0 18px;
+}
+.asking label {
+  margin-top: 0;
+}
+.asking .row {
+  flex-wrap: nowrap;
+}
+.asking .row button {
+  flex: none;
+}
+.asking .said {
+  margin: 14px 0 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.asking #agentAnswer > p:first-child {
+  margin-top: 14px;
+}
 .help {
   font-size: 13px;
   color: var(--dim);

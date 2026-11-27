@@ -31,6 +31,7 @@ import { Registry } from "./registry.ts";
 import { type Screen, Screens } from "./screens.ts";
 import { bringToShape } from "./shape.ts";
 import { Agent } from "./agent.ts";
+import { Engine, type EngineTuning } from "./engine.ts";
 import { Store } from "./store.ts";
 
 /** One plugin folder to start the hub with. What is chosen here for a driver is used the first time the hub sees it. */
@@ -56,6 +57,8 @@ export interface HubOptions {
   storeKeys?: string[];
   /** How often the store's list is read again, in seconds. Five minutes unless told otherwise. */
   storeEverySeconds?: number;
+  /** Timings of the agent's engine a test may shorten. */
+  engine?: EngineTuning;
 }
 
 export interface Hub {
@@ -64,6 +67,8 @@ export interface Hub {
   accounts: Accounts;
   /** The agent: who it is to the hub, and whether it is switched on. */
   agent: Agent;
+  /** How the agent answers what it is asked. */
+  engine: Engine;
   /** Which connections each screen may use. */
   approvals: Approvals;
   capabilities: Capabilities;
@@ -188,7 +193,8 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     get: () => kept.get(newest),
     set: (made) => kept.set(newest, made),
   }, opts.storeEverySeconds);
-  const admin = adminApi({ accounts, agent, approvals, config, devices, screens, store, taken });
+  const engine = new Engine({ accounts, agent, capabilities, log, screens }, opts.engine);
+  const admin = adminApi({ accounts, agent, approvals, config, devices, engine, screens, store, taken });
 
   const publicRule = (superuser: boolean) => {
     const p = accounts.policy();
@@ -412,6 +418,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     log,
     accounts,
     agent,
+    engine,
     approvals,
     capabilities,
     config,
@@ -421,6 +428,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     screens: screens.all,
     skills,
     async stop() {
+      await engine.stop();
       screens.closeAll();
       await devices.stop();
       await config.settled();

@@ -7,6 +7,7 @@
 import type { Value } from "../contract/types.ts";
 import type { Accounts, Person } from "./accounts.ts";
 import type { Agent } from "./agent.ts";
+import type { Engine } from "./engine.ts";
 import type { Approvals } from "./approvals.ts";
 import { aboutWords, advised, attemptWords, grantWords } from "./asks.ts";
 import type { Config } from "./config.ts";
@@ -33,6 +34,7 @@ const PROVEN: Record<string, string> = {
 export interface AdminDeps {
   accounts: Accounts;
   agent: Agent;
+  engine: Engine;
   approvals: Approvals;
   config: Config;
   devices: Devices;
@@ -43,7 +45,7 @@ export interface AdminDeps {
 }
 
 export function adminApi(deps: AdminDeps) {
-  const { accounts, agent, approvals, config, devices, screens, store } = deps;
+  const { accounts, agent, approvals, config, devices, engine, screens, store } = deps;
   /** The package each superuser is looking at, checked but not yet added. One each, for a few minutes. */
   const looking = new Map<string, { pkg: Package; at: number; from?: StoreModule }>();
   const kinds = (pkg: Package) => Object.keys((pkg.manifest.capabilities ?? {}) as Record<string, unknown>);
@@ -120,7 +122,11 @@ export function adminApi(deps: AdminDeps) {
       // The seconds this session may still make changes without saying who it is again.
       unlocked: accounts.unlocked(session),
       // Who the agent is and whether it is on. Never its key: only whether one is set.
-      agent: agent.about(),
+      agent: {
+        ...agent.about(),
+        // The devices it can see anything of, by what its roles give it. Not what the person looking can.
+        sees: agent.person() ? screens.reachOf(agent.person()!).hosts().map((h) => h.manifest.name) : [],
+      },
       people: accounts.people().map((p) => ({ ...p, devices: accounts.sessions(p.id).length })),
       roles: accounts.roles(),
       policy: accounts.policy(),
@@ -409,6 +415,9 @@ export function adminApi(deps: AdminDeps) {
         return (await sure()) ?? outcome(agent.turn(me.id, true));
       case "agent/off":
         return outcome(agent.turn(me.id, false));
+      // Asking it something hands out nothing: it can only look, and a superuser already sees everything.
+      case "agent/ask":
+        return outcome(await engine.ask(me, b.question));
       case "person":
         return outcome(accounts.addPerson(me.id, b.name));
       case "person/invite":

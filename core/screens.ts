@@ -13,6 +13,7 @@ import type { Capabilities } from "./capabilities.ts";
 import type { Devices } from "./devices.ts";
 import type { PluginHost } from "./host.ts";
 import { type Log, type LogEntry, newId } from "./log.ts";
+import { Reach } from "./reach.ts";
 import { readWatch, type Watch, watches } from "./watching.ts";
 
 export interface Screen {
@@ -101,6 +102,14 @@ export class Screens {
   }
   accessFor(person: Person, screen: ScreenManifest): Access {
     return new Access(screen, this.granted(person, screen), person, this.deps.accounts.isSuperuser(person));
+  }
+  /** Everything a person may see and change, across all their screens at once. For someone with no screen in front of them. */
+  reachOf(person: Person): Reach {
+    return new Reach(
+      this.manifests().map((screen) => ({ screen, access: this.accessFor(person, screen) })),
+      this.deps.approvals,
+      () => this.deps.devices.hosts.values(),
+    );
   }
   /** The screens a person has anything to do on. */
   of(person: Person): ScreenManifest[] {

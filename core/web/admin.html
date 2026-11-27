@@ -94,6 +94,19 @@
         </section>
         <section class="card" id="secAgent">
           <h2>Agent</h2>
+          <form id="agentAsk" class="asking" hidden>
+            <label for="agentQuestion">Ask it something</label>
+            <div class="row">
+              <input id="agentQuestion" maxlength="2000" autocomplete="off"
+                placeholder="Is anything not working?">
+              <button id="agentAskGo">Ask</button>
+            </div>
+            <div id="agentAnswer" hidden>
+              <p id="agentSaid"></p>
+              <p class="help" id="agentLookedAt"></p>
+              <ul class="facts" id="agentLooked"></ul>
+            </div>
+          </form>
           <div id="agent"></div>
           <p class="msg" id="agentMsg" role="status"></p>
         </section>
