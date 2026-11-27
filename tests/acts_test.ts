@@ -173,7 +173,7 @@ Deno.test("the agent changes something only after the person's yes, and then exa
   assertEquals([after[0].runId, after[1].toolCallId, after[1].content, after.at(-1).outcome], [
     "after",
     call.toolCallId,
-    "Done: it is now -12",
+    "Done: now -12",
     { type: "success" },
   ]);
   assertEquals(
@@ -226,8 +226,8 @@ Deno.test("a no, a late answer, a stop, or a yes to what is no longer allowed: n
   await until("it asks", ended(phone, 1));
   answer(phone, "yes please");
   await until("it goes on", ended(phone, 2));
-  assertEquals([board(hub, LEVEL), words()], [-90, "The person said no. It was not done."]);
-  assertEquals(phone.heard.find((e) => e.type === "TOOL_CALL_RESULT").content, "Not done: you said no");
+  assertEquals([board(hub, LEVEL), words()], [-90, "Declined by the user. Nothing was changed."]);
+  assertEquals(phone.heard.find((e) => e.type === "TOOL_CALL_RESULT").content, "Declined");
 
   // Yes, after the agent lost the role that let it. What each may do is worked out again at the yes.
   phone.ask("Down to -20.");

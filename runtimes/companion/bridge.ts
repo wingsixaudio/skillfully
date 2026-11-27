@@ -120,7 +120,7 @@ let refreshing: ReturnType<typeof setTimeout> | undefined;
 const plainer = (text: string) =>
   text.replace(
     /(NotCapable: )?Requires net access to "([^"]+)", run again with the --allow-net flag/g,
-    "it is not allowed to reach $2",
+    "network access to $2 not allowed",
   );
 
 function fullState(): Values {
@@ -169,14 +169,14 @@ const HEALTH: Record<string, HealthStatus> = {
 };
 /** A module's status, as a person would say it. */
 const IN_WORDS: Record<string, string> = {
-  connecting: "Connecting to the device",
-  disconnected: "Not connected to the device",
-  connection_failure: "It cannot reach the device",
-  bad_config: "Its settings need filling in",
-  authentication_failure: "The device refused its sign-in",
-  insufficient_permissions: "The device will not let it do what it needs",
-  unknown_error: "It reports a problem",
-  unknown_warning: "It reports a warning",
+  connecting: "Connecting",
+  disconnected: "Disconnected",
+  connection_failure: "Connection failed",
+  bad_config: "Settings incomplete",
+  authentication_failure: "Authentication failed",
+  insufficient_permissions: "Permission denied by the device",
+  unknown_error: "Error",
+  unknown_warning: "Warning",
 };
 
 function fromModule(m: Wire): void {
@@ -213,7 +213,9 @@ function fromModule(m: Wire): void {
         health,
         health === "ok"
           ? undefined
-          : (`${IN_WORDS[status] ?? `It reports ${status.replaceAll("_", " ")}`}${said}` + whyLately()).slice(
+          : (`${
+            IN_WORDS[status] ?? status.charAt(0).toUpperCase() + status.slice(1).replaceAll("_", " ")
+          }${said}` + whyLately()).slice(
             0,
             300,
           ),
@@ -393,9 +395,9 @@ function registered(m: Wire, data: any): void {
       // own words or none. The device says which setting it is until that is put right.
       const wrong = notAccepted(theirs, settings);
       badSettings = wrong.length
-        ? `${wrong.map((w) => `“${w}”`).join(" and ")} ${
-          wrong.length > 1 ? "are" : "is"
-        } not filled in the way this module accepts. Put that right under Settings.`
+        ? `Invalid ${wrong.length > 1 ? "settings" : "setting"}: ${
+          wrong.map((w) => `“${w}”`).join(", ")
+        }. Fix ${wrong.length > 1 ? "them" : "it"} in Settings.`
         : undefined;
       if (badSettings) link?.health("down", badSettings);
       const skip = new Set(notAcceptedIds(theirs, settings));
@@ -499,7 +501,7 @@ function refuseRunning(): void {
       .slice(0, 40);
     if (!noted.has(name) && noted.size < 50) {
       noted.add(name);
-      link?.event("module.refused", { what: `run a program on this computer${name ? `: ${name}` : ""}` });
+      link?.event("module.refused", { what: `Run programs${name ? `: ${name}` : ""}` });
     }
     return Object.assign(
       new Error(`A module may not run programs on the hub's computer${name ? ` (${name})` : ""}.`),
@@ -615,13 +617,13 @@ function refusal(message: string): string {
   const [, kind, what] = m;
   const about = what ? `: ${what}` : "";
   return ({
-    net: `reach somewhere on the network it was not given${about}`,
-    read: `read a file that is not its own${about}`,
-    write: `write a file${about}`,
-    run: `run a program on this computer${about}`,
-    env: "read this computer's environment",
-    sys: `ask about this computer${about}`,
-    ffi: "load a program library",
+    net: `Network access${about}`,
+    read: `Read files outside its folder${about}`,
+    write: `Write files${about}`,
+    run: `Run programs${about}`,
+    env: "Read environment variables",
+    sys: `Read system information${about}`,
+    ffi: "Load native code",
   } as Record<string, string>)[kind] ?? `${kind}${about}`;
 }
 
@@ -634,8 +636,7 @@ function refusal(message: string): string {
  */
 let lastError: { what: string; at: number } | undefined;
 /** The error behind a module's "something is wrong", when it printed one in the last minute and a half. */
-const whyLately = () =>
-  lastError && Date.now() - lastError.at < 90_000 ? `. Its error: ${lastError.what}` : "";
+const whyLately = () => lastError && Date.now() - lastError.at < 90_000 ? `. Error: ${lastError.what}` : "";
 function passOnErrors(): void {
   const seen = new Map<string, number>();
   let window = Date.now(), count = 0;
@@ -669,11 +670,11 @@ const refusedBySandbox = (reason: unknown): boolean => {
   // Running a program is refused at its first step, which is reading the environment to hand on. What
   // the module was doing is what is said.
   const running = /child_process/.test(String((reason as Error)?.stack ?? ""));
-  const what = running ? "run a program on this computer" : refusal(String(e.message ?? ""));
+  const what = running ? "Run programs" : refusal(String(e.message ?? ""));
   link?.event("module.refused", { what });
   link?.health(
     "degraded",
-    `This module tried to ${what}. The hub does not allow that, so part of it may not work.`,
+    `Blocked: ${what}. Some features may not work.`,
   );
   return true;
 };

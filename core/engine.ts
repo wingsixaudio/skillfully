@@ -244,7 +244,7 @@ export class Engine {
     const about = this.deps.agent.about();
     if (!about.person) return no("no_agent", "This hub has no agent yet.");
     if (!about.ready) {
-      return no("not_ready", about.on ? `The agent cannot work. ${about.needs}` : "The agent is off.");
+      return no("not_ready", about.on ? `Agent unavailable: ${about.needs}` : "Agent disabled.");
     }
     if (asker.kind !== "person" || asker.disabled) {
       return no("not_allowed", "Only someone signed in can ask.");
@@ -446,7 +446,7 @@ export class Engine {
             if (err.code !== "stopped") return failed(err.code, err.message, step);
             return ended.aborted
               ? failed("too_slow", "It took too long to answer.", step)
-              : failed("stopped", "It was stopped.", step);
+              : failed("stopped", "Stopped.", step);
           }
           return failed("broken", "Something went wrong inside the hub while it was answering.", step);
         }
@@ -464,7 +464,7 @@ export class Engine {
 
         if (!turn.uses.length) {
           const raw = turn.text.trim().slice(0, ANSWER_MAX);
-          if (!raw) return failed("no_answer", "It gave no answer.", step);
+          if (!raw) return failed("no_answer", "Model returned an empty response.", step);
           const cut = turn.stop === "max_tokens";
           const ms = Date.now() - began;
           note("skillfully.agent.answered", {
@@ -623,7 +623,7 @@ export class Engine {
               let told: { content: string; words: string; done?: boolean };
               if (!answers.get(o.id)) {
                 note("skillfully.agent.declined", {}, subject, asker.id);
-                told = { content: "The person said no. It was not done.", words: "Not done: you said no" };
+                told = { content: "Declined by the user. Nothing was changed.", words: "Declined" };
               } else {
                 const again = still && !still.disabled ? await proposing(looking, o.use) : null;
                 // Worked out again, it has to be exactly what the person was shown.
@@ -631,7 +631,7 @@ export class Engine {
                   note("skillfully.agent.declined", { why: "no_longer_allowed" }, subject, asker.id);
                   told = {
                     content: "The person said yes, but it may no longer be done, so it was not.",
-                    words: "Not done: it is no longer allowed",
+                    words: "Blocked: no longer permitted",
                   };
                 } else {
                   // The yes is the person's, and on the record as theirs. The change is the agent's.
@@ -665,7 +665,7 @@ export class Engine {
           traceid,
         };
       }
-      return failed("too_much", "It kept looking and did not come to an answer.", maxSteps);
+      return failed("too_much", "Stopped: too many steps without an answer.", maxSteps);
     };
     return go(1);
   }

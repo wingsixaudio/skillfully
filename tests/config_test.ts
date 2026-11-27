@@ -49,7 +49,7 @@ Deno.test("an edit that gives something needs a yes, and one that takes away or 
 
   const on = edited({ control: true }).changes;
   assertEquals(on.map((c) => [c.what, c.power]), [["control", true]]);
-  assert(on[0].words.includes("Let people control Stage lamp"));
+  assert(on[0].words.includes("Enable control of Stage lamp"));
   const acting = { ...record, mode: "act" as const };
   assertEquals(
     plan("stage-lamp", acting, known, { ...render("stage-lamp", acting, known), control: false }).changes.map(
@@ -89,8 +89,8 @@ Deno.test("an edit that gives something needs a yes, and one that takes away or 
   assertEquals(early.notes.length, 1);
 
   // What cannot be done from a file yet is said, not silently dropped.
-  assert(edited({ name: "Lamp" }).notes[0].words.includes("not built yet"));
-  assert(edited({ from: { source: "store", store: "x" } }).notes[0].words.includes("not built yet"));
+  assert(edited({ name: "Lamp" }).notes[0].words.includes("Not supported yet"));
+  assert(edited({ from: { source: "store", store: "x" } }).notes[0].words.includes("Not supported yet"));
 });
 
 Deno.test("the hub keeps a file for each device, and looking at what an edit would change changes nothing", async () => {
@@ -166,7 +166,7 @@ Deno.test("the hub keeps a file for each device, and looking at what an edit wou
   assert(wrong.problems[2].message.includes("must be called sim-console.json"));
   assert(
     wrong.notes.some((n: { device: string; words: string }) =>
-      n.device === "ghost" && n.words.includes("not built yet")
+      n.device === "ghost" && n.words.includes("Config files cannot add devices")
     ),
   );
   assertEquals(await Deno.readTextFile(`${dataDir}/config/devices/broken.json`), "{ not json");

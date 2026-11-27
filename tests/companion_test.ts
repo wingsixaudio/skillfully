@@ -168,7 +168,7 @@ Deno.test("a module that asks about the computer is told nothing about it, and c
     // It is noted once, by the program's name and nothing it was passed.
     const refused = ofType(hub, "skillfully.plugin.event").filter((e) => e.data.name === "module.refused");
     assertEquals(refused.map((e) => (e.data.detail as { what: string }).what), [
-      "run a program on this computer: arp",
+      "Run programs: arp",
     ]);
     assert(!JSON.stringify(hub.log.read({ limit: 500 })).includes("secret/argument"));
     // None of that is a failure: the lamp is as well as it was.
@@ -196,7 +196,7 @@ Deno.test("a setting filled in a way the module does not accept is said, and not
     assertEquals(host.health.status, "down");
     assertEquals(
       host.health.reason,
-      "“Lamp address” is not filled in the way this module accepts. Put that right under Settings.",
+      "Invalid setting: “Lamp address”. Fix it in Settings.",
     );
     // What the module then says about having no address does not replace it.
     await new Promise((r) => setTimeout(r, 600));
@@ -299,17 +299,20 @@ Deno.test("dropped in with nothing said about the network, a module can reach no
   try {
     assertEquals(installed.manifest.permissions?.network, []);
     assertEquals(host.granted, [], "what the hub holds for it is nothing either");
-    assert(networkNotes(host.granted).some((n) => n.includes("no access to your network")));
-    assert(networkNotes(host.granted).some((n) => n.includes("Nobody has reviewed")));
+    assert(networkNotes(host.granted).some((n) => n.includes("No network access until you approve")));
+    assert(networkNotes(host.granted).some((n) => n.includes("Not reviewed")));
     // It starts, describes itself, and says that it cannot get to its device. The module's own words are
     // only "check the lamp". The error its library printed is beside them, so a person can tell why.
     await until("the module reports trouble", () => host.health.status === "down", 8000);
-    await until("and why", () => !!host.health.reason?.includes("Its error:"), 8000);
+    await until("and why", () => !!host.health.reason?.includes(". Error:"), 8000);
     assert(
-      host.health.reason?.startsWith("It cannot reach the device: Check the lamp. Its error:"),
+      host.health.reason?.startsWith("Connection failed: Check the lamp. Error:"),
       host.health.reason,
     );
-    assert(host.health.reason?.includes("it is not allowed to reach 127.0.0.1"), host.health.reason);
+    assert(
+      /network access to 127\.0\.0\.1:\d+ not allowed/.test(host.health.reason ?? ""),
+      host.health.reason,
+    );
     assertEquals(lamp.connections, 0);
     // The wide grant still exists for whoever chooses it, and still leaves this computer out.
     const wide = resolveNetwork(["lan", "listen"], {});
@@ -333,7 +336,7 @@ Deno.test("allowed to reach a device that is not answering, a module says which 
   try {
     await until("it says why", () => !!host.health.reason?.includes("ECONNREFUSED"), 8000);
     assert(
-      host.health.reason?.startsWith("It cannot reach the device: Check the lamp. Its error:"),
+      host.health.reason?.startsWith("Connection failed: Check the lamp. Error:"),
       host.health.reason,
     );
   } finally {

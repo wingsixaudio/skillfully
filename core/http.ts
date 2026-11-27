@@ -43,7 +43,7 @@ export const setCookie = (token: string, secure: boolean, clear = false) => ({
 export function notOurPage(req: Request, origin: string): Response | null {
   const from = req.headers.get("origin");
   return from !== null && from !== origin
-    ? refuse(403, "That request did not come from this hub's own pages.")
+    ? refuse(403, "Request blocked: it did not come from this hub's pages.")
     : null;
 }
 
@@ -52,17 +52,17 @@ export async function readJson(req: Request, origin: string): Promise<Record<str
   const no = notOurPage(req, origin);
   if (no) return no;
   if (!(req.headers.get("content-type") ?? "").startsWith("application/json")) {
-    return refuse(415, "Expected JSON.");
+    return refuse(415, "Request must be JSON.");
   }
   const text = await req.text();
-  if (text.length > 20_000) return refuse(413, "Too large.");
+  if (text.length > 20_000) return refuse(413, "Request too large.");
   try {
     const parsed = JSON.parse(text);
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? parsed
-      : refuse(400, "Expected an object.");
+      : refuse(400, "Request must be a JSON object.");
   } catch {
-    return refuse(400, "That was not JSON.");
+    return refuse(400, "Invalid JSON.");
   }
 }
 
@@ -72,7 +72,7 @@ export async function readFile(req: Request, max: number): Promise<Uint8Array | 
   let total = 0;
   for await (const chunk of req.body ?? []) {
     total += chunk.length;
-    if (total > max) return refuse(413, "That file is larger than this hub accepts.");
+    if (total > max) return refuse(413, "File too large.");
     chunks.push(chunk);
   }
   const bytes = new Uint8Array(total);

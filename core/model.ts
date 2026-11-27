@@ -90,7 +90,7 @@ async function readSome(res: Response): Promise<string> {
     total += chunk.length;
     if (total > ANSWER_MAX) {
       await res.body?.cancel().catch(() => {});
-      throw new ModelError("not_understood", "The model's answer was too large to read.");
+      throw new ModelError("not_understood", "Model response too large.");
     }
     chunks.push(chunk);
   }
@@ -147,7 +147,7 @@ async function readPieces(res: Response, hear: (words: string) => void, clean: (
       const why = clean(e.error?.message ?? "");
       throw new ModelError(
         "turned_away",
-        "The model's service stopped part way." + (why ? ` It said: ${why}` : ""),
+        "Model response ended early." + (why ? ` Error: ${why}` : ""),
       );
     }
   };
@@ -155,7 +155,7 @@ async function readPieces(res: Response, hear: (words: string) => void, clean: (
     total += chunk.length;
     if (total > ANSWER_MAX) {
       await res.body?.cancel().catch(() => {});
-      throw new ModelError("not_understood", "The model's answer was too large to read.");
+      throw new ModelError("not_understood", "Model response too large.");
     }
     held += decoder.decode(chunk, { stream: true }).replaceAll("\r\n", "\n");
     for (let end = held.indexOf("\n\n"); end >= 0; end = held.indexOf("\n\n")) {
@@ -234,11 +234,11 @@ export async function askModel(
       }
     } catch (err) {
       if (err instanceof ModelError) throw err;
-      if (stop.aborted) throw new ModelError("stopped", "It was stopped.");
+      if (stop.aborted) throw new ModelError("stopped", "Stopped.");
       if ((err as Error).name === "TimeoutError") {
-        throw new ModelError("too_slow", "The model took too long to answer.");
+        throw new ModelError("too_slow", "Model request timed out.");
       }
-      throw new ModelError("unreachable", `The model could not be reached at ${new URL(url).host}.`);
+      throw new ModelError("unreachable", `Cannot reach the model API at ${new URL(url).host}.`);
     }
 
     if (!said) {
@@ -249,36 +249,36 @@ export async function askModel(
 
     if (!res.ok) {
       const why = clean(said?.error?.message ?? "");
-      const told = why ? ` It said: ${why}` : "";
+      const told = why ? ` Error: ${why}` : "";
       if (res.status === 401 || res.status === 403) {
-        throw new ModelError("key_refused", "The model's service refused the key." + told, res.status);
+        throw new ModelError("key_refused", "API key rejected." + told, res.status);
       }
       if (res.status === 404) {
         throw new ModelError(
           "no_model",
-          `The model's service has nothing called ${where.model} at that address.` + told,
+          `Model not found: ${where.model}.` + told,
           res.status,
         );
       }
       // Trouble at their end may pass. It is tried once more, and no more than that.
       if ((res.status >= 500 || res.status === 429) && tries < 2) {
         await sleep(tuning.againMs ?? 1500, stop);
-        if (stop.aborted) throw new ModelError("stopped", "It was stopped.");
+        if (stop.aborted) throw new ModelError("stopped", "Stopped.");
         continue;
       }
       throw new ModelError(
         "turned_away",
         (res.status === 429
-          ? "The model's service is turning requests away for now."
+          ? "Rate limited by the model API."
           : res.status >= 500
-          ? "The model's service is having trouble."
-          : "The model's service would not take the question.") + told,
+          ? "Model API error."
+          : "Model API rejected the request.") + told,
         res.status,
       );
     }
 
     if (!said || !Array.isArray(said.content)) {
-      throw new ModelError("not_understood", "The model's answer was not in a form the hub can read.");
+      throw new ModelError("not_understood", "Unrecognized model response.");
     }
     const uses: Turn["uses"] = [];
     let words = "";
@@ -339,9 +339,9 @@ export async function listModels(
   } catch (err) {
     if (err instanceof ModelError) throw err;
     if ((err as Error).name === "TimeoutError") {
-      throw new ModelError("too_slow", "The model's service took too long to say which models it has.");
+      throw new ModelError("too_slow", "Listing models timed out.");
     }
-    throw new ModelError("unreachable", `The model's service could not be reached at ${new URL(url).host}.`);
+    throw new ModelError("unreachable", `Cannot reach the model API at ${new URL(url).host}.`);
   }
   // deno-lint-ignore no-explicit-any
   let said: any = null;
@@ -353,14 +353,14 @@ export async function listModels(
     if (res.status === 401 || res.status === 403) {
       throw new ModelError(
         "key_refused",
-        "The model's service refused the key." + (why ? ` It said: ${why}` : ""),
+        "API key rejected." + (why ? ` Error: ${why}` : ""),
         res.status,
       );
     }
-    throw new ModelError("turned_away", "The model's service did not say which models it has.", res.status);
+    throw new ModelError("turned_away", "Could not list models.", res.status);
   }
   if (!said || !Array.isArray(said.data)) {
-    throw new ModelError("not_understood", "The model's service did not say which models it has.");
+    throw new ModelError("not_understood", "Could not list models.");
   }
   const offered: Offered[] = [];
   for (const m of said.data) {

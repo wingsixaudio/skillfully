@@ -242,7 +242,7 @@
         <div class="who">
           <div>
             <h1 id="t">Input 1 in bus 1</h1>
-            <p id="inputName">Waiting for the board</p>
+            <p id="inputName">Waiting for the mixer</p>
           </div>
           <div class="db" id="db" aria-hidden="true">&nbsp;</div>
         </div>
@@ -257,7 +257,7 @@
       </section>
 
       <section class="card" aria-labelledby="b">
-        <h2 id="b">Soundboard</h2>
+        <h2 id="b">Mixer</h2>
         <dl id="plugin">
           <dt>Status</dt>
           <dd>Unknown</dd>
@@ -265,9 +265,9 @@
       </section>
 
       <section class="card" aria-labelledby="l">
-        <h2 id="l">From the log</h2>
+        <h2 id="l">Activity</h2>
         <ol id="log">
-          <li class="empty">Nothing yet. Move the fader.</li>
+          <li class="empty">No activity yet. Move the fader.</li>
         </ol>
       </section>
     </main>
@@ -350,10 +350,10 @@
         if (linked && board && KEY) toHub({ type: "set", plugin: board, key: KEY, value: db, ref: ++ref });
         else {say(
             !KEY
-              ? "Nobody has set which ear mix is yours yet."
+              ? "No monitor mix assigned to you."
               : board
-              ? "Not connected to the hub, so this was not sent."
-              : "No soundboard is connected.",
+              ? "Not sent: disconnected from the hub."
+              : "No mixer connected.",
             true,
           );}
       }
@@ -400,13 +400,13 @@
             {
               running: "Running",
               starting: "Starting",
-              quarantined: "Held by the hub until someone releases it",
+              quarantined: "Stopped by the hub",
             }[p.status] || "Stopped",
           ], [
             "Mode",
-            p.mode === "act" ? "Act: changes are sent to the board" : "Listen: nothing is sent to the board",
+            p.mode === "act" ? "Control enabled" : "Read-only",
           ]]
-          : [["Status", "No soundboard is connected"]];
+          : [["Status", "No mixer connected"]];
         $("plugin").innerHTML = "";
         for (const [k, v] of rows) {
           const dt = document.createElement("dt"), dd = document.createElement("dd");
@@ -421,35 +421,35 @@
         switch (e.type) {
           case "skillfully.command.confirmed":
             return `${who} set the level to ${words(d.value)} dB. It was ${words(d.before)}.` +
-              (d.adjusted ? ` Asked for ${d.requested}; the board holds ${d.value}.` : "") +
-              ` Confirmed by the board in ${d.ms} ms.`;
+              (d.adjusted ? ` Requested ${d.requested}, mixer set ${d.value}.` : "") +
+              ` Confirmed in ${d.ms} ms.`;
           case "skillfully.command.moved":
             return `${who} moved the level from ${words(d.from)} to ${
               words(d.value)
             } dB, in ${d.steps} steps over ${(d.ms / 1000).toFixed(1)} s.` +
-              (d.adjusted ? ` Asked for ${d.requested}; the board holds ${d.value}.` : "");
+              (d.adjusted ? ` Requested ${d.requested}, mixer set ${d.value}.` : "");
           case "skillfully.state.moved":
-            return `Moved at the board itself: from ${words(d.from)} to ${words(d.value)} dB.`;
+            return `Changed on the mixer: ${words(d.from)} to ${words(d.value)} dB.`;
           case "skillfully.command.failed":
-            return `${who} asked for ${d.requested} dB. It failed: ${d.message}.`;
+            return `${who} requested ${d.requested} dB. Failed: ${d.message}.`;
           case "skillfully.command.blocked":
-            return `${who} asked for ${d.requested} dB. Not sent: the board is in Listen mode.`;
+            return `${who} requested ${d.requested} dB. Not sent: the mixer is read-only.`;
           case "skillfully.command.rejected":
-            return `${who} asked for ${d.requested}. Refused: ${d.message}.`;
+            return `${who} requested ${d.requested}. Rejected: ${d.message}.`;
           case "skillfully.state.changed": {
             const c = d.changes && KEY && d.changes[KEY];
-            return c ? `Changed at the board itself: now ${words(c.value)} dB, was ${words(c.before)}.` : null;
+            return c ? `Changed on the mixer: ${words(c.before)} to ${words(c.value)} dB.` : null;
           }
           case "skillfully.plugin.crashed":
-            return "The board's driver stopped unexpectedly. The hub is restarting it.";
+            return "Mixer connection crashed. Restarting.";
           case "skillfully.plugin.limit":
-            return `The board's driver went over its ${d.limit} limit (${d.used}, allowed ${d.allowed}). The hub stopped it.`;
+            return `Mixer connection exceeded its ${d.limit} limit (${d.used} of ${d.allowed}). Stopped.`;
           case "skillfully.plugin.quarantined":
-            return "The board's driver broke its limits three times. The hub will not restart it until someone releases it.";
+            return "Mixer connection exceeded its limits 3 times. Stopped until an admin restarts it.";
           case "skillfully.plugin.ready":
-            return `The board's driver is ready with ${d.values} values.`;
+            return `Mixer connection ready: ${d.values} values.`;
           case "skillfully.plugin.mode":
-            return `The board's driver was switched from ${d.before} to ${d.mode}.`;
+            return d.mode === "act" ? "Control enabled for the mixer." : "Mixer set to read-only.";
           default:
             return null;
         }
@@ -465,7 +465,7 @@
           if (items.length === 6) break;
         }
         const ol = $("log");
-        ol.innerHTML = items.length ? "" : '<li class="empty">Nothing yet. Move the fader.</li>';
+        ol.innerHTML = items.length ? "" : '<li class="empty">No activity yet. Move the fader.</li>';
         for (const [time, text] of items) {
           const li = document.createElement("li"), t = document.createElement("time");
           t.textContent = new Date(time).toLocaleTimeString();
@@ -505,9 +505,9 @@
           me = m.me;
           const ears = me && me.slots ? me.slots.ears : undefined;
           KEY = ears === undefined ? null : "console/input/1/bus/" + ears + "/level";
-          $("t").textContent = KEY ? "Input 1 in your ears" : "No ear mix yet";
+          $("t").textContent = KEY ? "Input 1 in your monitor mix" : "No monitor mix";
           bus = ears;
-          if (!KEY) say("Nobody has set which ear mix is yours yet. Ask whoever runs this hub.", true);
+          if (!KEY) say("No monitor mix assigned to you. Ask your hub admin.", true);
         }
         if (m.type === "hello") told = "";
         if (m.type === "hello" || m.type === "plugins") {
@@ -517,7 +517,7 @@
         }
         if (m.type === "state" && m.plugin === board) {
           if (typeof m.values[NAME] === "string") {
-            $("inputName").textContent = m.values[NAME] + " on the board, into bus " + bus;
+            $("inputName").textContent = m.values[NAME] + ", bus " + bus;
           }
           if (KEY && typeof m.values[KEY] === "number") {
             held = m.values[KEY];

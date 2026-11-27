@@ -124,7 +124,7 @@ Deno.test("a person talks to the agent through a screen, and hears its words as 
   assertEquals([result.toolCallId, result.role, result.content], [
     call.toolCallId,
     "tool",
-    "Listed the devices: Simulated board",
+    "Listed devices: Simulated board",
   ]);
 
   // The next question follows what was said: the model is sent the conversation, as words, with IDs.
@@ -276,7 +276,7 @@ Deno.test("a conversation is one person's, on every phone of theirs, and nobody 
   await until("the third answer begins", () => words(one, before) === "First half, ");
   two.agent("stop");
   await until("it stops", () => one.heard.at(-1).type === "RUN_ERROR");
-  assertEquals([one.heard.at(-1).code, one.heard.at(-1).message], ["stopped", "It was stopped."]);
+  assertEquals([one.heard.at(-1).code, one.heard.at(-1).message], ["stopped", "Stopped."]);
   assertEquals(
     one.heard.at(-2).type,
     "TEXT_MESSAGE_END",
@@ -351,10 +351,10 @@ Deno.test("asking the agent is an ability like any other: given by a role, on a 
   assert(hub.agent.turn(hub.owner.id, false).ok);
   const later = await Phone.connect(hub, lee, "ask");
   await until("it says hello", () => !!later.hello);
-  assertEquals(later.hello.agent, { name: "Robin", ready: false, why: "It is off." });
+  assertEquals(later.hello.agent, { name: "Robin", ready: false, why: "Agent disabled." });
   later.ask("Hello?");
   await until("it is refused", () => later.heard.length === 1);
-  assertEquals(later.heard[0], { type: "RUN_ERROR", code: "not_ready", message: "The agent is off." });
+  assertEquals(later.heard[0], { type: "RUN_ERROR", code: "not_ready", message: "Agent disabled." });
   for (const p of [fader, controls, ask, later]) await p.close();
   await t.done();
 });

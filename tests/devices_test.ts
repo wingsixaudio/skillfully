@@ -18,7 +18,7 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
     assert(seen.body.ok, JSON.stringify(seen.body));
     assertEquals(seen.body.module.name, "skillfully-test-lamp");
     assertEquals(seen.body.module.version, "1.0.0");
-    assert(seen.body.notes[0].includes("no access to your network"), seen.body.notes[0]);
+    assert(seen.body.notes[0].includes("No network access until you approve"), seen.body.notes[0]);
     assertEquals(seen.body.screens, [{ id: "controls", name: "Controls" }]);
     assertEquals(h.hub.hosts.size, 0);
     assert(!(await exists(`${h.dataDir}/plugins/companion-skillfully-test-lamp`)));
@@ -55,7 +55,7 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
     assertEquals(d.asks, [], "with no address to go to, it has asked for nothing");
     await until(
       "it says its settings need filling in",
-      () => host().health.reason?.startsWith("Its settings need filling in") ?? false,
+      () => host().health.reason?.startsWith("Settings incomplete") ?? false,
     );
 
     // Saving settings restarts it with them, and they are kept for the next start.
@@ -76,7 +76,7 @@ Deno.test("a superuser adds a device, fills in its settings, and allows what it 
     assertEquals(lamp.connections, 0, "nothing got through before anyone said yes");
     const ask = (await h.device(id)).asks[0];
     assertEquals(ask.value, wanted);
-    assertEquals(ask.words, `Reach another program on this computer, port ${lamp.port}`);
+    assertEquals(ask.words, `Connect to 127.0.0.1:${lamp.port} (this computer)`);
     assert(ask.caution && !ask.usual, "an address on the hub's own computer is not the ordinary case");
     assertEquals(h.hub.log.read({ type: "skillfully.plugin.asked", limit: 5 })[0].data.value, wanted);
 
@@ -151,14 +151,14 @@ Deno.test("what a device tries is shown for what it is, and a no is remembered",
     // Starting another program is stopped one step earlier, when it reaches for the environment to hand on,
     // so that is what the runtime notes.
     assertEquals(tried, [
-      "read a file outside its own folder",
-      "read this computer's environment",
-      "write a file",
+      "Read environment variables",
+      "Read files outside its folder",
+      "Write files",
     ]);
     // Reaching the internet is a question, not a quiet refusal, and it comes with a warning.
     const web = d.asks.find((a: { value: string }) => a.value === "example.com:443");
     assert(
-      web && web.where === "internet" && web.caution === "This leaves your network.",
+      web && web.where === "internet" && web.caution === "Leaves your local network.",
       JSON.stringify(d.asks),
     );
     assert(!web.usual);
@@ -226,7 +226,7 @@ Deno.test("the same module can be added again for a second device, and each is i
       reach: "lan",
       confirm: OWNER_PIN,
     });
-    assert(!again.body.ok && again.body.message.includes("Choose the package again"), JSON.stringify(again));
+    assert(!again.body.ok && again.body.message.includes("Select the package again"), JSON.stringify(again));
   } finally {
     await h.close();
   }
@@ -286,7 +286,7 @@ Deno.test("only a superuser's own page can add a device, and a bad package adds 
         confirm: OWNER_PIN,
       });
       assert(
-        !r.body.ok && r.body.message.includes("address with its port"),
+        !r.body.ok && r.body.message.includes("address with a port"),
         `${reach}: ${JSON.stringify(r.body)}`,
       );
     }

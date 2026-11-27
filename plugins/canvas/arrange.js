@@ -120,7 +120,7 @@
       redraw();
     }
     function addPage() {
-      if (session.doc.pages.length >= C.LIMITS.pages) return say("A canvas has 20 pages at most.", true);
+      if (session.doc.pages.length >= C.LIMITS.pages) return say("Maximum 20 pages per canvas.", true);
       const next = E.copy(session.doc);
       next.pages.push({ name: "Page " + (next.pages.length + 1), pieces: [] });
       undo.push({ doc: session.doc, page: session.page, selected: null });
@@ -140,8 +140,8 @@
       const into = at && at.piece.type === "group";
       const add = el(
         "select",
-        { id: "addPiece", ariaLabel: "Add a piece" },
-        el("option", { value: "", textContent: into ? "Add to this group" : "Add" }),
+        { id: "addPiece", ariaLabel: "Add element" },
+        el("option", { value: "", textContent: into ? "Add to group" : "Add" }),
         ...ADD.map((t) => el("option", { value: t, textContent: WORDS[t] })),
       );
       add.onchange = () => {
@@ -185,7 +185,7 @@
       });
       cancel.onclick = () => {
         if (undo.length && cancel.textContent === "Cancel") {
-          cancel.textContent = "Lose changes?";
+          cancel.textContent = "Discard changes?";
           return setTimeout(() => (cancel.textContent = "Cancel"), 4000);
         }
         host.done(false);
@@ -281,10 +281,10 @@
       const find = el("input", {
         type: "search",
         id: "pickFind",
-        placeholder: "Find a value or an action",
+        placeholder: "Search values and actions",
         value: picker.find,
       });
-      find.setAttribute("aria-label", "Find a value or an action");
+      find.setAttribute("aria-label", "Search values and actions");
       const close = el("button", { type: "button", className: "quiet", textContent: "Close" });
       close.onclick = () => {
         picker = null;
@@ -333,9 +333,7 @@
         if (!hits.length) {
           list.append(el("p", {
             className: "hint",
-            textContent: all.length
-              ? "Nothing matches that."
-              : "None of this screen's devices has anything a piece like this could be tied to.",
+            textContent: all.length ? "No matches." : "No compatible values on this screen's devices.",
           }));
         }
       };
@@ -460,7 +458,7 @@
         textContent: "Choose",
       });
       other.onclick = () =>
-        pick(kind, `What the ${WORDS[kind].toLowerCase()} is tied to`, (i) =>
+        pick(kind, `Link ${WORDS[kind].toLowerCase()} to a value`, (i) =>
           change((x) => {
             x.key = i.key;
             delete x.device;
@@ -470,7 +468,7 @@
         el(
           "label",
           { className: "field" },
-          el("span", { textContent: "Tied to" }),
+          el("span", { textContent: "Linked to" }),
           el("div", { className: "with" }, key, other),
         ),
       );
@@ -479,7 +477,7 @@
       const capability = p.key.slice(0, p.key.indexOf("/"));
       const could = host.plugins().filter((d) => d.capabilities && capability in d.capabilities);
       if (could.length > 1 || p.device !== undefined) {
-        const options = [["", "The first one that has it"], ...could.map((d) => [d.id, d.name])];
+        const options = [["", "First available"], ...could.map((d) => [d.id, d.name])];
         if (p.device !== undefined && !could.some((d) => d.id === p.device)) {
           options.push([p.device, p.device]);
         }
@@ -491,7 +489,7 @@
 
     function titled(p, box, placeholder) {
       if (p.title && typeof p.title === "object") {
-        const words = el("button", { type: "button", className: "quiet", textContent: "Use words" });
+        const words = el("button", { type: "button", className: "quiet", textContent: "Use text" });
         words.onclick = () => change((x) => delete x.title);
         box.append(
           el(
@@ -503,11 +501,11 @@
         );
         return;
       }
-      const from = el("button", { type: "button", className: "quiet", textContent: "From a value" });
+      const from = el("button", { type: "button", className: "quiet", textContent: "Use value" });
       from.onclick = () =>
         pick(
           "readout",
-          "The value that names it",
+          "Name from a value",
           (i) => change((x) => (x.title = { key: i.key, ...named(i) })),
         );
       box.append(
@@ -528,7 +526,7 @@
       field(
         "Colour",
         choice(p.color ?? "", [
-          ["", "Orange, as usual"],
+          ["", "Orange (default)"],
           ...C.COLORS.filter((c) => c !== "orange").map((c) => [c, c[0].toUpperCase() + c.slice(1)]),
         ], (
           v,
@@ -584,7 +582,7 @@
             "Repeats",
             choice(
               how,
-              [["", "No"], ["range", "Over numbers"], ["each", "Over a list of names"]],
+              [["", "No"], ["range", "Number range"], ["each", "List"]],
               (v) =>
                 change((x) => {
                   const as = x.repeat?.as ?? "n";
@@ -600,7 +598,7 @@
           if (r.each) {
             row.append(
               field(
-                "Each of",
+                "Items",
                 text(r.each.join(", "), (v) =>
                   change((x) => {
                     const list = v.split(",").map((s) => s.trim()).filter(Boolean).map((s) =>
@@ -639,7 +637,7 @@
           }
           row.append(
             field(
-              "Called",
+              "Variable",
               text(r.as, (v) => /^[a-z][A-Za-z0-9_-]*$/.test(v) && change((x) => (x.repeat.as = v)), {
                 id: "setAs",
                 autocapitalize: "off",
@@ -650,20 +648,20 @@
             row,
             el("p", {
               className: "hint",
-              textContent: `In the pieces of this group, {${r.as}} stands for the item.`,
+              textContent: `Use {${r.as}} in this group to insert the current item.`,
             }),
           );
         }
       }
       if (["button", "toggle", "slider", "readout", "meter", "light", "choice", "stepper"].includes(p.type)) {
         tied(p, p.type, box);
-        titled(p, box, "What the device calls it");
+        titled(p, box, "Device default");
       }
       if (p.type === "countdown") {
         titled(p, box, "None");
         box.append(
           field(
-            "Counts down to",
+            "Target time",
             text(
               p.until,
               (v) => /^([01]?\d|2[0-3]):[0-5]\d$/.test(v.trim()) && change((x) => (x.until = v.trim())),
@@ -676,14 +674,14 @@
           ),
           el("p", {
             className: "hint",
-            textContent: "A time of day on a 24-hour clock. After it, it counts up.",
+            textContent: "24-hour time (HH:MM). Counts up after the target time.",
           }),
         );
       }
       if (p.type === "light") {
         box.append(
           field(
-            "Lit while it is",
+            "On when value is",
             text(
               unparse(p.is ?? true),
               (v) => change((x) => setOrDrop(x, "is", parse(v) === true ? undefined : parse(v))),
@@ -701,14 +699,14 @@
       // the canvas's file. Here they are said, so nobody wonders where they went.
       if (p.sends || p.type === "choice" || p.type === "goto") {
         const said = p.type === "goto"
-          ? `Goes to the page “${p.page}”.`
+          ? `Opens page “${p.page}”.`
           : p.type === "choice"
-          ? `Offers ${p.options.map((o) => o.title ?? String(o.value)).join(", ")}.`
-          : `Does its action with the number in “${p.sends}”.`;
+          ? `Options: ${p.options.map((o) => o.title ?? String(o.value)).join(", ")}.`
+          : `Runs its action with the number in “${p.sends}”.`;
         box.append(
           el("p", {
             className: "hint",
-            textContent: said + " Ask for a change, or change it in the canvas's file.",
+            textContent: said + " To change this, ask the agent or edit the canvas file.",
           }),
         );
       }
@@ -726,7 +724,7 @@
             "Sends",
             text(unparse(p.value), (v) => change((x) => setOrDrop(x, "value", parse(v))), {
               id: "setValue",
-              placeholder: "A press",
+              placeholder: "Nothing (press)",
               autocapitalize: "off",
             }),
           ),
@@ -741,7 +739,7 @@
         lit.onclick = () =>
           pick(
             "readout",
-            "The value that lights it",
+            "Value that turns it on",
             (i) =>
               change((
                 x,
@@ -754,19 +752,19 @@
         const row = el(
           "div",
           { className: "with" },
-          el("code", { textContent: p.lit ? p.lit.key : "Never" }),
+          el("code", { textContent: p.lit ? p.lit.key : "None" }),
           lit,
         );
         if (p.lit) {
-          const never = el("button", { type: "button", className: "quiet", textContent: "Never" });
+          const never = el("button", { type: "button", className: "quiet", textContent: "Clear" });
           never.onclick = () => change((x) => delete x.lit);
           row.append(never);
         }
-        box.append(el("div", { className: "field" }, el("span", { textContent: "Lit while" }), row));
+        box.append(el("div", { className: "field" }, el("span", { textContent: "Light" }), row));
         if (p.lit) {
           box.append(
             field(
-              "Is",
+              "On when",
               text(unparse(p.lit.is ?? true), (v) => change((x) => (x.lit.is = parse(v) ?? true)), {
                 id: "setLitIs",
                 autocapitalize: "off",
@@ -799,17 +797,17 @@
         );
       }
       if (p.type === "slider" || p.type === "meter" || p.type === "stepper") {
-        const least = p.type === "stepper" ? "None" : "The device's";
+        const least = p.type === "stepper" ? "None" : "Device default";
         box.append(
           el(
             "div",
             { className: "parts" },
             field(
-              "Lowest",
+              "Minimum",
               number(p.min, (v) => change((x) => setOrDrop(x, "min", v)), { placeholder: least }),
             ),
             field(
-              "Highest",
+              "Maximum",
               number(p.max, (v) => change((x) => setOrDrop(x, "max", v)), { placeholder: least }),
             ),
             ...(p.type === "meter" ? [] : [
@@ -826,9 +824,9 @@
 
       const size = (wideBy, tallBy) =>
         commit(E.resize(session.doc, session.page, session.selected, wideBy, tallBy));
-      const sizes = el("div", { className: "parts" }, stepper("Wide", p.at[2] ?? 1, (n) => size(n, 0)));
+      const sizes = el("div", { className: "parts" }, stepper("Width", p.at[2] ?? 1, (n) => size(n, 0)));
       if (p.type !== "group" || p.at[3] !== undefined) {
-        sizes.append(stepper("Tall", p.at[3] ?? 1, (n) => size(0, n)));
+        sizes.append(stepper("Height", p.at[3] ?? 1, (n) => size(0, n)));
       }
       box.append(sizes);
 
@@ -846,7 +844,7 @@
         type: "button",
         className: "quiet",
         id: "groupPiece",
-        textContent: p.type === "group" ? "Ungroup" : "Put in a group",
+        textContent: p.type === "group" ? "Ungroup" : "Group",
       });
       wrap.onclick = () =>
         p.type === "group"
@@ -877,7 +875,7 @@
       const least = E.widest(doc);
       const columns = stepper("Columns", doc.columns ?? 4, (n) => {
         const want = (doc.columns ?? 4) + n;
-        if (want < least) return say(`A piece reaches column ${least}. Move or narrow it first.`);
+        if (want < least) return say(`An element extends to column ${least}. Move or resize it first.`);
         if (want > C.LIMITS.columns) return;
         whole((x) => (x.columns = want));
       });
@@ -920,7 +918,7 @@
         type: "button",
         className: "quiet bad",
         id: "removePage",
-        textContent: "Remove this page",
+        textContent: "Delete page",
         disabled: doc.pages.length < 2,
       });
       drop.onclick = () => {
@@ -931,7 +929,7 @@
         session.page = Math.min(session.page, next.pages.length - 1);
         redraw();
       };
-      tools.append(shift(-1, "Page earlier"), shift(1, "Page later"), drop);
+      tools.append(shift(-1, "Move page left"), shift(1, "Move page right"), drop);
       box.append(tools);
     }
 

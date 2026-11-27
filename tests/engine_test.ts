@@ -74,7 +74,7 @@ Deno.test("the agent answers by looking, and everything it did is on the record 
   assert(r.ok, JSON.stringify(r));
   assertEquals([r.answer, r.steps, r.cut, r.tokens], [ANSWER, 3, false, { in: 300, out: 60 }]);
   assertEquals(r.looked, [
-    "Listed the devices: Simulated board, Simulated switch",
+    "Listed devices: Simulated board, Simulated switch",
     "Read 1 value on Simulated board",
     "Searched Simulated switch for “outlet 1”: 3 found",
   ]);
@@ -426,24 +426,24 @@ Deno.test("when its model cannot be asked, the agent says why in words, and the 
   };
   assertEquals(await fails("refused"), [
     "key_refused",
-    "The model's service refused the key. It said: invalid x-api-key [key]",
+    "API key rejected. Error: invalid x-api-key [key]",
     1,
   ]);
   assertEquals(await fails("no-model"), [
     "no_model",
-    `The model's service has nothing called ${hub.agent.about().model} at that address. It said: model: nope`,
+    `Model not found: ${hub.agent.about().model}. Error: model: nope`,
     1,
   ]);
   // Trouble at their end is tried once more, and then it is said.
-  assertEquals(await fails("trouble"), ["turned_away", "The model's service is having trouble.", 2]);
+  assertEquals(await fails("trouble"), ["turned_away", "Model API error.", 2]);
   assertEquals(await fails("nonsense"), [
     "not_understood",
-    "The model's answer was not in a form the hub can read.",
+    "Unrecognized model response.",
     1,
   ]);
-  assertEquals(await fails("slow"), ["too_slow", "The model took too long to answer.", 1]);
-  assertEquals(await fails("forever"), ["too_much", "It kept looking and did not come to an answer.", 4]);
-  assertEquals(await fails("empty"), ["no_answer", "It gave no answer.", 1]);
+  assertEquals(await fails("slow"), ["too_slow", "Model request timed out.", 1]);
+  assertEquals(await fails("forever"), ["too_much", "Stopped: too many steps without an answer.", 4]);
+  assertEquals(await fails("empty"), ["no_answer", "Model returned an empty response.", 1]);
   // On its last look it is told to answer now. That is the hub speaking, after the results.
   assertEquals(model.sent.at(-2)!.body.messages.at(-1).content.at(-1), {
     type: "text",
@@ -452,7 +452,7 @@ Deno.test("when its model cannot be asked, the agent says why in words, and the 
   // Sent on to somewhere else, the hub does not follow, and the other place never hears the key.
   assertEquals((await fails("elsewhere")).slice(0, 2), [
     "unreachable",
-    `The model could not be reached at ${new URL(model.address).host}.`,
+    `Cannot reach the model API at ${new URL(model.address).host}.`,
   ]);
   assertEquals(elsewhere.sent.length, 0);
 
@@ -486,7 +486,7 @@ Deno.test("when its model cannot be asked, the agent says why in words, and the 
   );
   assert(hub.agent.turn(hub.owner.id, false).ok);
   const off = await hub.engine.ask(owner, "Hello?");
-  assertEquals([off.ok, !off.ok && off.message], [false, "The agent is off."]);
+  assertEquals([off.ok, !off.ok && off.message], [false, "Agent disabled."]);
   assertEquals(model.sent.length, sent);
   await t.done();
   await elsewhere.stop();
@@ -526,7 +526,7 @@ Deno.test("one question at a time each, turned off it stops where it is, and a s
   const none = await hub.post("/admin/api/agent/ask", { question: "Anything wrong?" });
   assertEquals([none.status, none.body.message], [
     400,
-    "The agent cannot work. It has no key to reach a model with.",
+    "Agent unavailable: API key not set.",
   ]);
   assertEquals(OWNER_PIN.length, 6);
   await t.done();

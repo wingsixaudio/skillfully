@@ -19,6 +19,9 @@ import type { DeviceRecord } from "./registry.ts";
 type Setting = string | number | boolean;
 
 /** One device as its file holds it. See contract/v1/config.device.schema.json. */
+/** "Connect to x" in the middle of a sentence: "connect to x". */
+const lower = (w: string) => w.charAt(0).toLowerCase() + w.slice(1);
+
 export interface DeviceFile {
   kind: "device";
   id: string;
@@ -146,8 +149,8 @@ export function plan(
 
   if (file.control !== undefined && file.control !== now.control) {
     file.control
-      ? add("control", `Let people control ${who}. Today the hub only watches it.`, true, { on: true })
-      : add("control", `Stop people controlling ${who}. The hub would only watch it.`, false, { on: false });
+      ? add("control", `Enable control of ${who} (currently read-only).`, true, { on: true })
+      : add("control", `Disable control of ${who} (make it read-only).`, false, { on: false });
   }
   if (file.settings) {
     for (const [key, value] of Object.entries(file.settings).sort(([a], [b]) => a.localeCompare(b))) {
@@ -157,7 +160,7 @@ export function plan(
         note(`"${key}" is a secret of ${who}. Secrets are set in the admin, never in a file.`);
       } else if (record.settings[key] !== value) {
         const from = shown(record.settings[key] ?? null);
-        add("setting", `Change ${who}'s setting "${key}" from ${from} to ${shown(value)}.`, false, {
+        add("setting", `${who}: change setting "${key}" from ${from} to ${shown(value)}.`, false, {
           setting: { name: key, value },
         });
       }
@@ -169,33 +172,35 @@ export function plan(
     for (const g of [...want].sort()) {
       if (had.has(g)) continue;
       const asked = declared(g);
-      add("allow", `Let ${who}: ${asked.words}.`, true, {
+      add("allow", `Allow ${who} to ${lower(asked.words)}.`, true, {
         grant: g,
         ...(asked.caution ? { caution: asked.caution } : {}),
       });
     }
     for (const g of [...had].sort()) {
-      if (!want.has(g)) add("revoke", `Take away from ${who}: ${grantWords(g)}.`, false, { grant: g });
+      if (!want.has(g)) {
+        add("revoke", `Revoke permission for ${who} to ${lower(grantWords(g))}.`, false, { grant: g });
+      }
     }
   }
   if (file.reach?.refused) {
     const want = new Set(file.reach.refused);
     for (const g of [...want].sort()) {
       if (!refusedNow.has(g)) {
-        add("refuse", `Refuse ${who} this for good: ${g.slice(0, 120)}.`, false, { grant: g });
+        add("refuse", `Always deny ${who} access to ${g.slice(0, 120)}.`, false, { grant: g });
       }
     }
     for (const g of [...refusedNow].sort()) {
       if (!want.has(g)) {
-        add("ask-again", `Let ${who} ask again for: ${g.slice(0, 120)}.`, false, { grant: g });
+        add("ask-again", `Stop denying ${who} access to ${g.slice(0, 120)}.`, false, { grant: g });
       }
     }
   }
   if (file.name !== undefined && file.name !== now.name) {
-    note(`Renaming ${who} to "${file.name.slice(0, 80)}" from a file is not built yet.`);
+    note(`Not supported yet: renaming ${who} to "${file.name.slice(0, 80)}" from a config file.`);
   }
   if (file.from && stable(file.from) !== stable(now.from)) {
-    note(`Where ${who} came from is written by the hub. Changing its version from a file is not built yet.`);
+    note(`Not supported yet: changing the source or version of ${who} from a config file.`);
   }
   return { changes, notes };
 }
@@ -451,13 +456,15 @@ export class Config {
   > {
     const o = await this.overview();
     const make = this.#deps.make;
-    if (!o.on || !make) return { ok: false, message: "This hub keeps no config folder.", problems: [] };
+    if (!o.on || !make) {
+      return { ok: false, message: "No config folder: the hub has no data folder.", problems: [] };
+    }
     if (o.problems.length) {
       return {
         ok: false,
         message: o.problems.length === 1
-          ? "One file could not be read, so nothing was changed. Fix or remove it first."
-          : `${o.problems.length} files could not be read, so nothing was changed. Fix or remove them first.`,
+          ? "Nothing applied: 1 config file has errors. Fix or remove it first."
+          : `Nothing applied: ${o.problems.length} config files have errors. Fix or remove them first.`,
         problems: o.problems,
       };
     }
@@ -520,7 +527,7 @@ export class Config {
       if (!record || !known) {
         notes.push({
           device: id,
-          words: `There is no device called ${id} on this hub. Adding a device from a file is not built yet.`,
+          words: `Device not found: ${id}. Config files cannot add devices yet.`,
         });
         continue;
       }

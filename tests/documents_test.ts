@@ -107,7 +107,7 @@ Deno.test("a screen's documents are read and changed only by those its abilities
   // A person who may only read cannot change anything, whatever their screen sends. It is on the record.
   const refused = await reader.putDoc("main", { title: "Mine now" });
   assertEquals(refused.ok, false);
-  assert(refused.message.includes("not allowed to change main"));
+  assert(refused.message.includes("cannot change main"));
   assertEquals((await reader.removeDoc("main")).ok, false);
   assertEquals(ofType(hub, "skillfully.document.refused").length, 2);
   assertEquals((await reader.docs()).docs[0].doc.title, "Sunday");

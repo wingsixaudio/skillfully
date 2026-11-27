@@ -5,7 +5,7 @@ import { attemptWords, classify, covered, grantWords } from "../core/asks.ts";
 
 Deno.test("an address is put in words by where it is, and only the ordinary case is ordinary", () => {
   const device = classify("192.168.1.50:9999")!;
-  assertEquals(device.words, "Reach the device at 192.168.1.50, port 9999");
+  assertEquals(device.words, "Connect to 192.168.1.50:9999 (local network)");
   assertEquals([device.where, device.grant, device.usual, device.caution], [
     "device",
     "192.168.1.50:9999",
@@ -29,7 +29,7 @@ Deno.test("an address is put in words by where it is, and only the ordinary case
     assert(a.where === "this-computer" && !a.usual && a.caution, here);
   }
   const web = classify("api.example.com:443")!;
-  assertEquals([web.where, web.usual, web.caution], ["internet", false, "This leaves your network."]);
+  assertEquals([web.where, web.usual, web.caution], ["internet", false, "Leaves your local network."]);
   assertEquals(classify("8.8.8.8:53")!.where, "internet");
   assertEquals(classify("mixer.local:10023")!.where, "name");
   assertEquals(classify("wing:2223")!.where, "name");
@@ -57,9 +57,10 @@ Deno.test("a grant covers what it says and nothing beside it", () => {
 });
 
 Deno.test("grants and refused attempts are said in plain words", () => {
-  assertEquals(grantWords("listen"), "Open ports on this computer, so devices can answer it");
-  assertEquals(grantWords("192.168.1.50:9999"), "Reach the device at 192.168.1.50, port 9999");
-  assertEquals(attemptWords("run"), "start another program");
+  assertEquals(grantWords("listen"), "Listen for incoming connections");
+  assertEquals(grantWords("192.168.1.50:9999"), "Connect to 192.168.1.50:9999 (local network)");
+  assertEquals(grantWords("{host}:6466"), "Connect to {host}:6466");
+  assertEquals(attemptWords("run"), "Run programs");
   assert(attemptWords("something-new").includes("something-new"));
 });
 

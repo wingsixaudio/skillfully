@@ -169,7 +169,7 @@ async function limited(res: Response, max: number): Promise<Uint8Array> {
   let total = 0;
   for await (const chunk of res.body ?? []) {
     total += chunk.length;
-    if (total > max) throw new Error("it is larger than this hub accepts");
+    if (total > max) throw new Error("file too large");
     chunks.push(chunk);
   }
   const out = new Uint8Array(total);
@@ -181,11 +181,9 @@ async function limited(res: Response, max: number): Promise<Uint8Array> {
   return out;
 }
 
-const UNREACHABLE =
-  "The store could not be reached from this hub. You can still add a device from a package file.";
+const UNREACHABLE = "Cannot reach the store. You can still install from a file.";
 
-const OLDER =
-  "What this hub was given as the store's list is older than one it has already read, so none of it is used. You can still add a device from a package file.";
+const OLDER = "Store list rejected: older than the one already loaded. You can still install from a file.";
 const RETRY_MS = 60 * 1000;
 
 /** Where a hub keeps the date of the newest signed list it has read, from one start to the next. */
@@ -228,7 +226,7 @@ export class Store {
 
   /** What the store lists. Read again after a few minutes. Throws a plain sentence when it cannot be read. */
   async list(): Promise<StoreModule[]> {
-    if (!this.#url) throw new Error("This hub is not set up to use a store.");
+    if (!this.#url) throw new Error("No store configured.");
     if (this.#list && Date.now() - this.#readAt < this.#keptMs) return this.#list;
     return await (this.#reading ??= this.#read().finally(() => (this.#reading = undefined)));
   }
@@ -250,7 +248,7 @@ export class Store {
       const signature = await get(`${this.#url}.sig`).then((b) => new TextDecoder().decode(b), () => "");
       if (!(await verify(bytes, signature, this.#keys))) {
         throw new Error(
-          "What this hub was given as the store's list was not signed by the store, so none of it is used. You can still add a device from a package file.",
+          "Store list rejected: signature invalid. You can still install from a file.",
         );
       }
     }
@@ -261,14 +259,14 @@ export class Store {
       throw new Error(UNREACHABLE);
     }
     if (parsed?.format !== 1 || !Array.isArray(parsed.modules)) {
-      throw new Error("The store's list is not one this hub understands. It may need a newer hub.");
+      throw new Error("Store list format not supported. Update the hub.");
     }
     if (this.signed) {
       // A signed list says when it was made. One made before a list this hub has already read is
       // somebody handing out an old list with its old signature, and is not used.
       const made = typeof parsed.generated === "string" ? Date.parse(parsed.generated) : NaN;
       if (Number.isNaN(made)) {
-        throw new Error("The store's list is not one this hub understands. It may need a newer hub.");
+        throw new Error("Store list format not supported. Update the hub.");
       }
       const seen = Date.parse(this.#newest?.get() ?? "");
       if (made < seen) throw new Error(OLDER);
@@ -320,7 +318,7 @@ export class Store {
   /** Download one package and check it is the one the list describes. Nothing in it is run. */
   async download(id: string): Promise<{ module: StoreModule; bytes: Uint8Array }> {
     const module = (await this.list()).find((m) => m.id === id);
-    if (!module) throw new Error("The store no longer lists that.");
+    if (!module) throw new Error("No longer in the store.");
     let bytes: Uint8Array;
     try {
       // A path was checked to stay beside the list, so it cannot be pointed anywhere else. An address is
@@ -334,10 +332,10 @@ export class Store {
       if (!res.ok) throw new Error(`it answered ${res.status}`);
       bytes = await limited(res, PACKAGE_MAX);
     } catch {
-      throw new Error("The package could not be downloaded from the store. Try again in a moment.");
+      throw new Error("Download failed. Try again in a moment.");
     }
     if (createHash("sha256").update(bytes).digest("hex") !== module.package.sha256) {
-      throw new Error("What was downloaded is not what the store says it built, so it was thrown away.");
+      throw new Error("Download rejected: checksum mismatch.");
     }
     return { module, bytes };
   }

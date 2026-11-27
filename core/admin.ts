@@ -11,7 +11,7 @@ import type { Agent } from "./agent.ts";
 import type { Engine } from "./engine.ts";
 import type { Updates } from "./update.ts";
 import type { Approvals } from "./approvals.ts";
-import { aboutWords, advised, attemptWords, grantWords } from "./asks.ts";
+import { aboutWords, advised, attemptWords, classify, grantWords } from "./asks.ts";
 import type { Config } from "./config.ts";
 import type { Devices } from "./devices.ts";
 import { json, notOurPage, outcome, readFile, readJson, refuse, sentence } from "./http.ts";
@@ -24,13 +24,32 @@ const UPLOAD_MAX = 64 * 1024 * 1024;
 const UPLOAD_KEPT_MS = 10 * 60 * 1000;
 /** How many things the store's shelf shows at once. The rest are found by typing. */
 const SHELF_PAGE = 30;
-const NO_PLACE = "This hub was started without a place to keep added devices.";
+const NO_PLACE = "No storage folder: start the hub with a data folder to add devices.";
+
+/**
+ * Words with a setting in them, "Connect to {host}:6466", as a person reads them: the setting's value when it
+ * has one, otherwise the setting's name in brackets.
+ */
+function filledIn(
+  words: string,
+  settings: Record<string, unknown> = {},
+  form: { id: string; label: string }[] = [],
+): string {
+  const filled = words.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/g, (_, k: string) => {
+    const v = settings[k];
+    if ((typeof v === "string" && v) || typeof v === "number") return String(v);
+    return `[${form.find((f) => f.id === k)?.label ?? k}]`;
+  });
+  // Every setting filled in: say where the address is, as any other address is said.
+  const at = /^Connect to (\S+)$/.exec(filled);
+  return (at && classify(at[1])?.words) || filled;
+}
 
 /** How far something from the store has been proven, in words. */
 const PROVEN: Record<string, string> = {
-  starts: "It starts and describes itself. Nobody has reported using it with a device.",
-  "pretend-device": "It has been proven against a stand-in for the device, not the real thing.",
-  "real-device": "It has been used with the real device.",
+  starts: "Not yet tested with hardware",
+  "pretend-device": "Tested in simulation",
+  "real-device": "Tested with hardware",
 };
 
 export interface AdminDeps {
@@ -72,7 +91,7 @@ export function adminApi(deps: AdminDeps) {
     // Whether a device on this hub already came from this entry.
     here: [...devices.hosts.keys()].some((id) => devices.record(id).origin?.store?.id === m.id),
     signed: store.signed,
-    advance: advance(m).map((g) => grantWords(g)),
+    advance: advance(m).map((g) => filledIn(grantWords(g))),
     // What its reviewers say about things it may ask for later. Advice only: the superuser decides.
     advises: m.advise.filter((a) => store.signed || a.say === "no").map((a) => ({
       say: a.say,
@@ -211,7 +230,9 @@ export function adminApi(deps: AdminDeps) {
               proven: PROVEN[other.listed.tested] ?? "",
               source: other.listed.source.repo,
               // What a signed list allows in advance that this device does not hold yet.
-              also: advance(other.listed).filter((g) => !h.granted.includes(g)).map((g) => grantWords(g)),
+              also: advance(other.listed).filter((g) => !h.granted.includes(g)).map((g) =>
+                filledIn(grantWords(g), record.settings, h.settingsForm)
+              ),
             }
             : null,
           form: h.settingsForm ?? null,
@@ -224,7 +245,14 @@ export function adminApi(deps: AdminDeps) {
             const advice = advised(a, ...store.advice(record.origin?.store?.id));
             return advice ? { ...a, advice: { say: advice.say, why: advice.why } } : a;
           }),
-          grants: h.granted.map((g) => ({ grant: g, words: grantWords(g) })),
+          // A grant written in terms of a setting is shown with what that setting holds now, as an address.
+          grants: h.granted.map((g) => ({
+            grant: g,
+            words: filledIn(grantWords(g), record.settings, h.settingsForm),
+            from: [...g.matchAll(/\{([A-Za-z][A-Za-z0-9]*)\}/g)].map(([, k]) =>
+              (h.settingsForm ?? []).find((f) => f.id === k)?.label ?? k
+            ),
+          })),
           attempts: [...h.attempts].map(([kind, times]) => ({ words: attemptWords(kind), times })),
           usedBy: screens.using(h.id).map((m) => m.name),
         };
@@ -265,7 +293,7 @@ export function adminApi(deps: AdminDeps) {
    */
   function tryOut(q: URLSearchParams): Response {
     const host = devices.hosts.get((q.get("id") ?? "").slice(0, 80));
-    if (!host) return refuse(400, "No such device.");
+    if (!host) return refuse(400, "Device not found.");
     const typed = (q.get("find") ?? "").slice(0, 80).toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
     const hit = (text: string) => typed.every((w) => text.toLowerCase().includes(w));
     const most = typed.length ? 40 : 8;
@@ -418,20 +446,16 @@ export function adminApi(deps: AdminDeps) {
     const sure = async () => {
       if (b.confirm === undefined) {
         return accounts.unlocked(session) ? null : json(
-          { ok: false, locked: true, message: "Confirm with your own PIN or password first." },
+          { ok: false, locked: true, message: "Enter your PIN or password to confirm." },
           400,
         );
       }
-      return (await accounts.confirm(me.id, b.confirm))
-        ? null
-        : refuse(400, "Your own PIN or password is not right.");
+      return (await accounts.confirm(me.id, b.confirm)) ? null : refuse(400, "Incorrect PIN or password.");
     };
     switch (path) {
       case "unlock": {
         const seconds = await accounts.unlock(me.id, session, b.confirm);
-        return seconds
-          ? json({ ok: true, unlocked: seconds })
-          : refuse(400, "Your own PIN or password is not right.");
+        return seconds ? json({ ok: true, unlocked: seconds }) : refuse(400, "Incorrect PIN or password.");
       }
       case "lock":
         accounts.lock(me.id, session);
@@ -455,7 +479,7 @@ export function adminApi(deps: AdminDeps) {
       }
       case "config/trust": {
         if (b.mode !== "strict" && b.mode !== "hour" && b.mode !== "always") {
-          return refuse(400, "Choose strict, trusting for an hour, or always trusting.");
+          return refuse(400, "Mode must be strict, hour or always.");
         }
         const no = await sure();
         if (no) return no;
@@ -537,11 +561,11 @@ export function adminApi(deps: AdminDeps) {
       case "screen/connections": {
         // Handing a plugin a connection is handing out power.
         const screen = screens.all.get(id)?.manifest;
-        if (!screen) return refuse(400, "No such screen.");
+        if (!screen) return refuse(400, "Screen not found.");
         const wanted = Array.isArray(b.drivers) ? b.drivers.map(String) : null;
         const can = new Set(screens.eligible(screen).map((h) => h.id));
         if (!wanted || wanted.some((d) => !can.has(d))) {
-          return refuse(400, "A screen can only be given connections of a kind it works with.");
+          return refuse(400, "This screen does not support that kind of connection.");
         }
         const no = await sure();
         if (no) return no;
@@ -552,7 +576,7 @@ export function adminApi(deps: AdminDeps) {
 
       case "driver/mode": {
         if (!devices.hosts.has(id) || (b.mode !== "listen" && b.mode !== "act")) {
-          return refuse(400, "No such device, or no such mode.");
+          return refuse(400, "Device or mode not found.");
         }
         const no = await sure();
         if (no) return no;
@@ -567,10 +591,10 @@ export function adminApi(deps: AdminDeps) {
         // of these with something typed in, such as the code a television shows, so that can be done
         // here too. The hub logs it either way, with who asked and that it came from the admin.
         const host = devices.hosts.get(id);
-        if (!host) return refuse(400, "No such device.");
+        if (!host) return refuse(400, "Device not found.");
         const key = String(b.key ?? "");
         if (!/^generic\/(action|ready)\/[^/]{1,200}$/.test(key) || !host.state.has(`${key}/title`)) {
-          return refuse(400, "That is not something this device offers to do.");
+          return refuse(400, "This device has no such action.");
         }
         // What was filled in for it, when the action takes something: a code, a level, a choice. Plain
         // values only, and no more of them than an action has options.
@@ -596,22 +620,22 @@ export function adminApi(deps: AdminDeps) {
       }
       case "driver/release": {
         const host = devices.hosts.get(id);
-        if (!host) return refuse(400, "No such device.");
+        if (!host) return refuse(400, "Device not found.");
         host.release(who);
         return json({ ok: true });
       }
       case "driver/settings": {
         const host = devices.hosts.get(id);
-        if (!host) return refuse(400, "No such device.");
+        if (!host) return refuse(400, "Device not found.");
         const given = b.settings;
         if (!given || typeof given !== "object" || Array.isArray(given)) {
-          return refuse(400, "Expected settings.");
+          return refuse(400, "Settings missing from the request.");
         }
         const was = devices.record(id).settings;
         const next: Record<string, unknown> = { ...was };
         for (const [name, value] of Object.entries(given)) {
           if (!["string", "number", "boolean"].includes(typeof value) || name.length > 64) {
-            return refuse(400, `The setting ${name.slice(0, 64)} is not something this hub can keep.`);
+            return refuse(400, `Unknown setting: ${name.slice(0, 64)}.`);
           }
           // A secret left blank means "keep what is there". It is never sent back to be re-entered.
           if (value === "" && host.settingsForm?.find((f) => f.id === name)?.kind === "secret") continue;
@@ -624,14 +648,14 @@ export function adminApi(deps: AdminDeps) {
       case "driver/allow": {
         // A superuser's answers to what a device asked for, and anything they take back.
         const host = devices.hosts.get(id);
-        if (!host) return refuse(400, "No such device.");
+        if (!host) return refuse(400, "Device not found.");
         const list = (v: unknown) => (Array.isArray(v) ? [...new Set(v.map(String))] : []);
         const allow = list(b.allow), deny = list(b.deny), revoke = list(b.revoke);
         if (allow.some((v) => !host.asks.has(v)) || deny.some((v) => !host.asks.has(v))) {
-          return refuse(400, "It is no longer asking for one of those. Look again.");
+          return refuse(400, "Some of these requests are no longer pending. Refresh and try again.");
         }
         if (revoke.some((g) => !host.granted.includes(g))) {
-          return refuse(400, "It does not hold one of those.");
+          return refuse(400, "Some of these permissions are not granted.");
         }
         if (!allow.length && !deny.length && !revoke.length) {
           return json({ ok: true, allowed: [], denied: [], revoked: [] });
@@ -640,7 +664,9 @@ export function adminApi(deps: AdminDeps) {
         if (no) return no;
         const allowed = allow.map((v) => host.asks.get(v)!.grant);
         const granted = [...new Set([...host.granted.filter((g) => !revoke.includes(g)), ...allowed])];
-        if (granted.length > 64) return refuse(400, "That is more than one device can be given.");
+        if (granted.length > 64) {
+          return refuse(400, "Too many network permissions for one device (limit 64).");
+        }
         const denied = [...new Set([...devices.record(id).denied, ...deny])].filter((v) =>
           !allow.includes(v)
         );
@@ -648,9 +674,9 @@ export function adminApi(deps: AdminDeps) {
         return json({ ok: true, allowed: allow, denied: deny, revoked: revoke });
       }
       case "driver/remove": {
-        if (!devices.hosts.has(id)) return refuse(400, "No such device.");
+        if (!devices.hosts.has(id)) return refuse(400, "Device not found.");
         if (!devices.record(id).origin) {
-          return refuse(400, "This device was not added here, so it cannot be removed here.");
+          return refuse(400, "This device is set up outside the hub pages and cannot be removed here.");
         }
         const no = await sure();
         if (no) return no;
@@ -665,8 +691,10 @@ export function adminApi(deps: AdminDeps) {
 
       case "driver/update": {
         // Replace a device from the store with the version the store lists now. Everything decided for it stays.
-        if (!devices.hosts.has(id)) return refuse(400, "No such device.");
-        if (!devices.record(id).origin?.store) return refuse(400, "This device did not come from the store.");
+        if (!devices.hosts.has(id)) return refuse(400, "Device not found.");
+        if (!devices.record(id).origin?.store) {
+          return refuse(400, "This device was not installed from the store.");
+        }
         try {
           // About to act on it, so the list is read now, not from a few minutes ago.
           store.forget();
@@ -675,7 +703,7 @@ export function adminApi(deps: AdminDeps) {
           return refuse(400, sentence(err));
         }
         const other = newerFor(id);
-        if (!other) return refuse(400, "It is already the version the store lists.");
+        if (!other) return refuse(400, "Already up to date.");
         const no = await sure();
         if (no) return no;
         try {
@@ -717,18 +745,18 @@ export function adminApi(deps: AdminDeps) {
       case "module/add": {
         const up = looking.get(me.id);
         if (!up || up.pkg.sha256 !== b.upload || Date.now() - up.at > UPLOAD_KEPT_MS) {
-          return refuse(400, "Choose the package again.");
+          return refuse(400, "Upload expired. Select the package again.");
         }
         // Unless told otherwise a device starts with no access to the network and asks as it goes.
         const reach = String(b.reach ?? "ask").trim();
         const one = /^[A-Za-z0-9.-]{1,253}:[0-9]{1,5}$/.test(reach);
         if (reach !== "ask" && reach !== "lan" && !one) {
-          return refuse(400, "Write the address with its port, like 192.168.1.50:9999.");
+          return refuse(400, "Enter an address with a port, for example 192.168.1.50:9999.");
         }
         const wanted = Array.isArray(b.screens) ? b.screens.map(String) : [];
         const can = new Set(couldUse(up.pkg).map((m) => m.id));
         if (wanted.some((sc) => !can.has(sc))) {
-          return refuse(400, "One of those screens cannot use this device.");
+          return refuse(400, "One of the selected screens does not support this device.");
         }
         const no = await sure();
         if (no) return no;

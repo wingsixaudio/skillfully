@@ -88,11 +88,11 @@ export class Agent {
     const row = this.#keyRow();
     const on = this.kept.get("agent.on") === "1";
     const needs = !person
-      ? "It has not been made yet."
+      ? "Not set up."
       : !row
-      ? "It has no key to reach a model with."
+      ? "API key not set."
       : person.disabled
-      ? "Its account is turned off, under People."
+      ? "Its account is disabled in People."
       : null;
     return {
       person,
@@ -109,7 +109,7 @@ export class Agent {
 
   /** Give the agent its account. It starts with no roles, so it can see and do nothing. */
   make(by: string, name: unknown): Outcome<{ person: Person }> {
-    if (this.person()) return no("exists", "This hub already has an agent.");
+    if (this.person()) return no("exists", "An agent is already set up.");
     const made = this.accounts.addAgent(by, name);
     if (!made.ok) return made;
     this.kept.set("agent.person", made.person.id);
@@ -118,9 +118,9 @@ export class Agent {
 
   /** Keep the key the agent reaches its model with. Who set it and when is logged. The key is not. */
   setKey(by: string, key: unknown): Outcome {
-    if (typeof key !== "string" || !key.trim()) return no("bad_key", "Paste the key.");
+    if (typeof key !== "string" || !key.trim()) return no("bad_key", "Enter an API key.");
     const clean = key.trim();
-    if (clean.length > 500 || /\s/.test(clean)) return no("bad_key", "That does not look like a key.");
+    if (clean.length > 500 || /\s/.test(clean)) return no("bad_key", "Invalid API key format.");
     this.#db.prepare(
       "INSERT INTO agent_key (id, key, set_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET key = excluded.key, set_at = excluded.set_at",
     ).run(clean, new Date().toISOString());
@@ -161,7 +161,7 @@ export class Agent {
       ) {
         return no(
           "bad_address",
-          "The address starts with https://. Only an address on this computer may use http://.",
+          "The endpoint must start with https:// (http:// is allowed only for this computer).",
         );
       }
       const clean = url.origin + url.pathname.replace(/\/+$/, "");
