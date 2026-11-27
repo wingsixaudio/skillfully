@@ -13,6 +13,9 @@
   const written = (path) => steps(path).map((i) => i + 1).join("/");
   const clamp = (n, least, most) => Math.min(Math.max(n, least), Math.max(least, most));
 
+  /** How many rows a canvas has room for: all of a desktop grid, or as many as a page may scroll to. */
+  const rowsOf = (doc) => doc.fixed ? doc.rows : C.LIMITS.rows;
+
   /** One piece of one page, the list it sits in, and how many columns it has room in. */
   function spot(doc, page, path) {
     let list = doc.pages[page].pieces, columns = doc.columns ?? 4, piece = null, index = -1;
@@ -45,7 +48,7 @@
     return changed(doc, page, path, ({ piece, columns }) => {
       const tall = C.tallOf(piece);
       const col = clamp(piece.at[0] + columnsBy, 1, columns - wideOf(piece) + 1);
-      const row = clamp(piece.at[1] + rowsBy, 1, C.LIMITS.rows - tall + 1);
+      const row = clamp(piece.at[1] + rowsBy, 1, rowsOf(doc) - tall + 1);
       if (col === piece.at[0] && row === piece.at[1]) return false;
       piece.at = [col, row, ...piece.at.slice(2)];
     });
@@ -58,14 +61,14 @@
       const wide = clamp(wideOf(piece) + wideBy, least, columns - piece.at[0] + 1);
       // A group with no height of its own stays as tall as what is in it.
       const own = piece.type !== "group" || piece.at[3] !== undefined;
-      const tall = own ? clamp((piece.at[3] ?? 1) + tallBy, 1, C.LIMITS.rows - piece.at[1] + 1) : undefined;
+      const tall = own ? clamp((piece.at[3] ?? 1) + tallBy, 1, rowsOf(doc) - piece.at[1] + 1) : undefined;
       if (wide === wideOf(piece) && tall === piece.at[3]) return false;
       piece.at = own ? [piece.at[0], piece.at[1], wide, tall] : [piece.at[0], piece.at[1], wide];
     });
   }
 
   /** The first place a piece of this size fits among these, reading left to right, top to bottom. */
-  function free(list, columns, wide, tall, skip) {
+  function free(list, columns, wide, tall, skip, rows = C.LIMITS.rows) {
     const taken = new Set();
     for (const p of list) {
       if (p === skip) continue;
@@ -75,7 +78,7 @@
       }
     }
     const w = Math.min(wide, columns);
-    for (let row = 1; row <= C.LIMITS.rows; row++) {
+    for (let row = 1; row <= rows - tall + 1; row++) {
       for (let col = 1; col <= columns - w + 1; col++) {
         let clear = true;
         for (let x = col; clear && x < col + w; x++) {
@@ -95,7 +98,7 @@
     const list = group ? group.piece.pieces : next.pages[page].pieces;
     const columns = group ? wideOf(group.piece) : next.columns ?? 4;
     const made = copy(piece);
-    made.at = free(list, columns, made.at?.[2] ?? 1, made.at?.[3] ?? 1);
+    made.at = free(list, columns, made.at?.[2] ?? 1, made.at?.[3] ?? 1, null, rowsOf(next));
     if (made.type === "group" && piece.at?.[3] === undefined) made.at.length = 3;
     list.push(made);
     return { doc: next, path: (into ? written(into) + "/" : "") + list.length };
@@ -128,7 +131,7 @@
     if (!at) return { doc, path: null };
     const parent = written(path).split("/").slice(0, -1).join("/");
     const twin = copy(at.piece);
-    twin.at = free(at.list, at.columns, wideOf(at.piece), C.tallOf(at.piece));
+    twin.at = free(at.list, at.columns, wideOf(at.piece), C.tallOf(at.piece), null, rowsOf(next));
     if (at.piece.type === "group" && at.piece.at[3] === undefined) twin.at.length = 3;
     at.list.push(twin);
     return { doc: next, path: (parent ? parent + "/" : "") + at.list.length };
@@ -170,20 +173,37 @@
   const widest = (doc) =>
     Math.max(1, ...doc.pages.flatMap((pg) => pg.pieces.map((p) => p.at[0] + wideOf(p) - 1)));
 
-  /** A new piece of a kind, at the size that kind usually wants. Whatever ties it to a device is added by whoever adds it. */
-  function fresh(type, columns = 4) {
-    const size = {
-      label: [2, 1],
-      readout: [2, 1],
-      button: [1, 1],
-      toggle: [2, 1],
-      slider: [1, 4],
-      meter: [4, 1],
-      light: [2, 1],
-      stepper: [2, 1],
-      countdown: [4, 2],
-      clock: [4, 2],
-    }[type] ?? [2, 1];
+  /**
+   * A new piece of a kind, at the size that kind usually wants. Whatever ties it to a device is added by
+   * whoever adds it. On a desktop grid's finer cells, a piece takes more of them, to come out about the size
+   * it is on a phone.
+   */
+  function fresh(type, columns = 4, desktop = false) {
+    const size = desktop
+      ? {
+        label: [6, 2],
+        readout: [6, 2],
+        button: [4, 2],
+        toggle: [6, 2],
+        slider: [3, 8],
+        meter: [8, 2],
+        light: [4, 2],
+        stepper: [6, 2],
+        countdown: [8, 4],
+        clock: [8, 4],
+      }[type] ?? [6, 2]
+      : {
+        label: [2, 1],
+        readout: [2, 1],
+        button: [1, 1],
+        toggle: [2, 1],
+        slider: [1, 4],
+        meter: [4, 1],
+        light: [2, 1],
+        stepper: [2, 1],
+        countdown: [4, 2],
+        clock: [4, 2],
+      }[type] ?? [2, 1];
     const at = [1, 1, Math.min(size[0], columns), size[1]];
     if (type === "label") return { type, at, text: "Label" };
     if (type === "countdown") return { type, at, until: "10:00" };

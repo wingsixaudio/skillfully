@@ -57,7 +57,52 @@ filled in from the person looking, so one canvas is everybody's own mix.
   get too small to touch.
 - On a wider screen, a computer or a tablet, the grid fills the screen: everything is drawn larger, the
   columns widen to the edges, and the rows grow to fill the height. Draw for a phone first; the same canvas
-  fills a monitor in full screen.
+  fills a monitor in full screen, unless it has a desktop layout.
+
+## Desktop and mobile
+
+What is described above is the canvas's mobile layout. A canvas can also have a desktop layout, with its own
+pages and pieces, for a computer or a monitor:
+
+```json
+{
+  "kind": "canvas",
+  "name": "Front of house",
+  "columns": 4,
+  "pages": [{ "name": "Mix", "pieces": [] }],
+  "desktop": {
+    "columns": 48,
+    "rows": 27,
+    "pages": [
+      {
+        "name": "Mix",
+        "pieces": [
+          { "type": "label", "at": [1, 1, 16, 2], "text": "Front of house", "size": "large" },
+          { "type": "slider", "at": [1, 4, 3, 12], "key": "console/input/1/bus/1/level", "title": "In 1" },
+          {
+            "type": "button",
+            "at": [1, 22, 6, 3],
+            "key": "console/scene/recall",
+            "value": 1,
+            "title": "Scene 1"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- The desktop grid is a whole screen of fine cells: `columns` 12 to 96 (48 when left out) and `rows` 6 to 64
+  (left out, 9/16 of the columns: 27 for 48). Every row is there, and the whole grid is drawn as large as
+  fits, so what is placed is what fills the monitor. Nothing scrolls, and nothing may reach past the last row.
+- A desktop cell is about a quarter of a phone's column and half of its row. Sizes that read well: a button
+  4×2 or larger, a toggle or stepper 6×2, a slider 3×8 to 3×12 standing or 12×2 lying down, a meter 8×2, a
+  label 6×2, a clock or countdown 8×4.
+- The two layouts share nothing but the canvas's name: a desktop layout can hold far more. A goto piece goes
+  to a page of its own layout.
+- A screen 900 pixels wide or more shows the desktop layout, when there is one, and a narrower one the mobile
+  layout. Anyone can switch between Desktop and Mobile at the top of the canvas.
 
 ## The pieces
 
@@ -165,7 +210,9 @@ needs a slot nobody has set for that person says so, and sends nothing.
 
 ## Arranging on the screen
 
-Someone who may arrange canvases has an Arrange button on each one, and "An empty canvas" to start from.
+Someone who may arrange canvases has an Arrange button on each one, and "Blank canvas" to start from. Arrange
+works on the layout being shown; Desktop and Mobile switch between them while arranging too. Choosing Desktop
+for a canvas with no desktop layout offers to create one.
 
 - **Choose, then drag.** A first touch chooses a piece. Dragging a chosen piece moves it by whole cells, and
   dragging its corner sizes it. The arrow keys move it, and with Shift they size it.

@@ -5,6 +5,7 @@
 // is the part with no page in it, so it can be run anywhere and tested on its own:
 //
 //   check     is this document a canvas, and if not, why not, in words
+//   face      one of its two layouts, mobile or desktop, as a canvas of its own; unface puts it back
 //   layout    where every piece of one page goes, with groups unfolded and {names} filled in
 //   may       whether a key is inside what a person may read or change
 //   describe  what kind of thing a key is, from the definitions the hub hands a screen
@@ -28,7 +29,19 @@
     "group",
   ];
   const COLORS = ["orange", "red", "green", "blue", "yellow", "white"];
-  const LIMITS = { pages: 20, pieces: 200, drawn: 600, columns: 24, rows: 200, depth: 4, repeat: 64 };
+  const LIMITS = {
+    pages: 20,
+    pieces: 200,
+    drawn: 600,
+    columns: 24,
+    rows: 200,
+    depth: 4,
+    repeat: 64,
+    desktop: { columns: [12, 96], rows: [6, 64] },
+  };
+  /** A desktop layout's grid when it does not say: fine enough for a monitor, 16 by 9 like one. */
+  const DESKTOP_COLUMNS = 48;
+  const desktopRows = (columns) => Math.round(columns * 9 / 16);
 
   /** The words each kind of piece understands, besides the ones every piece has. */
   const WORDS = {
@@ -79,7 +92,7 @@
     return null;
   }
 
-  function pieceProblems(p, where, columns, depth, out, count) {
+  function pieceProblems(p, where, columns, depth, out, count, rows = LIMITS.rows) {
     if (!isObject(p)) return out.push(`${where} is not a piece`);
     if (!TYPES.includes(p.type)) {
       return out.push(`${where} has the type "${p.type}". A piece is one of: ${TYPES.join(", ")}`);
@@ -98,7 +111,7 @@
       if (at[0] + (at[2] ?? 1) - 1 > columns) {
         out.push(`${where} reaches past column ${columns}, the last one it has room in`);
       }
-      if (at[1] + (at[3] ?? 1) - 1 > LIMITS.rows) out.push(`${where} is below row ${LIMITS.rows}`);
+      if (at[1] + (at[3] ?? 1) - 1 > rows) out.push(`${where} reaches below row ${rows}, the last one`);
     }
     const text = (v, what) => {
       const problem = v === undefined ? null : textProblem(v, `${where}: its ${what}`);
@@ -242,7 +255,9 @@
       }
       if (!Array.isArray(p.pieces) || !p.pieces.length) return out.push(`${where} needs "pieces"`);
       const inner = Array.isArray(at) && whole(at[2]) ? at[2] : 1;
-      p.pieces.forEach((c, i) => pieceProblems(c, `${where}, piece ${i + 1}`, inner, depth + 1, out, count));
+      p.pieces.forEach((c, i) =>
+        pieceProblems(c, `${where}, piece ${i + 1}`, inner, depth + 1, out, count, rows)
+      );
     }
   }
 
@@ -253,7 +268,7 @@
       return ['It is not a canvas: it does not say "kind": "canvas"'];
     }
     for (const k of Object.keys(doc)) {
-      if (!["$schema", "kind", "name", "columns", "pages"].includes(k)) {
+      if (!["$schema", "kind", "name", "columns", "pages", "desktop"].includes(k)) {
         out.push(`It has "${k}", which a canvas does not have`);
       }
     }
@@ -264,12 +279,46 @@
     if (!whole(columns) || columns > LIMITS.columns) {
       out.push(`"columns" is how many columns its grid has: 1 to ${LIMITS.columns}`);
     }
-    if (!Array.isArray(doc.pages) || !doc.pages.length || doc.pages.length > LIMITS.pages) {
-      out.push(`It needs "pages": a list of 1 to ${LIMITS.pages}`);
-      return out;
+    pagesProblems(doc.pages, whole(columns) ? columns : 4, LIMITS.rows, "", out);
+    if (doc.desktop !== undefined) {
+      const d = doc.desktop;
+      const [fewest, most] = LIMITS.desktop.columns, [lowest, highest] = LIMITS.desktop.rows;
+      if (!isObject(d)) {
+        out.push('"desktop" is the layout for a computer: { "columns": 48, "rows": 27, "pages": [...] }');
+      } else {
+        for (const k of Object.keys(d)) {
+          if (!["columns", "rows", "pages"].includes(k)) {
+            out.push(`"desktop" has "${k}", which it does not have`);
+          }
+        }
+        const across = d.columns ?? DESKTOP_COLUMNS;
+        const down = d.rows ?? desktopRows(whole(across) ? across : DESKTOP_COLUMNS);
+        if (!whole(across) || across < fewest || across > most) {
+          out.push(`"desktop.columns" is how many columns the desktop grid has: ${fewest} to ${most}`);
+        }
+        if (!whole(down) || down < lowest || down > highest) {
+          out.push(`"desktop.rows" is how many rows the desktop grid has: ${lowest} to ${highest}`);
+        }
+        pagesProblems(
+          d.pages,
+          whole(across) ? across : DESKTOP_COLUMNS,
+          whole(down) ? down : desktopRows(DESKTOP_COLUMNS),
+          "Desktop ",
+          out,
+        );
+      }
     }
-    doc.pages.forEach((page, i) => {
-      const where = `Page ${i + 1}`;
+    return out.slice(0, 20);
+  }
+
+  /** What is wrong with one layout's pages. `prefix` says which layout, for a desktop one. */
+  function pagesProblems(pages, columns, rows, prefix, out) {
+    if (!Array.isArray(pages) || !pages.length || pages.length > LIMITS.pages) {
+      out.push(`${prefix ? `"desktop" needs` : "It needs"} "pages": a list of 1 to ${LIMITS.pages}`);
+      return;
+    }
+    pages.forEach((page, i) => {
+      const where = `${prefix}Page ${i + 1}`.replace(/^Desktop P/, "Desktop p");
       if (!isObject(page)) return out.push(`${where} is not a page`);
       for (const k of Object.keys(page)) {
         if (!["name", "pieces"].includes(k)) out.push(`${where} has "${k}", which a page does not have`);
@@ -278,13 +327,57 @@
         out.push(`${where} needs a "name" of 40 characters at most`);
       }
       if (!Array.isArray(page.pieces)) return out.push(`${where} needs "pieces": a list`);
-      const count = { n: 0, pages: doc.pages.map((pg) => isObject(pg) ? pg.name : undefined) };
+      const count = { n: 0, pages: pages.map((pg) => isObject(pg) ? pg.name : undefined) };
       page.pieces.forEach((p, j) =>
-        pieceProblems(p, `${where}, piece ${j + 1}`, whole(columns) ? columns : 4, 0, out, count)
+        pieceProblems(p, `${where}, piece ${j + 1}`, columns, 0, out, count, rows)
       );
       if (count.n > LIMITS.pieces) out.push(`${where} has more than ${LIMITS.pieces} pieces`);
     });
-    return out.slice(0, 20);
+  }
+
+  // --- Its two layouts ---
+
+  /**
+   * One layout of a canvas as a canvas of its own, so everything that draws, checks or changes a canvas
+   * works on either. "mobile" is the canvas itself. "desktop" is its desktop layout, with its grid's size
+   * written out and `fixed` set: a desktop grid is a whole screen, every row of it there, drawn to fit.
+   * A canvas with no desktop layout gives null for "desktop".
+   */
+  function face(doc, which) {
+    if (which !== "desktop") return doc;
+    const d = doc.desktop;
+    if (!isObject(d)) return null;
+    const columns = d.columns ?? DESKTOP_COLUMNS;
+    return {
+      kind: "canvas",
+      name: doc.name,
+      columns,
+      rows: d.rows ?? desktopRows(columns),
+      fixed: true,
+      pages: d.pages,
+    };
+  }
+
+  /** The canvas with one of its layouts replaced by a face of it, changed. The other layout is kept. */
+  function unface(doc, changed, which) {
+    if (which !== "desktop") {
+      const { fixed: _f, rows: _r, ...mobile } = changed;
+      return doc.desktop === undefined ? mobile : { ...mobile, desktop: doc.desktop };
+    }
+    return {
+      ...doc,
+      name: changed.name,
+      desktop: { columns: changed.columns, rows: changed.rows, pages: changed.pages },
+    };
+  }
+
+  /** An empty desktop layout for a canvas, with a page for each of its pages, by the same names. */
+  function emptyDesktop(doc) {
+    return {
+      columns: DESKTOP_COLUMNS,
+      rows: desktopRows(DESKTOP_COLUMNS),
+      pages: doc.pages.map((pg) => ({ name: pg.name, pieces: [] })),
+    };
   }
 
   // --- Where every piece goes ---
@@ -380,7 +473,8 @@
     page.pieces.forEach((p, i) => place(p, p.at[0], p.at[1], { ...slots }, String(i + 1)));
     return {
       columns: canvas.columns ?? 4,
-      rows: out.reduce((most, p) => Math.max(most, p.row + p.tall - 1), 1),
+      rows: canvas.fixed ? canvas.rows : out.reduce((most, p) => Math.max(most, p.row + p.tall - 1), 1),
+      fixed: !!canvas.fixed,
       pieces: out,
       cut: out.length >= LIMITS.drawn,
     };
@@ -519,6 +613,11 @@
     COLORS,
     LIMITS,
     check,
+    face,
+    unface,
+    emptyDesktop,
+    DESKTOP_COLUMNS,
+    desktopRows,
     layout,
     tallOf,
     fill,

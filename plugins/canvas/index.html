@@ -123,6 +123,56 @@
       background: var(--rail);
     }
 
+    /* On a phone the canvas's name has a line of its own, and what can be done with it goes below. */
+    @media (max-width: 640px) {
+      header {
+        flex-wrap: wrap;
+        row-gap: 8px;
+      }
+      h1,
+      #pick {
+        order: 1;
+        flex: 1 1 calc(100% - 60px);
+      }
+      header .link {
+        order: 2;
+      }
+      #layouts,
+      #arrange,
+      #more {
+        order: 3;
+      }
+      #layouts {
+        margin-right: auto;
+      }
+    }
+
+    /* Which of its two layouts a canvas is shown in */
+    #layouts {
+      display: flex;
+      flex: none;
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 3px;
+    }
+    #layouts button {
+      background: none;
+      color: var(--dim);
+      border-radius: 999px;
+      padding: 5px 12px;
+      min-height: 32px;
+      font-size: 13px;
+    }
+    #layouts button[aria-pressed="true"] {
+      background: var(--rail);
+      color: var(--text);
+    }
+    @media (max-width: 520px) {
+      #layouts button {
+        padding: 5px 9px;
+      }
+    }
+
     /* The pages of one canvas */
     #pages {
       display: flex;
@@ -183,6 +233,16 @@
       grid-auto-rows: var(--row);
       gap: var(--gap);
       margin: 0 auto;
+    }
+    /* A desktop layout: a whole screen of fine cells, every row there, the whole of it drawn to fit. */
+    #board.fixed {
+      --row: 28px;
+      --gap: 4px;
+      grid-template-columns: repeat(var(--cols), var(--row));
+      grid-template-rows: repeat(var(--rows), var(--row));
+    }
+    #board.fixed .piece {
+      border-radius: 10px;
     }
     .piece {
       min-width: 0;
@@ -1022,6 +1082,8 @@
       <header>
         <h1 id="name"></h1>
         <select id="pick" aria-label="Canvas" hidden></select>
+        <div id="layouts" role="group" aria-label="Layout" hidden><button type="button"
+            data-which="desktop">Desktop</button><button type="button" data-which="mobile">Mobile</button></div>
         <button id="arrange" class="quiet" type="button" hidden>Arrange</button>
         <button id="more" class="quiet" type="button" aria-expanded="false" hidden>Canvases</button>
         <div class="link"
@@ -1197,7 +1259,7 @@
       function readout(p) {
         const t = tie(p.key, p.device, p.missing);
         const name = el("span", { className: "name" }), num = el("span", { className: "num", textContent: "—" });
-        const e = el("div", { className: "readout" + (p.tall > 1 ? " tall" : "") }, name, num);
+        const e = el("div", { className: "readout" + (asOnPhone(p).tall > 1 ? " tall" : "") }, name, num);
         title(name, p, t);
         if (!t.plugin) return off(e, t);
         t.watch((v) => (num.textContent = shown(v, t.info)));
@@ -1265,6 +1327,15 @@
       // columns widen and the rows grow until the grid reaches the edges. Arranging keeps the rows as drawn,
       // so the empty rows below stay the size a piece will be.
       let drawnPlan = null;
+      /**
+       * How many of a phone's cells a piece would take, for a piece that looks one way when small and
+       * another when large. A desktop grid's cells are finer: a phone's row is about two of them, its
+       * column about four.
+       */
+      const asOnPhone = (p) =>
+        drawnPlan?.fixed
+          ? { wide: Math.max(1, Math.round(p.wide * 32 / 140)), tall: Math.max(1, Math.round(p.tall * 32 / 68)) }
+          : p;
       const LARGEST = 1.75, TALLEST = 3;
       function roomFor(plan) {
         drawnPlan = plan;
@@ -1273,6 +1344,22 @@
         board.style.width = "";
         board.style.maxWidth = natural + "px";
         board.style.removeProperty("--row");
+        board.classList.toggle("fixed", plan.fixed);
+        board.style.setProperty("--rows", plan.rows);
+        if (plan.fixed) {
+          // A desktop layout is drawn whole, as large as fits, the same on every screen but for its size.
+          board.style.maxWidth = "none";
+          const style = getComputedStyle(board);
+          const cell = parseFloat(style.gridAutoRows) || 28, gap = parseFloat(style.rowGap) || 0;
+          const wide = plan.columns * cell + (plan.columns - 1) * gap;
+          const tall = plan.rows * cell + (plan.rows - 1) * gap;
+          const roomWide = $("scroll").clientWidth - 8;
+          const roomTall = innerHeight - board.getBoundingClientRect().top - 16;
+          const fits = Math.min(roomWide / wide, roomTall / tall);
+          board.style.width = wide + "px";
+          board.style.zoom = String(Number(Math.max(0.2, fits).toFixed(3)));
+          return;
+        }
         const style = getComputedStyle(board);
         const row = parseFloat(style.gridAutoRows), gap = parseFloat(style.rowGap);
         const rows = Math.max(1, ...plan.pieces.map((p) => p.row + p.tall - 1));
@@ -1533,7 +1620,7 @@
         const name = el("span", { className: "name" });
         const e = el(
           "div",
-          { className: "light" + (p.tall > 1 ? " tall" : "") + (p.color ? " " + p.color : "") },
+          { className: "light" + (asOnPhone(p).tall > 1 ? " tall" : "") + (p.color ? " " + p.color : "") },
           el("i", { className: "dot" }),
           name,
         );
@@ -1559,7 +1646,7 @@
           "div",
           {
             className: "choice " + (up ? "up" : "across") +
-              (!up && p.options.length > p.wide + 1 ? " many" : "") +
+              (!up && p.options.length > asOnPhone(p).wide + 1 ? " many" : "") +
               (p.color ? " " + p.color : ""),
           },
           name,
@@ -1698,8 +1785,8 @@
         if (p.title !== undefined) words(name, p.title);
         else name.textContent = p.page;
         e.onclick = () => {
-          const c = current();
-          const i = c ? c.doc.pages.findIndex((pg) => pg.name === p.page) : -1;
+          const face = faceOf(current());
+          const i = face ? face.pages.findIndex((pg) => pg.name === p.page) : -1;
           if (i < 0) return say(`This canvas has no page called ${p.page}.`);
           page = i;
           draw();
@@ -1755,16 +1842,52 @@
       let proposed = null;
       const current = () => (!arr && proposed) || canvases.find((c) => c.id === chosen) || null;
 
+      // Which layout a canvas is shown in. A screen as wide as a computer's shows the desktop layout, when
+      // the canvas has one, and anything narrower the mobile one. Either can be chosen instead, here.
+      let wantWhich = null;
+      const roomy = () => innerWidth >= 900;
+      /** The layout a canvas is shown in: "desktop" or "mobile". */
+      function whichFor(c) {
+        if (arr) return arr.which;
+        if (!c || c.problems.length) return "mobile";
+        return wantWhich ?? (roomy() && c.doc.desktop ? "desktop" : "mobile");
+      }
+      /** The layout a canvas is shown in, as a canvas of its own. Null when it has no desktop layout yet. */
+      const faceOf = (c) => arr ? arr.doc : c ? C.face(c.doc, whichFor(c)) : null;
+      /** Show the other layout, on the page of the same name when it has one. */
+      function showWhich(which) {
+        const c = current();
+        const before = faceOf(c);
+        const name = before?.pages[arr ? arr.page : page]?.name;
+        wantWhich = which;
+        if (arr) arr.setWhich(which);
+        const after = faceOf(c);
+        const same = after ? after.pages.findIndex((pg) => pg.name === name) : -1;
+        if (arr) {
+          if (same >= 0) arr.setPage(same);
+        } else page = Math.max(0, same);
+        draw();
+      }
+      for (const b of document.querySelectorAll("#layouts button")) b.onclick = () => showWhich(b.dataset.which);
+      let wasRoomy = roomy();
+      addEventListener("resize", () => {
+        if (roomy() === wasRoomy) return;
+        wasRoomy = roomy();
+        if (!arr && wantWhich === null) draw();
+      });
+
       /** The canvases this person has any use for. Someone who may change them sees them all. */
       function forMe(c) {
         if (c.write) return true;
         if (c.problems.length) return false;
         let tied = 0;
-        for (let i = 0; i < c.doc.pages.length; i++) {
-          for (const p of C.layout(c.doc, i, me.slots || {}).pieces) {
-            if (!p.key) continue;
-            tied++;
-            if (p.missing.length || C.may(reach.read, p.key)) return true;
+        for (const face of [c.doc, C.face(c.doc, "desktop")]) {
+          for (let i = 0; face && i < face.pages.length; i++) {
+            for (const p of C.layout(face, i, me.slots || {}).pieces) {
+              if (!p.key) continue;
+              tied++;
+              if (p.missing.length || C.may(reach.read, p.key)) return true;
+            }
           }
         }
         return tied === 0;
@@ -1790,10 +1913,18 @@
         more.hidden = !(mayCreate || canvases.some((x) => x.write)) || !canvases.length || !!arr || showing;
         more.setAttribute("aria-expanded", String(shelf));
         $("arrange").hidden = !!arr || shelf || !c || !c.write || !!c.problems.length;
+        // The two layouts, for a canvas that has both, and for anyone who may arrange one.
+        const layouts = $("layouts");
+        layouts.hidden = shelf || showing || !c || !!c.problems.length || !(arr || c.doc.desktop || c.write);
+        const which = whichFor(c);
+        for (const b of layouts.querySelectorAll("button")) {
+          b.setAttribute("aria-pressed", String(b.dataset.which === which));
+        }
 
         const pages = $("pages");
         pages.innerHTML = "";
-        const list = arr ? arr.doc.pages : c && !c.problems.length ? c.doc.pages : [];
+        const face = faceOf(c);
+        const list = arr ? arr.doc.pages : face && !c.problems.length ? face.pages : [];
         const on = arr ? arr.page : page;
         pages.hidden = (list.length < 2 && !arr) || shelf;
         list.forEach((pg, i) => {
@@ -1820,7 +1951,7 @@
        * outline with a tab to take hold of.
        */
       function drawArranging(board, plan) {
-        for (let row = 1; row <= plan.rows + 2; row++) {
+        for (let row = 1; row <= (plan.fixed ? plan.rows : plan.rows + 2); row++) {
           for (let col = 1; col <= plan.columns; col++) {
             board.append(where(el("i", { className: "cell" }), { col, row, wide: 1, tall: 1 }));
           }
@@ -1929,7 +2060,27 @@
           );
           return;
         }
-        const plan = C.layout(c.doc, page, me.slots || {});
+        const face = faceOf(c);
+        if (!face) {
+          // Desktop chosen for a canvas drawn only for a phone.
+          $("scroll").hidden = true;
+          blank.hidden = false;
+          blank.append(
+            el("h2", { textContent: "No desktop layout" }),
+            el("p", {
+              textContent: c.write && !proposed
+                ? "Create a desktop layout to use a finer grid that fills a computer screen. The mobile layout stays as it is."
+                : "This canvas has only a mobile layout.",
+            }),
+          );
+          if (c.write && !proposed) {
+            const make = el("button", { type: "button", className: "on", textContent: "Create desktop layout" });
+            make.onclick = () => arrange(c.id, c.doc, false);
+            blank.append(make);
+          }
+          return;
+        }
+        const plan = C.layout(face, page, me.slots || {});
         board.style.setProperty("--cols", plan.columns);
         roomFor(plan);
         for (const p of plan.pieces) {
@@ -1994,6 +2145,7 @@
           id,
           doc,
           fresh,
+          which: fresh ? "mobile" : whichFor(current()),
           page: fresh ? 0 : page,
           el,
           say,
@@ -2019,6 +2171,7 @@
           },
           done: () => {
             page = arr.page;
+            wantWhich = arr.which === (roomy() ? "desktop" : "mobile") ? null : arr.which;
             arr.stop();
             arr = null;
             draw();
@@ -2141,7 +2294,8 @@
           if (!proposed) page = 0;
         }
         const c = current();
-        if (c && !c.problems.length && page >= c.doc.pages.length) page = 0;
+        const face = faceOf(c);
+        if (face && !c.problems.length && page >= face.pages.length) page = 0;
         if (!canvases.length || arr || proposed) shelf = false;
         drawHead();
         drawBoard();
