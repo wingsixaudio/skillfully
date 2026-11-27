@@ -185,7 +185,7 @@ export async function lookDocs(
     return {
       content: JSON.stringify({ screens: out }),
       note: { tool: name, found: out.reduce((n, s) => n + s.documents.length, 0) },
-      words: `Listed what ${out.map((s) => s.name).join(", ")} keep${out.length === 1 ? "s" : ""}`.slice(
+      words: `Listed documents in ${out.map((s) => s.name).join(", ")}`.slice(
         0,
         200,
       ),
@@ -203,7 +203,7 @@ export async function lookDocs(
         "There is no screen with that id that keeps documents you can read. Use documents to list them.",
       failed: true,
       note: { ...note, refused: true },
-      words: "Asked about a screen it cannot read",
+      words: "Failed: screen has no readable documents",
     };
   }
   if (name === FORMAT.name) {
@@ -213,7 +213,7 @@ export async function lookDocs(
         ? JSON.stringify({ screen: screen.manifest.id, in_words: format.about, schema: format.schema })
         : `${screen.manifest.name} does not say how its documents are written. Read one of them to see.`,
       note,
-      words: `Read how ${screen.manifest.name} documents are written`,
+      words: `Read the ${screen.manifest.name} document format`,
     };
   }
   const id = text(input.document);
@@ -226,7 +226,7 @@ export async function lookDocs(
       content: "There is no document by that name on that screen that you can read.",
       failed: true,
       note: { ...note, refused: true },
-      words: `Asked ${screen.manifest.name} for a document it cannot read`,
+      words: `Failed: ${screen.manifest.name} document not readable`,
     };
   }
   return {
@@ -278,13 +278,8 @@ export async function proposeDoc(l: Looking, input: Record<string, unknown>): Pr
     ok: true,
     proposal: {
       // Where to look is said truly: on the screen if they have it open, and otherwise how to get there.
-      message:
-        (there ? `Replace “${id}” in ${name} with a new version?` : `Keep “${id}” in ${name}? It is new.`) +
-        (l.kept.open(sid)
-          ? ` ${name} is showing ${
-            there ? "the new one" : "it"
-          } now, not yet saved, for you to look at first.`
-          : ` Open ${name} to look at it first: it is shown there, not yet saved.`),
+      message: (there ? `Update “${id}” in ${name}?` : `Save new “${id}” to ${name}?`) +
+        (l.kept.open(sid) ? ` Preview open in ${name}.` : ` Open ${name} to preview it.`),
       subject: `${sid}:${id}`,
       where: name,
       data: { through: sid, bytes: whole.length, new: !there },
@@ -301,7 +296,7 @@ export async function proposeDoc(l: Looking, input: Record<string, unknown>): Pr
           const why = String((err as Error).message).slice(0, 200);
           return {
             content: `The person said yes, but it could not be kept: ${why}`,
-            words: `Could not be kept: ${why}`,
+            words: `Save failed: ${why}`,
             done: false,
           };
         }

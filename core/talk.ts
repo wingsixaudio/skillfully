@@ -67,7 +67,7 @@ export class Talks {
     return {
       name: a.person.name,
       ready: a.ready,
-      ...(a.ready ? {} : { why: a.on ? "It is on, but cannot work yet." : "It is off." }),
+      ...(a.ready ? {} : { why: a.on ? "Agent unavailable." : "Agent disabled." }),
     };
   }
 

@@ -354,7 +354,7 @@ export class Screens {
         actor: c.person.id,
         via,
       });
-      return refuse(`You are not allowed to change ${id} in ${c.screen.name}.`);
+      return refuse(`Permission denied: cannot change ${id} in ${c.screen.name}.`);
     }
     try {
       if (m.type === "doc-put") await documents.put(c.screen.id, id, m.doc as Record<string, unknown>);
@@ -523,7 +523,7 @@ export class Screens {
         !(capabilityOf(m.key) in host.manifest.capabilities)
       ) {
         // What a person was not granted, they cannot do, whatever the screen sends. The attempt is on the record.
-        const message = `You are not allowed to set ${m.key} on ${m.plugin} from ${c.screen.name}.`;
+        const message = `Permission denied: cannot set ${m.key} on ${m.plugin} from ${c.screen.name}.`;
         log.append({
           type: "skillfully.command.rejected",
           source: "core",

@@ -1,4 +1,4 @@
-// What a device asks for, in words a person can weigh.
+// What a device asks for, in the words a firewall prompt would use: where, and what kind of place it is.
 //
 // A device holds only what a superuser allowed. Its manifest can ask in advance, and whatever it tries to
 // reach beyond what it holds, the runtime refuses and notes. The hub turns both into questions for a
@@ -39,13 +39,13 @@ export function classify(value: string): Ask | null {
   // the word its own code holds where an address would be. That is not somewhere to allow. It is a device
   // whose settings are not filled in, and its status already says so.
   if (["undefined", "null", "nan", "false", "true"].includes(host)) return null;
-  const on = port === "0" ? "" : `, port ${port}`;
+  const at_ = port === "0" ? host : `${host}:${port}`;
   if (host === "0.0.0.0" || host === "[::]") {
     return {
       value,
       grant: "listen",
       where: "ports",
-      words: "Open ports on this computer, so devices can answer it or announce themselves",
+      words: "Listen for incoming connections",
       usual: false,
     };
   }
@@ -56,8 +56,8 @@ export function classify(value: string): Ask | null {
       value,
       grant: `${host}:${port}`,
       where: "everyone",
-      words: `Send to every device on your network at once${on}. Devices use this to find each other`,
-      caution: "Everything on the network receives what it sends there.",
+      words: `Broadcast to the local network (${at_})`,
+      caution: "Every device on the network receives it.",
       usual: false,
     };
   }
@@ -66,8 +66,8 @@ export function classify(value: string): Ask | null {
       value,
       grant: `${host}:${port}`,
       where: "this-computer",
-      words: `Reach another program on this computer${on}`,
-      caution: "Allow this only if you know what is listening there.",
+      words: `Connect to ${at_} (this computer)`,
+      caution: "Allow only if you know what is listening there.",
       usual: false,
     };
   }
@@ -76,7 +76,7 @@ export function classify(value: string): Ask | null {
       value,
       grant: `${host}:${port}`,
       where: "device",
-      words: `Reach the device at ${host}${on}`,
+      words: `Connect to ${at_} (local network)`,
       usual: true,
     };
   }
@@ -87,7 +87,7 @@ export function classify(value: string): Ask | null {
       value,
       grant: `${host}:${port}`,
       where: "name",
-      words: `Reach ${host} on your network${on}`,
+      words: `Connect to ${at_} (local network)`,
       usual: true,
     };
   }
@@ -95,8 +95,8 @@ export function classify(value: string): Ask | null {
     value,
     grant: `${host}:${port}`,
     where: "internet",
-    words: `Reach ${host} on the internet${on}`,
-    caution: "This leaves your network.",
+    words: `Connect to ${at_} (internet)`,
+    caution: "Leaves your local network.",
     usual: false,
   };
 }
@@ -110,7 +110,7 @@ export function declared(grant: string): Ask {
     grant,
     where: grant === "listen" ? "ports" : grant === "lan" ? "everyone" : "device",
     words: grantWords(grant),
-    ...(grant === "lan" ? { caution: "That is every device on your network, not one." } : {}),
+    ...(grant === "lan" ? { caution: "Every device on the network, not just one." } : {}),
     usual: grant !== "lan" && grant !== "listen",
   };
 }
@@ -156,42 +156,39 @@ export function covered(value: string, grants: string[]): boolean {
 
 /** A grant a device already holds, as a sentence. */
 export function grantWords(grant: string): string {
-  if (grant === "listen") return "Open ports on this computer, so devices can answer it";
-  if (grant === "lan") return "Reach any device on your local network";
+  if (grant === "listen") return "Listen for incoming connections";
+  if (grant === "lan") return "Connect to any device on the local network";
   const filled = /^\{([A-Za-z][A-Za-z0-9]*)\}:(\{[A-Za-z][A-Za-z0-9]*\}|\d+)$/.exec(grant);
   if (filled) {
-    const port = filled[2].startsWith("{")
-      ? `the port in its "${filled[2].slice(1, -1)}" setting`
-      : `port ${filled[2]}`;
-    return `Reach the address you give it in its "${filled[1]}" setting, ${port}`;
+    const port = filled[2].startsWith("{") ? `{${filled[2].slice(1, -1)}}` : filled[2];
+    return `Connect to {${filled[1]}}:${port}`;
   }
   const ask = classify(grant);
-  return ask ? ask.words : `Reach ${grant}`;
+  return ask ? ask.words : `Connect to ${grant}`;
 }
 
-/** What a piece of advice is about, as the end of a sentence. */
+/** What a piece of advice is about, as a short label. */
 export function aboutWords(about: string): string {
   const kinds: Record<string, string> = {
-    device: "reaching a device on your network",
-    everyone: "sending to every device on your network at once",
-    "this-computer": "reaching other programs on this computer",
-    ports: "opening ports on this computer",
-    name: "reaching a device on your network by its name",
-    internet: "reaching the internet",
+    device: "Connections to local network devices",
+    everyone: "Local network broadcasts",
+    "this-computer": "Connections to other programs on this computer",
+    ports: "Incoming connections",
+    name: "Connections to local network devices by name",
+    internet: "Internet access",
   };
-  const words = grantWords(about);
-  return kinds[about] ?? words.charAt(0).toLowerCase() + words.slice(1);
+  return kinds[about] ?? grantWords(about);
 }
 
 /** Something a device tried that the hub never allows, as a few plain words. */
 export function attemptWords(permission: string): string {
   return ({
-    read: "read a file outside its own folder",
-    write: "write a file",
-    env: "read this computer's environment",
-    run: "start another program",
-    sys: "read details of this computer",
-    ffi: "load code written for this computer directly",
-    import: "load code from somewhere else",
-  } as Record<string, string>)[permission] ?? `use "${permission.slice(0, 20)}"`;
+    read: "Read files outside its folder",
+    write: "Write files",
+    env: "Read environment variables",
+    run: "Run programs",
+    sys: "Read system information",
+    ffi: "Load native code",
+    import: "Load code from elsewhere",
+  } as Record<string, string>)[permission] ?? `Use "${permission.slice(0, 20)}"`;
 }

@@ -117,7 +117,7 @@ final class Hub {
     if running { return }
     let version = read("current")
     guard there(version) else {
-      failed = "There is no version of the hub to run."
+      failed = "Hub files not found. Reinstall Skillfully."
       changed()
       return
     }
@@ -161,7 +161,7 @@ final class Hub {
       try p.run()
       process = p
     } catch {
-      failed = "The hub could not be started: \(error.localizedDescription)"
+      failed = "Failed to start the hub: \(error.localizedDescription)"
     }
     changed()
   }
@@ -208,14 +208,14 @@ final class Hub {
     // cannot stay up for a few minutes is not helped by being started a sixth time.
     crashes = crashes.filter { Date().timeIntervalSince($0) < 600 } + [Date()]
     if crashes.count <= 5 && extra == nil {
-      failed = "The hub stopped by itself. Starting it again."
+      failed = "The hub crashed. Restarting."
       changed()
       DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
         if !self.running && !self.stoppedByPerson { self.start() }
       }
       return
     }
-    failed = "The hub keeps stopping by itself. The log says why."
+    failed = "The hub keeps crashing. See the log for details."
     changed()
   }
 
@@ -375,9 +375,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     bar.addItem(first)
     let mine = NSMenu()
     mine.addItem(withTitle: "Show Skillfully", action: #selector(show), keyEquivalent: "0").target = self
-    mine.addItem(withTitle: "Open in the browser", action: #selector(open), keyEquivalent: "o").target = self
+    mine.addItem(withTitle: "Open in Browser", action: #selector(open), keyEquivalent: "o").target = self
     mine.addItem(.separator())
-    mine.addItem(withTitle: "Quit and stop the hub", action: #selector(quit), keyEquivalent: "q").target = self
+    mine.addItem(withTitle: "Quit Skillfully", action: #selector(quit), keyEquivalent: "q").target = self
     first.submenu = mine
     NSApp.mainMenu = bar
 
@@ -434,17 +434,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     let codeLead = NSTextField(
       wrappingLabelWithString:
-        "This hub has no owner yet. Enter this code on the page that opens, and it is yours to set up.")
+        "Setup required. Enter this code on the setup page to create the first admin account.")
     codeLead.preferredMaxLayoutWidth = 392
     code.font = .monospacedSystemFont(ofSize: 26, weight: .medium)
     code.isSelectable = true
-    claimButton = NSButton(title: "Copy the code and open Skillfully", target: self, action: #selector(claim))
+    claimButton = NSButton(title: "Copy Code and Open Setup", target: self, action: #selector(claim))
     codeBox.orientation = .vertical
     codeBox.alignment = .leading
     codeBox.spacing = 8
     for part in [codeLead, code, claimButton!] as [NSView] { codeBox.addArrangedSubview(part) }
 
-    let phonesLead = NSTextField(labelWithString: "Phones on this network open")
+    let phonesLead = NSTextField(labelWithString: "Local network address")
     phonesLead.textColor = .secondaryLabelColor
     phones.isSelectable = true
     let copy = NSButton(title: "Copy", target: self, action: #selector(copyAddress))
@@ -460,9 +460,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     let rule = NSBox()
     rule.boxType = .separator
-    login = NSButton(checkboxWithTitle: "Start when I log in", target: self, action: #selector(toggleLogin))
-    let log = NSButton(title: "Show the log", target: self, action: #selector(showLog))
-    let leave = NSButton(title: "Quit and stop the hub", target: self, action: #selector(quit))
+    login = NSButton(checkboxWithTitle: "Open at Login", target: self, action: #selector(toggleLogin))
+    let log = NSButton(title: "Show Log", target: self, action: #selector(showLog))
+    let leave = NSButton(title: "Quit Skillfully", target: self, action: #selector(quit))
     let foot = NSStackView(views: [log, leave])
     foot.spacing = 8
 
@@ -521,19 +521,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let version = numberOf(read("current"))
     var word = "Starting"
     var color = NSColor.systemOrange
-    var more = "It opens in your browser in a moment."
+    var more = "Opening in your browser…"
     if hub.stoppedByPerson && !hub.running {
       word = "Stopped"
       color = .systemGray
-      more = "Nobody can reach Skillfully until it is started again."
+      more = "Screens are offline until the hub is started."
     } else if let failed = hub.failed, status == nil {
-      word = "Not running"
+      word = "Error"
       color = .systemRed
       more = failed
     } else if let url = url {
-      word = "Running, version \(version)"
+      word = "Running · version \(version)"
       color = .systemGreen
-      more = "On this computer it is at \(url). Closing this window leaves it running: the mark in the menu bar brings it back."
+      more = "Local address: \(url). The hub keeps running when this window is closed. Reopen it from the menu bar."
     }
     if !read("went-back").isEmpty && status != nil {
       more += " A newer version would not start, so this is the one before."
@@ -573,14 +573,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     menu.addItem(.separator())
     menu.addItem(withTitle: "Show Skillfully", action: #selector(show), keyEquivalent: "").target = self
     if status != nil {
-      menu.addItem(withTitle: "Open in the browser", action: #selector(open), keyEquivalent: "").target = self
+      menu.addItem(withTitle: "Open in Browser", action: #selector(open), keyEquivalent: "").target = self
     }
     menu.addItem(withTitle: hub.running ? "Stop" : "Start", action: #selector(toggle), keyEquivalent: "").target = self
     if hub.running {
       menu.addItem(withTitle: "Restart", action: #selector(restart), keyEquivalent: "").target = self
     }
     menu.addItem(.separator())
-    menu.addItem(withTitle: "Quit and stop the hub", action: #selector(quit), keyEquivalent: "").target = self
+    menu.addItem(withTitle: "Quit Skillfully", action: #selector(quit), keyEquivalent: "").target = self
     item.menu = menu
   }
 

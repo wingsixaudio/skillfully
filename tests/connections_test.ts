@@ -76,7 +76,7 @@ Deno.test("only a superuser decides, with their own PIN, and only for connection
   // One fader works with soundboards. It cannot be handed a switch.
   const wrongKind = await ask({ id: "one-fader", drivers: ["sim-switch"], confirm: "482915" });
   assert(
-    !wrongKind.body.ok && String(wrongKind.body.message).includes("a kind it works with"),
+    !wrongKind.body.ok && String(wrongKind.body.message).includes("does not support that kind"),
     JSON.stringify(wrongKind),
   );
   assert(!(await ask({ id: "no-such-screen", drivers: [], confirm: "482915" })).body.ok);

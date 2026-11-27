@@ -28,7 +28,7 @@ Add one file, `capabilities/<name>.json`. Start from `capabilities/switch.json`,
 - `values` lists each value: its name (`outlet/{outlet}/on`), its kind (`number`, `text` or `boolean`), and
   whether it can be set.
 - A part in braces is a number counted from 1. `bounds` says which option gives the count.
-- Use plain words a volunteer would use. Never a vendor's names.
+- Use the words a person setting up a room would use. Never a vendor's names.
 
 Check first whether an existing capability already fits. A new capability that overlaps an old one splits the
 screens written for both.
@@ -184,7 +184,31 @@ is safe to run.
 - `deno task test` passes, and a driver passes `deno task conformance`.
 - It asks for the least it needs: the narrowest network address, the fewest `uses`.
 - Its `description` tells a non-technical person what it is.
-- Words on screen are plain. No vendor terms, no jargon.
+- Words on screen follow [Words on screen](#words-on-screen).
+
+## Words on screen
+
+Use the words people already know from other apps. A label is a few words, not a sentence. A status is a word
+or two, then the detail. A button says what it does, as a verb. Keep out what only the code knows: protocol
+names, "driver", "sandbox", "payload", "capability".
+
+| Say                                         | Not                                                   |
+| ------------------------------------------- | ----------------------------------------------------- |
+| Connected · Connecting · Offline · Error    | Connected to its device · It cannot reach the device  |
+| Warning: Unpaired                           | It reports a warning: Unpaired                        |
+| Stopped · Starting                          | Not running · It is not running                       |
+| Read-only · Control enabled                 | Watching only · People can control it                 |
+| Enable control · Disable control            | Let people control it · Stop people controlling it    |
+| Network access · Allow · Revoke · Blocked   | What it may reach · Take away · The hub never allows  |
+| Values · Actions · Run · Requires input     | Try it · Do it · It asks for something first          |
+| Used by · Remove                            | Screens that use it · Take it away                    |
+| Permissions                                 | Abilities                                             |
+| Approve · Approve all · Confirm             | Say yes to all · Yes, do it                           |
+| Tested with hardware · Tested in simulation | Used with the real device · Tested against a stand-in |
+| Restart · Update · Check for updates        | Release it · Look now                                 |
+
+Errors say what failed, then why, then what to do: "Connection failed: check the IP address. Error: connect
+ECONNREFUSED 192.168.1.20:6467". They do not apologize and are never vague.
 
 There is no license in this repository yet. Until one is chosen, contributions cannot be accepted, because
 nobody would know the terms they were given under.

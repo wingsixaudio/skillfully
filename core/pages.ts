@@ -29,10 +29,10 @@ async function page(file: string, values: Record<string, string> = {}, html: str
 }
 
 const TITLES = {
-  setup: "Set up this hub",
+  setup: "Set up hub",
   signin: "Sign in",
-  join: "Join the team",
-  account: "Your account",
+  join: "Join",
+  account: "Account",
 };
 
 /** Setting up a new hub, signing in, using an invitation, and your own account. One page, four forms. */

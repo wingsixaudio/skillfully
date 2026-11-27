@@ -337,8 +337,8 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
       content: fitted(out, (devices) => ({ devices })),
       note: { tool: name, found: out.length },
       words: out.length
-        ? `Listed the devices: ${out.map((d) => d.name).join(", ")}`.slice(0, 200)
-        : "Listed the devices: none in reach",
+        ? `Listed devices: ${out.map((d) => d.name).join(", ")}`.slice(0, 200)
+        : "Listed devices: none accessible",
     };
   }
 

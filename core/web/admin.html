@@ -17,14 +17,14 @@
         hidden><span id="lockLeft"></span> <button type="button" class="small quiet" id="lockNow">Lock now</button></p>
       <div class="place" data-place="">
         <section class="card"
-          id="home"><h2 id="homeStatus"></h2><p class="dim" id="homeDetail"></p><a class="button" id="homeAdd" href="/admin/devices" data-go="1" hidden>Add a device</a><a class="button" id="homeUpdate" href="/admin/hub" data-go="1" hidden>A newer version is ready</a></section>
+          id="home"><h2 id="homeStatus"></h2><p class="dim" id="homeDetail"></p><a class="button" id="homeAdd" href="/admin/devices" data-go="1" hidden>Add a device</a><a class="button" id="homeUpdate" href="/admin/hub" data-go="1" hidden>Update available</a></section>
         <section class="card" id="needs" hidden>
-          <h2>Needs you</h2>
+          <h2>Needs attention</h2>
           <div id="needsList"></div>
           <p class="msg" id="needsMsg" role="status"></p>
         </section>
         <section class="card" id="setup"
-          hidden><h2>Setting up</h2><div id="steps"></div><button class="small quiet" id="hideSetup" style="margin-top:12px">Hide this</button></section>
+          hidden><h2>Get started</h2><div id="steps"></div><button class="small quiet" id="hideSetup" style="margin-top:12px">Dismiss</button></section>
         <section class="card" id="homeDevices" hidden>
           <h2>Devices</h2>
           <div id="homeDeviceList"></div>
@@ -35,72 +35,72 @@
           <h2>People</h2>
           <div id="people"></div>
           <form id="add" class="row"
-            style="margin-top:14px"><input id="newName" placeholder="Name of a new person" aria-label="Name of a new person" style="flex:1;min-width:180px" required><button class="small" style="margin:0;width:auto">Add</button></form>
+            style="margin-top:14px"><input id="newName" placeholder="Name" aria-label="New person's name" style="flex:1;min-width:180px" required><button class="small" style="margin:0;width:auto">Add</button></form>
           <p class="msg" id="peopleMsg" role="status"></p>
         </section>
         <section class="card"
-          id="secRoles"><h2>Roles</h2><p class="dim">A role is a set of abilities that plugins offer. Superuser is built in and has all of them.</p><div id="roles"></div>
+          id="secRoles"><h2>Roles</h2><p class="dim">A role is a set of permissions. Superuser is built in and has every permission.</p><div id="roles"></div>
        <button class="small quiet" id="newRole" style="margin-top:14px">New role</button><p class="msg" id="rolesMsg" role="status"></p></section>
       </div>
       <div class="place" data-place="screens" hidden>
         <section class="card" id="secScreens">
           <h2>Screens</h2>
           <p
-            class="dim">A screen can use only the connections you give it. Until you give it one, it reaches nothing.</p>
+            class="dim">A screen can only use the devices you choose for it.</p>
           <div id="screens"></div>
           <p class="msg" id="screensMsg" role="status"></p>
         </section>
       </div>
       <div class="place" data-place="devices" hidden>
         <section class="card"
-          id="secDevices"><div id="devicesIntro"><h2>Devices</h2><p class="dim">Each device starts out watched only: the hub sends it nothing until you let people control it.</p></div><p id="oneDevice" hidden><a href="/admin/devices" data-go="1">All devices</a></p><p class="msg bad" id="oneDeviceGone" hidden>There is no device at this address. These are the ones on this hub.</p><div id="drivers"></div><button class="small quiet" id="addDevice" style="margin-top:14px" hidden>Add a device</button><p class="msg" id="driversMsg" role="status"></p></section>
+          id="secDevices"><div id="devicesIntro"><h2>Devices</h2><p class="dim">New devices are read-only until you enable control.</p></div><p id="oneDevice" hidden><a href="/admin/devices" data-go="1">All devices</a></p><p class="msg bad" id="oneDeviceGone" hidden>Device not found.</p><div id="drivers"></div><button class="small quiet" id="addDevice" style="margin-top:14px" hidden>Add a device</button><p class="msg" id="driversMsg" role="status"></p></section>
       </div>
       <div class="place" data-place="devices/add" hidden>
         <section class="card" id="catalog">
           <p><a href="/admin/devices" data-go="1">All devices</a></p>
           <h2>Add a device</h2>
-          <input id="catFind" type="search" placeholder="What do you have?"
-            aria-label="Find a device by its name, its maker or what kind of thing it is" autofocus>
+          <input id="catFind" type="search" placeholder="Search by product, manufacturer or category"
+            aria-label="Search devices by product, manufacturer or category" autofocus>
           <p class="dim" id="catNote" style="margin-top:12px"></p>
           <div id="catNative" hidden>
-            <h3>Made for Skillfully</h3>
+            <h3>Skillfully plugins</h3>
             <div id="catNativeList"></div>
           </div>
           <div id="catCompanion" hidden>
             <h3>Bitfocus Companion modules <span class="dim" id="catCount"></span></h3>
             <p
-              class="dim">Connections for hundreds of products, written by the Companion community and published by <a href="https://bitfocus.io/companion" target="_blank" rel="noopener noreferrer">Bitfocus</a>. Skillfully runs them as they are, and asks you before one reaches anything.</p>
+              class="dim">Integrations for hundreds of products, maintained by the Companion community and published by <a href="https://bitfocus.io/companion" target="_blank" rel="noopener noreferrer">Bitfocus</a>. Modules run in a sandbox and need your approval for network access.</p>
             <div id="catKinds" class="row"></div>
             <div id="catList"></div>
           </div>
           <p
-            style="margin-top:18px"><button type="button" class="small quiet" id="catFile">Add from a file</button></p>
+            style="margin-top:18px"><button type="button" class="small quiet" id="catFile">Install from file</button></p>
         </section>
       </div>
       <div class="place" data-place="hub" hidden>
         <section class="card" id="secSignIn">
-          <h2>Signing in</h2>
+          <h2>Sign-in</h2>
           <form id="policy">
-         <label for="pk">Everyone signs in with</label><select id="pk"><option value="pin">A PIN</option><option value="password">A password</option></select>
-         <label for="pl">Shortest allowed</label><input id="pl" type="number" min="4" max="64">
-         <label class="check"><input type="checkbox" id="pm"> <span>A password must have a letter and a digit</span></label>
-         <label class="check"><input type="checkbox" id="ps"> <span>Hold superusers to a stricter rule</span></label>
+         <label for="pk">Sign-in method</label><select id="pk"><option value="pin">PIN</option><option value="password">Password</option></select>
+         <label for="pl">Minimum length</label><input id="pl" type="number" min="4" max="64">
+         <label class="check"><input type="checkbox" id="pm"> <span>Passwords require a letter and a number</span></label>
+         <label class="check"><input type="checkbox" id="ps"> <span>Separate requirements for superusers</span></label>
          <div id="sup" hidden>
-           <label for="sk">Superusers sign in with</label><select id="sk"><option value="pin">A PIN</option><option value="password">A password</option></select>
-           <label for="sl">Shortest allowed for superusers</label><input id="sl" type="number" min="4" max="64">
+           <label for="sk">Superuser sign-in method</label><select id="sk"><option value="pin">PIN</option><option value="password">Password</option></select>
+           <label for="sl">Superuser minimum length</label><input id="sl" type="number" min="4" max="64">
          </div>
-         <button>Save the rule</button><p class="msg" id="policyMsg" role="status"></p>
+         <button>Save</button><p class="msg" id="policyMsg" role="status"></p>
        </form>
         </section>
         <section class="card" id="secVersion">
-          <h2>This hub</h2>
+          <h2>Software</h2>
           <div id="version"></div>
           <p class="msg" id="versionMsg" role="status"></p>
         </section>
         <section class="card" id="secAgent">
           <h2>Agent</h2>
           <form id="agentAsk" class="asking" hidden>
-            <label for="agentQuestion">Ask it something</label>
+            <label for="agentQuestion">Ask the agent</label>
             <div class="row">
               <input id="agentQuestion" maxlength="2000" autocomplete="off"
                 placeholder="Is anything not working?">
@@ -116,7 +116,7 @@
           <p class="msg" id="agentMsg" role="status"></p>
         </section>
         <section class="card" id="secConfig" hidden>
-          <h2>Config as text</h2>
+          <h2>Config files</h2>
           <p class="dim" id="configWhere"></p>
           <div id="configList"></div>
           <p class="help" id="configNext"></p>

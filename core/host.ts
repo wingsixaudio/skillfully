@@ -99,7 +99,7 @@ const MAX_EVENT_DATA_CHARS = 4000;
 
 export class PluginHost {
   readonly state = new Map<string, Value>();
-  health: { status: HealthStatus; reason?: string } = { status: "down", reason: "not started" };
+  health: { status: HealthStatus; reason?: string } = { status: "down", reason: "Not started" };
   /** The settings this driver says it takes, if it has said. */
   settingsForm: SettingsField[] | undefined;
   /** What it tried to reach and was not allowed, waiting for a superuser's answer. By address. */
@@ -296,11 +296,11 @@ export class PluginHost {
         return this.#quarantine(
           "skillfully.plugin.refused",
           { message: err.message.slice(0, 800) },
-          "refused",
+          "Refused to start",
         );
       }
       this.status = "down";
-      this.#setHealth("down", "failed to start");
+      this.#setHealth("down", "Failed to start");
       this.#lastProblem = String((err as Error).message).slice(0, 800);
       this.log.append({
         type: "skillfully.plugin.failed",
@@ -870,7 +870,7 @@ export class PluginHost {
     if (!proc || (this.status !== "running" && this.status !== "starting")) return;
 
     if (this.status === "running" && now - this.#lastHeard > SILENCE_MS) {
-      this.#setHealth("down", "the plugin has gone silent");
+      this.#setHealth("down", "Not responding");
     }
 
     if (now - this.#messagesSince >= 1000) {
@@ -943,10 +943,10 @@ export class PluginHost {
       return this.#quarantine(
         "skillfully.plugin.quarantined",
         { because: `it went over a limit ${STRIKES} times`, last: limit },
-        "quarantined",
+        `Stopped: exceeded its ${limit} limit ${STRIKES} times`,
       );
     }
-    this.#exitBecause = `over its ${limit} limit`;
+    this.#exitBecause = `Restarted: exceeded its ${limit} limit`;
     this.#proc?.kill();
   }
 
@@ -1005,7 +1005,7 @@ export class PluginHost {
     if (!info.expected && !this.#exitBecause) {
       this.#lastProblem = `it stopped with exit code ${info.code}: ${info.stderr.trim().slice(-600)}`;
     }
-    if (!held) this.#setHealth("down", info.expected ? "stopped" : this.#exitBecause ?? "crashed");
+    if (!held) this.#setHealth("down", info.expected ? "Stopped" : this.#exitBecause ?? "Crashed");
     if (!info.expected && !held) this.#scheduleRestart();
   }
 

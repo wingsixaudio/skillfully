@@ -12,7 +12,11 @@ async function call(path, body) {
       : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
   ).catch(() => null);
   if (!res) {
-    return { ok: false, away: true, message: "The hub did not answer. Check it is running, then try again." };
+    return {
+      ok: false,
+      away: true,
+      message: "Cannot reach the hub. Check that it is running, then try again.",
+    };
   }
   let data = {};
   try {
@@ -21,7 +25,7 @@ async function call(path, body) {
   if (!res.ok && data.ok === undefined) {
     data = {
       ok: false,
-      message: res.status === 401 ? "Please sign in again." : "The hub could not do that.",
+      message: res.status === 401 ? "Session expired. Sign in again." : "Request failed.",
     };
   }
   return data;

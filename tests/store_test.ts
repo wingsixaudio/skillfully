@@ -106,9 +106,9 @@ Deno.test("a device added from the store holds what the store allows in advance,
     assertEquals(shelf.body.modules.length, 1);
     const listed = shelf.body.modules[0];
     assertEquals([listed.id, listed.name, listed.license], ["skillfully-test-lamp", "Test lamp", "MIT"]);
-    assertEquals(listed.proven, "It has been proven against a stand-in for the device, not the real thing.");
+    assertEquals(listed.proven, "Tested in simulation");
     assertEquals(listed.advance, [
-      'Reach the address you give it in its "host" setting, the port in its "port" setting',
+      "Connect to [host]:[port]",
     ]);
     assertEquals(listed.source, "https://github.com/wingsixaudio/skillfully");
 
@@ -165,11 +165,11 @@ Deno.test("a device added from the store holds what the store allows in advance,
     assertEquals(device.store.license, "MIT");
     assertEquals(
       device.store.proven,
-      "It has been proven against a stand-in for the device, not the real thing.",
+      "Tested in simulation",
     );
     assertEquals(
       device.grants[0].words,
-      'Reach the address you give it in its "host" setting, the port in its "port" setting',
+      `Connect to 127.0.0.1:${lamp.port} (this computer)`,
     );
   } finally {
     await h.close();
@@ -186,7 +186,7 @@ Deno.test("a package that is not what the store says it built is thrown away", a
   try {
     const got = await h.post("/admin/api/store/fetch", { id: "skillfully-test-lamp" });
     assert(
-      !got.body.ok && got.body.message.includes("not what the store says it built"),
+      !got.body.ok && got.body.message.includes("checksum mismatch"),
       JSON.stringify(got.body),
     );
     const add = await h.post("/admin/api/module/add", { upload: SHA, name: "X", confirm: OWNER_PIN });
@@ -225,7 +225,7 @@ Deno.test("what the store lists is data: anything malformed or reaching past the
       "the hub never asked for a path outside the store",
     );
     // An answer that waits on a setting is said in words a person can follow.
-    assertEquals(grantWords("{host}:9999"), 'Reach the address you give it in its "host" setting, port 9999');
+    assertEquals(grantWords("{host}:9999"), "Connect to {host}:9999");
   } finally {
     await h.close();
     await store.close();
@@ -247,7 +247,8 @@ Deno.test("a hub with no store, or a store it cannot reach, still works and says
     const shelf = await h.get("/admin/api/store");
     assertEquals(shelf.body.modules, []);
     assert(
-      shelf.body.message.includes("could not be reached") && shelf.body.message.includes("package file"),
+      shelf.body.message.includes("Cannot reach the store") &&
+        shelf.body.message.includes("install from a file"),
       shelf.body.message,
     );
     assertEquals((await h.get("/admin/api/store", "sk_session=nobody")).status, 401);
@@ -262,10 +263,10 @@ Deno.test("a hub that knows the store's key reads only a list the store signed",
     try {
       const shelf = (await h.get("/admin/api/store")).body;
       assertEquals(shelf.modules, [], why);
-      assert(shelf.message.includes("was not signed by the store"), `${why}: ${shelf.message}`);
+      assert(shelf.message.includes("signature invalid"), `${why}: ${shelf.message}`);
       // Nothing in it can be picked either, whatever a page asks for.
       const got = await h.post("/admin/api/store/fetch", { id: "skillfully-test-lamp" });
-      assert(!got.body.ok && got.body.message.includes("was not signed by the store"), why);
+      assert(!got.body.ok && got.body.message.includes("signature invalid"), why);
       assert(!store.asked.some((p) => p.startsWith("/packages/")), `${why}: no package was even asked for`);
     } finally {
       await h.close();
@@ -353,10 +354,10 @@ Deno.test("the store's reviewers can advise on what a device asks for, and a sup
     // Before adding, the superuser sees what the reviewers say. Malformed advice is not there.
     const got = await h.post("/admin/api/store/fetch", { id: "skillfully-test-lamp" });
     assertEquals(got.body.store.advises, [
-      { say: "no", about: "reaching the internet", why: "A lamp has no reason to leave your network." },
+      { say: "no", about: "Internet access", why: "A lamp has no reason to leave your network." },
       {
         say: "yes",
-        about: "reach example.com on the internet, port 443",
+        about: "Connect to example.com:443 (internet)",
         why: "It checks for new colours there.",
       },
     ]);
@@ -501,10 +502,10 @@ Deno.test("a hub notices a newer version in the store, and updating keeps everyt
     assertEquals(offered, {
       version: "1.1.0",
       newer: true,
-      proven: "It has been used with the real device.",
+      proven: "Tested with hardware",
       source: "https://github.com/wingsixaudio/skillfully",
       rebuilt: false,
-      also: ["Open ports on this computer, so devices can answer it"],
+      also: ["Listen for incoming connections"],
     });
     // Seeing it changes nothing. Taking it asks for the superuser's own PIN.
     assertEquals(h.hub.devices.record(id), before);
@@ -542,7 +543,7 @@ Deno.test("a hub notices a newer version in the store, and updating keeps everyt
       ["1.0.0", "1.1.0", ["listen"]],
     );
     assertEquals((await h.device(id)).update, null);
-    assert((await update(OWNER_PIN)).body.message.includes("already the version"));
+    assert((await update(OWNER_PIN)).body.message.includes("Already up to date"));
 
     // A version this hub cannot run is refused, and the one that is running carries on untouched.
     const broken = await laterLamp("2.0.0", (theirs) => {
@@ -592,7 +593,7 @@ Deno.test("a hub notices a newer version in the store, and updating keeps everyt
       confirm: OWNER_PIN,
     });
     const no = await h.post("/admin/api/driver/update", { id: byHand.body.id, confirm: OWNER_PIN });
-    assert(!no.body.ok && no.body.message.includes("did not come from the store"));
+    assert(!no.body.ok && no.body.message.includes("not installed from the store"));
   } finally {
     await h.close();
     await store.close();
@@ -618,7 +619,7 @@ Deno.test("a hub refuses a signed list that is older than one it has read, even 
     // is real: the store did sign it, last month.
     await store.publish({ generated: "2026-10-20T10:00:00.000Z", modules: [listing({ network: ["lan"] })] });
     const old = await reading(hub());
-    assert(old.includes("older than one it has already read"), old);
+    assert(old.includes("older than the one already loaded"), old);
     assertEquals(kept, "2026-11-20T10:00:00.000Z", "and it is not remembered as the newest");
 
     // A newer list is read, and becomes the one to beat.
@@ -628,9 +629,9 @@ Deno.test("a hub refuses a signed list that is older than one it has read, even 
 
     // A signed list has to say when it was made, or it could never be told from an old one.
     await store.publish({ generated: null });
-    assert((await reading(hub())).includes("not one this hub understands"));
+    assert((await reading(hub())).includes("format not supported"));
     await store.publish({ generated: "last Tuesday" });
-    assert((await reading(hub())).includes("not one this hub understands"));
+    assert((await reading(hub())).includes("format not supported"));
 
     // A hub with no key for this store has nobody's word to compare, and reads what it is given.
     await store.publish({ generated: "2026-10-20T10:00:00.000Z" });
@@ -829,7 +830,7 @@ Deno.test("only a list the store signed can say where else its packages are kept
     const wrong = await new Store(signed.url, [KEY.publicKey]).download("kept-elsewhere").catch((e) =>
       e.message
     );
-    assert(String(wrong).includes("not what the store says it built"), String(wrong));
+    assert(String(wrong).includes("checksum mismatch"), String(wrong));
 
     // A list nobody signed cannot send a hub anywhere but beside itself.
     assertEquals(

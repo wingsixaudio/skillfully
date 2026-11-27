@@ -156,7 +156,7 @@ Deno.test("the agent writes a canvas, the person sees it on Canvas before it is 
   // Its second was. Kim is asked, in the hub's words, and shown it on Canvas, marked as not kept.
   const q = asked(ask)[0];
   assertEquals([q.message, q.metadata], [
-    "Keep “kims-ears” in Canvas? It is new. Canvas is showing it now, not yet saved, for you to look at first.",
+    "Save new “kims-ears” to Canvas? Preview open in Canvas.",
     { "ag-ui:tool-execution": "server", screen: "Canvas" },
   ]);
   await until("Kim's Canvas is shown it", () => proposals(canvas).length === 1);
@@ -227,7 +227,7 @@ Deno.test("a no keeps nothing, and a screen's documents are reached only by abil
   ask.ask("Change the house canvas.");
   await until("it asks", ended(ask, 1));
   assertEquals(asked(ask).map((i) => i.message), [
-    "Replace “house” in Canvas with a new version? Canvas is showing the new one now, not yet saved, for you to look at first.",
+    "Update “house” in Canvas? Preview open in Canvas.",
   ]);
   await until("she is shown it", () => proposals(canvas).length === 1);
   answer(ask, false);
@@ -240,7 +240,7 @@ Deno.test("a no keeps nothing, and a screen's documents are reached only by abil
   assertEquals(told.slice(2).map((x) => x.content), [
     "That cannot be kept: a document's name is lower-case letters, digits and dashes, 64 at most.",
     "There is no screen with that id that keeps documents you can read. Use documents to list them.",
-    "The person said no. It was not done.",
+    "Declined by the user. Nothing was changed.",
   ]);
 
   // Asked from somewhere Canvas is not open, the question says where to look and does not pretend.
@@ -249,7 +249,7 @@ Deno.test("a no keeps nothing, and a screen's documents are reached only by abil
   await until("it asks again", ended(ask, 3));
   assertEquals(
     asked(ask)[0].message,
-    "Replace “house” in Canvas with a new version? Open Canvas to look at it first: it is shown there, not yet saved.",
+    "Update “house” in Canvas? Open Canvas to preview it.",
   );
   ask.agent("stop");
   await until("it is left", ended(ask, 4));

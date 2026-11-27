@@ -255,7 +255,7 @@
         <div class="link"
           aria-live="polite"><i class="led" id="led"></i><span id="linkText">Connecting</span></div>
       </div>
-      <button class="quiet" id="fresh" type="button" hidden>Start over</button>
+      <button class="quiet" id="fresh" type="button" hidden>New chat</button>
     </header>
 
     <div id="talk" role="log" aria-live="polite" aria-label="Conversation"></div>
@@ -303,7 +303,7 @@
         waiting?.remove();
         waiting = null;
         if (running) {
-          waiting = el("div", "waiting", looked ? "Looking" : "Thinking");
+          waiting = el("div", "waiting", looked ? "Reading…" : "Thinking…");
           talk.append(waiting);
         }
         if (stick) talk.scrollTop = talk.scrollHeight;
@@ -316,12 +316,12 @@
         $("linkText").textContent = !linked
           ? "Connecting"
           : !agent
-          ? "This hub has no agent yet"
+          ? "No agent set up"
           : agent.ready
-          ? "Answers from what you can see"
-          : agent.why + " Whoever runs this hub can change that.";
+          ? "Ready"
+          : agent.why + " Contact your hub admin.";
         q.disabled = !can || !!asking;
-        q.placeholder = asking ? "Say yes or no first" : "Ask about your equipment";
+        q.placeholder = asking ? "Approve or decline first" : "Ask about your equipment";
         send.disabled = !can || !!asking;
         send.textContent = running ? "Stop" : "Ask";
         $("fresh").hidden = !any || running || !!asking;
@@ -334,7 +334,7 @@
           el(
             "p",
             "",
-            "Ask in your own words. It looks at the equipment this hub is connected to and tells you what it finds. It can see what you can see on your other screens, and no more.",
+            "Ask a question about the equipment connected to this hub. The agent can only see what you have access to.",
           ),
         );
         const row = el("div");
@@ -370,7 +370,7 @@
         const row = el("div");
         const answer = (approved) => {
           asking = null;
-          card.replaceWith(el("div", "waiting done", approved ? "You said yes." : "You said no."));
+          card.replaceWith(el("div", "waiting done", approved ? "Approved" : "Declined"));
           toHub({
             type: "agent",
             do: "run",
@@ -382,8 +382,8 @@
           });
           drawState();
         };
-        const yes = el("button", "", interrupts.length > 1 ? "Yes, all of it" : "Yes, do it");
-        const no = el("button", "no", "No");
+        const yes = el("button", "", interrupts.length > 1 ? "Approve all" : "Approve");
+        const no = el("button", "no", "Decline");
         yes.type = no.type = "button";
         yes.onclick = () => answer(true);
         no.onclick = () => answer(false);
@@ -458,7 +458,7 @@
               asking.remove();
               asking = null;
             }
-            add(el("div", "trouble", e.message || "It could not answer."));
+            add(el("div", "trouble", e.message || "Request failed."));
             break;
         }
         settle();

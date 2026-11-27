@@ -160,14 +160,14 @@ async function carryOut(
   if (!r.ok) {
     return {
       content: `The person said yes, but it could not be done: ${r.error.message}`,
-      words: `Could not be done: ${r.error.message}`.slice(0, 200),
+      words: `Failed: ${r.error.message}`.slice(0, 200),
       done: false,
     };
   }
   if (r.superseded) {
     return {
       content: "The person said yes, and it was overtaken by a newer change before it reached the device.",
-      words: "Overtaken by a newer change",
+      words: "Superseded by a newer change",
       done: false,
     };
   }
@@ -180,7 +180,7 @@ async function carryOut(
     }`,
     words: p.from === undefined
       ? "Done"
-      : `Done: it is now ${typeof r.value === "string" ? `“${r.value.slice(0, 80)}”` : r.value}`,
+      : `Done: now ${typeof r.value === "string" ? `“${r.value.slice(0, 80)}”` : r.value}`,
     done: true,
   };
 }

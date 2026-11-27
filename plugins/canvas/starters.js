@@ -4,11 +4,10 @@ globalThis.SkillfullyCanvasStarters = [
   {
     id: "my-ears",
     needs: "console",
-    about:
-      "Eight inputs into the ear mix that is yours. One canvas serves everyone: each person gets their own.",
+    about: "Inputs 1–8 in your monitor mix. Shared by everyone: each person controls their own mix.",
     doc: {
       kind: "canvas",
-      name: "My ears",
+      name: "My monitor mix",
       columns: 4,
       pages: [
         {
@@ -35,7 +34,7 @@ globalThis.SkillfullyCanvasStarters = [
   {
     id: "channel-strips",
     needs: "console",
-    about: "Sixteen inputs into bus 1 as two pages of eight strips, each with its pan.",
+    about: "Inputs 1–16 to bus 1, with pan, on two pages.",
     doc: {
       kind: "canvas",
       name: "Channel strips",
@@ -46,7 +45,7 @@ globalThis.SkillfullyCanvasStarters = [
           {
             type: "group",
             at: [1, 1, 8],
-            title: "Into bus 1",
+            title: "Bus 1",
             repeat: { as: "n", from, to },
             pieces: [
               {
@@ -65,7 +64,7 @@ globalThis.SkillfullyCanvasStarters = [
   {
     id: "power",
     needs: "switch",
-    about: "Four outlets, each with a switch and its brightness, under a clock.",
+    about: "Four outlets with on/off and brightness, plus a clock.",
     doc: {
       kind: "canvas",
       name: "Power and lights",

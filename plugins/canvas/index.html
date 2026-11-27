@@ -1032,15 +1032,15 @@
       <p id="notes"></p>
       <div id="scroll">
         <p id="proposedNote" hidden>
-          Not saved yet. This is what you are being asked about. Say yes or no where you asked for it. Nothing
-          on it works until it is saved.
+          Preview, not saved. Approve or decline it in the conversation. Controls are inactive until it is
+          saved.
         </p>
         <div id="board"></div>
       </div>
       <section id="shelf" class="card" aria-label="Canvases" hidden></section>
       <section id="blank" class="card" hidden></section>
     </main>
-    <section id="panel" aria-label="The chosen piece" hidden></section>
+    <section id="panel" aria-label="Element settings" hidden></section>
     <section id="picker" aria-label="Choose a value" hidden></section>
     <p id="said" role="status"></p>
 
@@ -1104,8 +1104,8 @@
         if (missing && missing.length) {
           const what = missing.join(" and ");
           return {
-            short: "Not set for you",
-            words: `Nobody has set your ${what} yet. Whoever runs this hub can.`,
+            short: "Not assigned",
+            words: `No ${what} assigned to you. Ask your hub admin.`,
           };
         }
         const plugin = C.deviceFor(plugins, key, named);
@@ -1113,18 +1113,20 @@
           return {
             short: "No device",
             words: named
-              ? `This screen has not been given a device called ${named}.`
-              : `This screen has not been given a device that has ${key.slice(0, key.indexOf("/"))} values.`,
+              ? `Device not connected to this screen: ${named}.`
+              : `No device with ${key.slice(0, key.indexOf("/"))} values is connected to this screen.`,
           };
         }
-        if (!C.may(reach.read, key)) return { short: "Not yours", words: "That one is not yours to see." };
+        if (!C.may(reach.read, key)) {
+          return { short: "No access", words: "You do not have permission to view this." };
+        }
         const info = C.describe(key, defs, plugin);
         const cant = plugin.status !== "running"
-          ? `${plugin.name} is not running.`
+          ? `${plugin.name} is stopped.`
           : plugin.mode !== "act"
-          ? `${plugin.name} is watched only: nothing is sent to it.`
+          ? `${plugin.name} is read-only.`
           : !C.may(reach.write, key) || (info && !info.writable)
-          ? "You can look at that, not change it."
+          ? "View only: you cannot change this."
           : "";
         return {
           plugin,
@@ -1137,7 +1139,7 @@
       }
 
       function send(t, value, on) {
-        if (!linked) return say("Not connected to the hub, so that was not sent.", true);
+        if (!linked) return say("Not sent: disconnected from the hub.", true);
         asked.set(++ref, on || {});
         toHub({ type: "set", plugin: t.plugin.id, key: t.key, value, ref });
         return ref;
@@ -1899,19 +1901,19 @@
         if (!c) {
           if (!greeted || !answered) return void (blank.hidden = true);
           blank.append(
-            el("h2", { textContent: allowed ? "No canvases yet" : "No canvases for you yet" }),
+            el("h2", { textContent: "No canvases" }),
             el("p", {
               textContent: allowed
-                ? "Nobody has made a canvas you can use. Someone who may add canvases can start one here."
-                : "Whoever runs this hub has not given you any.",
+                ? "No one has created a canvas yet. People with permission to create canvases can start one here."
+                : "You do not have access to any canvases. Ask your hub admin.",
             }),
           );
           return;
         }
         if (c.problems.length) {
           blank.append(
-            el("h2", { textContent: "This canvas cannot be drawn" }),
-            el("p", { textContent: `Its file is ${c.id}.json, and this is what is wrong with it:` }),
+            el("h2", { textContent: "Canvas has errors" }),
+            el("p", { textContent: `Errors in ${c.id}.json:` }),
             el("ul", {}, ...c.problems.map((problem) => el("li", { textContent: problem }))),
           );
           return;
@@ -1933,16 +1935,22 @@
         }
         for (const plugin of used) {
           const trouble = plugin.status !== "running"
-            ? "is not running"
+            ? "Stopped"
             : plugin.health.status !== "ok"
             ? (plugin.health.reason || plugin.health.status)
             : "";
           if (trouble) notes.append(el("span", { className: "bad", textContent: `${plugin.name}: ${trouble}` }));
           else if (plugin.mode !== "act") {
-            notes.append(el("span", { textContent: `${plugin.name} is watched only: nothing is sent to it.` }));
+            notes.append(el("span", { textContent: `${plugin.name}: Read-only` }));
           }
         }
-        if (plan.cut) notes.append(el("span", { textContent: "This page has more on it than can be drawn." }));
+        if (plan.cut) {
+          notes.append(
+            el("span", {
+              textContent: "Some elements on this page are hidden: the page exceeds the size limit.",
+            }),
+          );
+        }
       }
 
       // --- Adding and removing canvases ---
@@ -2039,14 +2047,19 @@
           });
         }
         if (mayCreate) {
-          box.append(el("h2", { textContent: canvases.length ? "Start another" : "Start a canvas" }));
+          box.append(el("h2", { textContent: canvases.length ? "New canvas" : "Create a canvas" }));
           if (!starts.length) {
             box.append(el("p", {
               textContent:
-                "This screen has not been given a device yet. A superuser chooses its connections under Screens, and what there is to start from shows up here.",
+                "No devices connected to this screen. Templates appear here once an admin connects a device.",
             }));
           }
-          const empty = el("button", { type: "button", className: "on", id: "startEmpty", textContent: "Start" });
+          const empty = el("button", {
+            type: "button",
+            className: "on",
+            id: "startEmpty",
+            textContent: "Create",
+          });
           empty.onclick = () => arrange(null, C.edit.blank("New canvas"), true);
           box.append(
             el(
@@ -2055,8 +2068,8 @@
               el(
                 "div",
                 {},
-                el("b", { textContent: "An empty canvas" }),
-                el("span", { textContent: "One page with nothing on it, to arrange yourself." }),
+                el("b", { textContent: "Blank canvas" }),
+                el("span", { textContent: "One empty page." }),
               ),
               empty,
             ),
@@ -2076,12 +2089,12 @@
         }
         const theirs = canvases.filter((c) => c.write);
         if (theirs.length) {
-          box.append(el("h2", { textContent: "Canvases here", style: mayCreate ? "margin-top:18px" : "" }));
+          box.append(el("h2", { textContent: "Canvases", style: mayCreate ? "margin-top:18px" : "" }));
           for (const c of theirs) {
             const remove = el("button", { type: "button", textContent: "Remove" });
             remove.onclick = () => {
               if (remove.textContent === "Remove") {
-                remove.textContent = "Really remove?";
+                remove.textContent = "Confirm remove";
                 return setTimeout(() => (remove.textContent = "Remove"), 4000);
               }
               asked.set(++ref, {

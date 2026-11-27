@@ -37,13 +37,13 @@ try {
   for (const what of new Set(refused)) console.log(`      it tried to ${what}`);
   check(
     "whatever it tried that a module may not do, it was told no where it could take it",
-    refused.every((w) => w.startsWith("run a program on this computer")),
+    refused.every((w) => w.startsWith("Run programs")),
     refused.join("; "),
   );
   check("it is still running", host.status === "running", host.status);
   check(
     "what the device says is the module's own report",
-    !String(host.health.reason ?? "").startsWith("This module tried"),
+    !String(host.health.reason ?? "").startsWith("Blocked:"),
     JSON.stringify(host.health),
   );
   console.log(`      it says: ${host.health.status}${host.health.reason ? `, ${host.health.reason}` : ""}`);

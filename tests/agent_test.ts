@@ -16,7 +16,7 @@ Deno.test("the agent is an account with roles like anyone's, that nobody can sig
   assertEquals([hub.agent.about().person, hub.agent.about().on, hub.agent.about().needs], [
     null,
     false,
-    "It has not been made yet.",
+    "Not set up.",
   ]);
   assertEquals(hub.agent.turn(by, true).ok, false, "there is nothing to turn on yet");
 
@@ -59,7 +59,7 @@ Deno.test("the agent's key goes one way: it is kept, used, and never shown, logg
   const hub = await hubWith([{ dir: SIM, mode: "act" }], `${dir}/hub.db`);
   const by = hub.owner.id;
   assert(hub.agent.make(by, "Robin").ok);
-  assertEquals(hub.agent.about().needs, "It has no key to reach a model with.");
+  assertEquals(hub.agent.about().needs, "API key not set.");
   assertEquals(hub.agent.turn(by, true).ok, false);
 
   for (const bad of ["", "   ", 7, "two words", "x".repeat(501)]) {
@@ -81,7 +81,7 @@ Deno.test("the agent's key goes one way: it is kept, used, and never shown, logg
   assert(hub.accounts.setDisabled(by, about.person!.id, true).ok);
   assertEquals([hub.agent.about().ready, hub.agent.about().needs, hub.agent.keyForModel()], [
     false,
-    "Its account is turned off, under People.",
+    "Its account is disabled in People.",
     null,
   ]);
   assert(hub.accounts.setDisabled(by, about.person!.id, false).ok);
@@ -274,17 +274,17 @@ Deno.test("the models a key can use are asked of the model's service, by the hub
   assertEquals(await fails(null), [
     400,
     "turned_away",
-    "The model's service did not say which models it has.",
+    "Could not list models.",
   ]);
   assertEquals(await fails(new Response("{}", { status: 401 })), [
     400,
     "key_refused",
-    "The model's service refused the key.",
+    "API key rejected.",
   ]);
   assertEquals(await fails({ models: [] }), [
     400,
     "not_understood",
-    "The model's service did not say which models it has.",
+    "Could not list models.",
   ]);
   assertEquals((await fails(Response.redirect(elsewhere.address + "/v1/models", 307))).slice(0, 2), [
     400,

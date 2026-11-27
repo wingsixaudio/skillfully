@@ -376,7 +376,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
           return json({ ok: true }, 200, setCookie("", secure, true));
         }
         if (path === "/auth/secret") {
-          if (!me) return refuse(401, "Please sign in again.");
+          if (!me) return refuse(401, "Session expired. Sign in again.");
           return outcome(await accounts.changeSecret(me.id, b.current, b.next));
         }
         return refuse(404, "Not found.");
@@ -384,8 +384,8 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
 
       // --- A superuser's tools ---
       if (path.startsWith("/admin/api/")) {
-        if (!me) return refuse(401, "Please sign in again.");
-        if (!accounts.isSuperuser(me)) return refuse(403, "Only a superuser can do that.");
+        if (!me) return refuse(401, "Session expired. Sign in again.");
+        if (!accounts.isSuperuser(me)) return refuse(403, "Requires a superuser.");
         return await admin(req, path.slice("/admin/api/".length), me, origin, session!.id);
       }
 
@@ -398,7 +398,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       }
       if (path === "/join") return html(authPage("join"));
       if (!accounts.claimed()) return go("/setup");
-      if (!me) return path.startsWith("/api/") ? refuse(401, "Please sign in.") : go("/signin");
+      if (!me) return path.startsWith("/api/") ? refuse(401, "Sign in required.") : go("/signin");
 
       if (path === "/account") return html(authPage("account"));
       if (me.mustChange && !path.startsWith("/api/")) return go("/account");
@@ -433,7 +433,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       // --- Read-only views of the hub ---
       if (path === "/api/catalog") return json(catalog());
       if (path === "/api/log" || path === "/api/state") {
-        if (!accounts.isSuperuser(me)) return refuse(403, "Only a superuser can read that.");
+        if (!accounts.isSuperuser(me)) return refuse(403, "Requires a superuser.");
         if (path === "/api/state") {
           const host = hosts.get(url.searchParams.get("plugin") ?? "");
           return host ? json(Object.fromEntries(host.state)) : json({ error: "unknown plugin" }, 404);

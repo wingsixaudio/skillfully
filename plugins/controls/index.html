@@ -200,8 +200,8 @@
   <body>
     <main>
       <header>
-        <input id="find" type="search" placeholder="Find a value or an action"
-          aria-label="Find a value or an action">
+        <input id="find" type="search" placeholder="Search values and actions"
+          aria-label="Search values and actions">
         <div class="link"
           aria-live="polite"><i class="led" id="led"></i><span id="linkText">Connecting</span></div>
       </header>
@@ -340,7 +340,7 @@
         if (item.kind === "trigger") {
           const go = el("button", {
             type: "button",
-            textContent: item.fields.some((f) => f.type !== "static-text") ? "Options" : "Do it",
+            textContent: item.fields.some((f) => f.type !== "static-text") ? "Run…" : "Run",
             disabled: !can,
           });
           const form = el("div", { className: "opts", hidden: true });
@@ -373,7 +373,7 @@
             form.append(el("label", {}, el("span", { textContent: f.label || f.id }), input));
             return { f, input };
           });
-          const fire = el("button", { type: "button", className: "on", textContent: "Do it" });
+          const fire = el("button", { type: "button", className: "on", textContent: "Run" });
           if (inputs.length) form.append(fire);
           const read = () => {
             const o = {};
@@ -458,7 +458,7 @@
           if (find && !items.length) continue;
           const can = canOperate && plugin.mode === "act" && plugin.status === "running";
           const health = plugin.status !== "running"
-            ? "Not running"
+            ? "Stopped"
             : plugin.health.status === "ok"
             ? "Connected"
             : (plugin.health.reason || plugin.health.status);
@@ -470,28 +470,28 @@
               textContent: health,
             }),
           );
-          if (plugin.mode !== "act") sub.append(" · Listen mode: nothing is sent to it");
-          else if (!canOperate) sub.append(" · You can look, not change");
+          if (plugin.mode !== "act") sub.append(" · Read-only");
+          else if (!canOperate) sub.append(" · View only");
           const card = el("section", { className: "card" }, el("h2", { textContent: plugin.name }), sub);
           for (const item of items.slice(0, MOST)) card.append(control(plugin, item, can));
           if (items.length > MOST) {
             card.append(
               el("p", {
                 className: "empty",
-                textContent: "Showing " + MOST + " of " + items.length + ". Type above to narrow it.",
+                textContent: "Showing " + MOST + " of " + items.length + ". Search to narrow it.",
               }),
             );
           }
           if (!all.length) {
-            card.append(el("p", { className: "empty", textContent: "It has not reported anything yet." }));
+            card.append(el("p", { className: "empty", textContent: "No values reported yet." }));
           }
           list.append(card);
         }
         const none = $("nothing");
         none.hidden = list.children.length > 0;
         none.textContent = plugins.length
-          ? "Nothing matches that."
-          : "This screen has not been given any connections yet. A superuser chooses them under Screens.";
+          ? "No matches."
+          : "No devices. An admin can connect devices to this screen.";
       }
 
       // The set of rows only changes when keys come or go. A value changing just updates its row.
@@ -549,7 +549,13 @@
           if (!row) return;
           if (m.ok) {
             row.said(
-              m.superseded ? "" : was.trigger ? "Done" : m.adjusted ? "The device set it to " + m.value : "Set",
+              m.superseded
+                ? ""
+                : was.trigger
+                ? "Done"
+                : m.adjusted
+                ? "Adjusted by the device to " + m.value
+                : "Set",
             );
           } else row.said(m.error.message, true);
         }

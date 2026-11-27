@@ -368,13 +368,13 @@ export class Accounts {
     secret: unknown,
     device: string,
   ): Promise<Outcome<{ token: string; person: Person }>> {
-    if (this.claimed() || !this.claimCode) return no("claimed", "This hub already has an owner.");
+    if (this.claimed() || !this.claimCode) return no("claimed", "This hub is already set up.");
     const wait = this.#mustWait("claim");
-    if (wait) return no("wait", `Too many tries. Wait ${wait} seconds.`);
+    if (wait) return no("wait", `Too many attempts. Try again in ${wait} seconds.`);
     const a = new TextEncoder().encode(String(given ?? "").toUpperCase().trim().padEnd(9).slice(0, 9));
     if (!timingSafeEqual(a, new TextEncoder().encode(this.claimCode))) {
       this.#failed("claim");
-      return no("wrong_code", "That is not the code this hub is showing.");
+      return no("wrong_code", "Incorrect setup code.");
     }
     const nameProblem = this.#nameProblem(name);
     if (nameProblem) return no("bad_name", nameProblem);
@@ -403,14 +403,14 @@ export class Accounts {
       : null;
     const who = row ? `person:${row.id}` : null;
     const wait = Math.max(this.#mustWait(`from:${from}`), who ? this.#mustWait(who) : 0);
-    if (wait) return no("wait", `Too many tries. Wait ${wait} seconds.`);
+    if (wait) return no("wait", `Too many attempts. Try again in ${wait} seconds.`);
     const ok = typeof secret === "string" && (await this.#matches(row?.id ?? null, secret)) && !row.disabled;
     if (!ok) {
       this.#failed(`from:${from}`);
       if (who) this.#failed(who, row.id);
       this.#note("skillfully.signin.failed", undefined, row?.id, { from });
       // One answer for every kind of failure, so it cannot be used to find out who is on the team.
-      return no("no_match", "That name and PIN or password do not match.");
+      return no("no_match", "Incorrect name or PIN/password.");
     }
     this.#clearTries(who!);
     this.#clearTries(`from:${from}`);
@@ -425,13 +425,13 @@ export class Accounts {
     from: string,
   ): Promise<Outcome<{ token: string; person: Person }>> {
     const wait = this.#mustWait(`from:${from}`);
-    if (wait) return no("wait", `Too many tries. Wait ${wait} seconds.`);
+    if (wait) return no("wait", `Too many attempts. Try again in ${wait} seconds.`);
     const hash = await sha256(String(given ?? "").toUpperCase().trim());
     const row = this.#one("SELECT person, expires FROM invites WHERE code_hash = ?", hash);
     const person = row && row.expires > Date.now() ? this.person(row.person) : null;
     if (!person || person.disabled) {
       this.#failed(`from:${from}`);
-      return no("bad_invite", "That invitation is not valid. Ask for a new one.");
+      return no("bad_invite", "Invalid or expired invite code. Ask for a new one.");
     }
     const problem = this.secretProblem(secret, this.isSuperuser(person));
     if (problem) return no("weak", problem);
@@ -447,13 +447,13 @@ export class Accounts {
     next: unknown,
   ): Promise<Outcome<Record<never, never>>> {
     const p = this.person(person);
-    if (!p) return no("unknown", "No such person.");
+    if (!p) return no("unknown", "Person not found.");
     if (!(await this.confirm(person, current))) {
-      return no("no_match", "Your current PIN or password is not right.");
+      return no("no_match", "Current PIN or password is incorrect.");
     }
     const problem = this.secretProblem(next, this.isSuperuser(p));
     if (problem) return no("weak", problem);
-    if (next === current) return no("same", "Choose a different one from the one you have.");
+    if (next === current) return no("same", "Choose a different PIN or password from your current one.");
     await this.#setSecret(person, next as string, false);
     this.#note("skillfully.secret.changed", person, person);
     return { ok: true };
@@ -466,7 +466,7 @@ export class Accounts {
       return "A name is needed, up to 60 characters.";
     }
     const taken = this.#one("SELECT id FROM people WHERE name_key = ?", name.trim().toLowerCase());
-    return taken && taken.id !== except ? "Someone already has that name." : null;
+    return taken && taken.id !== except ? "That name is already in use." : null;
   }
   #insertPerson(name: string, kind: "person" | "agent" = "person"): string {
     const id = newId("p");
@@ -503,9 +503,9 @@ export class Accounts {
 
   /** Make a one-time invitation the person uses to choose their own PIN or password. Replaces any earlier one. */
   async invite(by: string, person: string): Promise<Outcome<{ code: string; expires: number }>> {
-    if (!this.person(person)) return no("unknown", "No such person.");
+    if (!this.person(person)) return no("unknown", "Person not found.");
     if (this.person(person)!.kind === "agent") {
-      return no("agent", "An agent does not sign in, so it has no invitation.");
+      return no("agent", "Agents do not sign in, so they have no invite code.");
     }
     const fresh = `${code(4)}-${code(4)}`;
     const expires = Date.now() + INVITE_DAYS * DAY;
@@ -523,8 +523,8 @@ export class Accounts {
   /** Give a person a temporary PIN or password. They must change it at their next sign-in, and their devices are forgotten. */
   async resetSecret(by: string, person: string, temporary: unknown): Promise<Outcome<Record<never, never>>> {
     const p = this.person(person);
-    if (!p) return no("unknown", "No such person.");
-    if (p.kind === "agent") return no("agent", "An agent does not sign in, so it has no PIN or password.");
+    if (!p) return no("unknown", "Person not found.");
+    if (p.kind === "agent") return no("agent", "Agents do not sign in, so they have no PIN or password.");
     const problem = this.secretProblem(temporary, this.isSuperuser(p));
     if (problem) return no("weak", problem);
     await this.#setSecret(person, temporary as string, true);
@@ -536,13 +536,13 @@ export class Accounts {
 
   setRoles(by: string, person: string, roles: unknown): Outcome<{ person: Person }> {
     const p = this.person(person);
-    if (!p) return no("unknown", "No such person.");
+    if (!p) return no("unknown", "Person not found.");
     const known = new Set([SUPERUSER, ...this.roles().map((r) => r.id)]);
     if (!Array.isArray(roles) || !roles.every((r) => typeof r === "string" && known.has(r))) {
-      return no("bad_roles", "One of those roles does not exist.");
+      return no("bad_roles", "Role not found.");
     }
     if (p.kind === "agent" && roles.includes(SUPERUSER)) {
-      return no("agent", "An agent is given roles like anyone else, and is never a superuser.");
+      return no("agent", "An agent cannot be a superuser.");
     }
     if (this.isSuperuser(p) && !roles.includes(SUPERUSER) && !p.disabled && this.#superusers() <= 1) {
       return no("last_superuser", "A hub must always have a superuser. Make someone else one first.");
@@ -560,13 +560,13 @@ export class Accounts {
 
   setSlots(by: string, person: string, slots: unknown): Outcome<{ person: Person }> {
     const p = this.person(person);
-    if (!p) return no("unknown", "No such person.");
+    if (!p) return no("unknown", "Person not found.");
     const ok = !!slots && typeof slots === "object" && !Array.isArray(slots) &&
       Object.entries(slots).every(([k, v]) =>
         /^[a-z][a-z0-9]{0,30}$/.test(k) &&
         (typeof v === "number" || (typeof v === "string" && /^[a-z0-9-]{1,40}$/.test(v)))
       );
-    if (!ok) return no("bad_slots", "Slots are short names with a number or a short word each.");
+    if (!ok) return no("bad_slots", "Each assignment needs a short name and a number or short word.");
     this.#run("UPDATE people SET slots = ? WHERE id = ?", JSON.stringify(slots), person);
     this.#note("skillfully.person.slots", by, person, { before: p.slots, slots });
     return { ok: true, person: this.person(person)! };
@@ -574,7 +574,7 @@ export class Accounts {
 
   setDisabled(by: string, person: string, disabled: boolean): Outcome<{ person: Person }> {
     const p = this.person(person);
-    if (!p) return no("unknown", "No such person.");
+    if (!p) return no("unknown", "Person not found.");
     if (disabled && this.isSuperuser(p) && !p.disabled && this.#superusers() <= 1) {
       return no("last_superuser", "A hub must always have a superuser. Make someone else one first.");
     }
@@ -595,7 +595,7 @@ export class Accounts {
       return no("bad_role", "A role needs a name.");
     }
     if (r.id === SUPERUSER || r.name.trim().toLowerCase() === SUPERUSER) {
-      return no("bad_role", "Superuser is built in and cannot be changed.");
+      return no("bad_role", "Superuser is built in and cannot be edited.");
     }
     const grants = r.grants ?? {};
     for (const [plugin, abilities] of Object.entries(grants)) {
@@ -623,7 +623,7 @@ export class Accounts {
 
   deleteRole(by: string, id: string): Outcome<Record<never, never>> {
     const before = this.roles().find((x) => x.id === id);
-    if (!before) return no("unknown", "No such role.");
+    if (!before) return no("unknown", "Role not found.");
     this.#run("DELETE FROM roles WHERE id = ?", id);
     this.#run("DELETE FROM person_roles WHERE role = ?", id);
     this.#note("skillfully.role.deleted", by, id, { before });

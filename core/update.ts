@@ -154,10 +154,10 @@ export class Updates {
     if (!this.#o.running || !this.#o.home) {
       return {
         can: false,
-        why: "This hub was started from its source, so it is updated the way its source is.",
+        why: "Running from source. Update it with git.",
       };
     }
-    if (!this.#o.keys.length) return { can: false, why: "Updates are not set up for this hub yet." };
+    if (!this.#o.keys.length) return { can: false, why: "Updates are not configured for this hub." };
     return { can: true };
   }
 
@@ -207,22 +207,21 @@ export class Updates {
       const note = await get("latest.json");
       const signature = new TextDecoder().decode(await get("latest.json.sig"));
       if (!await verify(note, signature, this.#o.keys)) {
-        this.#trouble =
-          "What was published as the newest version was not signed for this hub, so it was ignored.";
+        this.#trouble = "Latest release ignored: signature invalid.";
         this.#o.log.append({ type: "skillfully.update.refused", source: "core", data: { why: "signature" } });
         return this.about();
       }
       const latest = readLatest(new TextDecoder().decode(note));
       if (!latest || !latest.url.startsWith(this.#o.packsFrom)) {
-        this.#trouble = "What was published as the newest version could not be read.";
+        this.#trouble = "Could not read the latest release.";
         return this.about();
       }
       this.#latest = latest;
       this.#trouble = undefined;
     } catch (err) {
       this.#trouble = (err as Error).message === "none"
-        ? "No version has been published yet."
-        : "The hub could not look for a newer version. It will try again later.";
+        ? "No releases published yet."
+        : "Could not check for updates. Will retry later.";
     }
     return this.about();
   }
@@ -235,15 +234,15 @@ export class Updates {
     const no = (code: string, message: string) => ({ ok: false as const, code, message });
     const can = this.#can();
     if (!can.can) return no("cannot", can.why!);
-    if (this.#busy) return no("busy", "It is already updating.");
+    if (this.#busy) return no("busy", "Already updating.");
     const about = (await this.look()).newer;
     const l = this.#latest;
     const { home, running, log } = this.#o;
-    if (!about || !l || !running || !home) return no("none", this.#trouble ?? "This hub is up to date.");
+    if (!about || !l || !running || !home) return no("none", this.#trouble ?? "Up to date.");
     if (about.needsApp) {
       return no(
         "needs_app",
-        "This version needs a newer Skillfully app. Download it and open it, and this hub's data comes with it.",
+        "Requires a newer Skillfully app. Install it, and this hub's data carries over.",
       );
     }
     this.#busy = true;
@@ -263,14 +262,14 @@ export class Updates {
       const res = await fetch(l.url, { signal: AbortSignal.timeout(5 * 60_000) });
       if (!res.ok) {
         await res.body?.cancel();
-        return fail("fetch", "The new version could not be fetched. Try again in a while.");
+        return fail("fetch", "Download failed. Try again later.");
       }
       const pack = new Uint8Array(await res.arrayBuffer());
       // The note was signed, and the note says exactly which bytes the pack is.
       if (pack.length !== l.size || hex(await crypto.subtle.digest("SHA-256", pack)) !== l.sha256) {
         return fail(
           "checksum",
-          "What was fetched is not the version that was published, so it was thrown away.",
+          "Download rejected: checksum mismatch.",
         );
       }
       await Deno.remove(part, { recursive: true }).catch(() => {});
@@ -290,7 +289,7 @@ export class Updates {
         : null;
       if (!inside || inside.number !== l.number || inside.commit !== l.commit) {
         await Deno.remove(part, { recursive: true }).catch(() => {});
-        return fail("unpack", "The new version could not be unpacked.");
+        return fail("unpack", "Could not unpack the update.");
       }
       await Deno.rename(part, into);
 
@@ -313,7 +312,7 @@ export class Updates {
       await Deno.remove(part, { recursive: true }).catch(() => {});
       // Why, for whoever looks into it. It goes to the hub's own output, not to a page.
       console.error("update:", err);
-      return fail("broken", "Something went wrong while getting the new version. Nothing was changed.");
+      return fail("broken", "Update failed. Nothing was changed.");
     }
     log.append({
       type: "skillfully.update.started",

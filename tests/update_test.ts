@@ -216,14 +216,14 @@ Deno.test({
         1,
         true,
         undefined,
-        "No version has been published yet.",
+        "No releases published yet.",
       ]);
       pub.signAs("stranger");
       await pub.publish(2);
       v = (await post("update/look")).version;
       assertEquals([v.newer, v.trouble], [
         undefined,
-        "What was published as the newest version was not signed for this hub, so it was ignored.",
+        "Latest release ignored: signature invalid.",
       ]);
       // A pack that is not the one its note describes is fetched, found out, and thrown away.
       pub.signAs("publisher");
@@ -294,7 +294,7 @@ Deno.test("a hub started from its source says it is not updated by a button", as
   assertEquals([v.running, v.can, v.why], [
     null,
     false,
-    "This hub was started from its source, so it is updated the way its source is.",
+    "Running from source. Update it with git.",
   ]);
   const went = await hub.post("/admin/api/update/go", { confirm: "000000" });
   assertEquals(went.body.ok, false);

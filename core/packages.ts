@@ -193,16 +193,16 @@ export function networkNotes(network: string[]): string[] {
   const notes: string[] = [];
   const named = network.filter((n) => n !== "lan" && n !== "listen");
   if (network.includes("lan")) {
-    notes.push("It may reach any device on your local network, and nothing on the internet.");
+    notes.push("Network access: any device on the local network, no internet.");
   } else if (named.length) {
-    notes.push(`It may reach ${named.join(" and ")}, and nothing else on the network.`);
+    notes.push(`Network access: ${named.join(" and ")} only.`);
   } else if (!network.length) {
     notes.push(
-      "It starts with no access to your network. When it tries to reach something, you are asked first.",
+      "No network access until you approve each request.",
     );
   }
-  if (network.includes("listen")) notes.push("It may open ports on this computer for devices to answer on.");
-  notes.push("It can read its own folder, and no other file on this computer.");
-  notes.push("Nobody has reviewed it for this hub.");
+  if (network.includes("listen")) notes.push("Can listen for incoming connections on this computer.");
+  notes.push("File access is limited to its own folder.");
+  notes.push("Not reviewed.");
   return notes;
 }

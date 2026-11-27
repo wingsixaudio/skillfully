@@ -17,9 +17,7 @@ const unlocked = () => unlockedUntil > Date.now();
 function drawLock() {
   const left = Math.max(0, Math.ceil((unlockedUntil - Date.now()) / 60000));
   $("lockbar").hidden = !unlocked();
-  $("lockLeft").textContent = left <= 1
-    ? "Unlocked for a minute more."
-    : "Unlocked for " + left + " minutes.";
+  $("lockLeft").textContent = left <= 1 ? "Unlocked: 1 minute left" : "Unlocked: " + left + " minutes left";
 }
 setInterval(drawLock, 5000);
 $("lockNow").onclick = async () => {
@@ -142,9 +140,7 @@ const input = (parent, id, label, props = {}) => {
   return i;
 };
 const confirmField = (parent) =>
-  unlocked()
-    ? null
-    : input(parent, "confirm", "Your own PIN or password, to confirm", { type: "password", required: true });
+  unlocked() ? null : input(parent, "confirm", "Your PIN or password", { type: "password", required: true });
 
 async function load() {
   const r = await call("/admin/api/all");
@@ -186,18 +182,18 @@ function drawPeople() {
     for (const n of names) {
       chips.append(el("span", { className: "chip" + (n === "Superuser" ? " on" : ""), textContent: n }));
     }
-    if (!names.length) chips.append(el("span", { className: "chip", textContent: "No role yet" }));
+    if (!names.length) chips.append(el("span", { className: "chip", textContent: "No role" }));
     for (const [k, v] of Object.entries(p.slots)) {
       chips.append(el("span", { className: "chip", textContent: k + ": " + v }));
     }
     const isAgent = p.kind === "agent";
     if (isAgent) chips.prepend(el("span", { className: "chip on", textContent: "Agent" }));
-    if (p.disabled) chips.append(el("span", { className: "chip", textContent: "Turned off" }));
+    if (p.disabled) chips.append(el("span", { className: "chip", textContent: "Disabled" }));
     if (!p.hasSecret && !isAgent) {
-      chips.append(el("span", { className: "chip", textContent: "Has not joined yet" }));
+      chips.append(el("span", { className: "chip", textContent: "Invited" }));
     }
     if (p.mustChange) {
-      chips.append(el("span", { className: "chip", textContent: "Must choose a new PIN or password" }));
+      chips.append(el("span", { className: "chip", textContent: "Must reset PIN or password" }));
     }
     if (!isAgent) {
       chips.append(
@@ -225,13 +221,13 @@ function drawPeople() {
           b.append(
             el("p", {
               className: "dim",
-              textContent: "Give this to " + p.name +
-                ". It works once, for 7 days. They choose their own way to sign in.",
+              textContent: "Single use, expires in 7 days. " + p.name +
+                " sets their own PIN or password when they join.",
             }),
             el("p", {}, el("span", { className: "code", textContent: r.code })),
             el("p", {
               className: "dim",
-              textContent: "Or send this address: " + location.origin + "/join#" + r.code,
+              textContent: "Invite link: " + location.origin + "/join#" + r.code,
             }),
           );
         },
@@ -250,7 +246,7 @@ function drawPeople() {
               el("span", {}, name, note ? el("span", { className: "caution", textContent: note }) : ""),
             ),
           );
-        mk(SUPER, "Superuser", "Full access to everything on this hub, including people and devices.");
+        mk(SUPER, "Superuser", "Full access to this hub, including people and devices.");
         for (const r of roles) {
           mk(r.id, r.name);
         }
@@ -261,22 +257,22 @@ function drawPeople() {
           roles: [...$("dlgBody").querySelectorAll("input[type=checkbox]:checked")].map((c) => c.value),
         })));
     btn("Assign", () =>
-      ask("What is " + p.name + "'s", (b) => {
+      ask("Assignments for " + p.name, (b) => {
         b.append(
           el("p", {
             className: "dim",
             textContent:
-              "Abilities can be limited to a person's own things, such as their own ear bus. Set those here.",
+              "Some permissions apply only to what is assigned to a person, such as their own monitor mix.",
           }),
         );
         const names = new Set([...Object.keys(p.slots), ...offered.flatMap((o) => o.slots)]);
         if (!names.size) {
           b.append(
-            el("p", { className: "dim", textContent: "No installed plugin needs anything set per person." }),
+            el("p", { className: "dim", textContent: "No installed plugin uses per-person assignments." }),
           );
         }
         for (const n of names) {
-          input(b, "slot_" + n, n, { value: p.slots[n] ?? "", placeholder: "not set" }).dataset.slot = n;
+          input(b, "slot_" + n, n, { value: p.slots[n] ?? "", placeholder: "Not set" }).dataset.slot = n;
         }
       }, () => {
         const slots = {};
@@ -293,7 +289,7 @@ function drawPeople() {
           el("p", {
             className: "dim",
             textContent:
-              "Give them a temporary PIN or password. They must choose their own at next sign-in, and every device they use is signed out.",
+              "Set a temporary PIN or password. They must change it at next sign-in, and all their sessions are signed out.",
           }),
         );
         input(b, "temp", "Temporary PIN or password", { required: true });
@@ -305,10 +301,10 @@ function drawPeople() {
         })));
     btn("Sign out everywhere", async () => {
       const r = await call("/admin/api/person/revoke", { id: p.id });
-      say("peopleMsg", r.ok ? p.name + " is signed out on every device." : r.message, r.ok ? "ok" : "bad");
+      say("peopleMsg", r.ok ? p.name + " was signed out of all sessions." : r.message, r.ok ? "ok" : "bad");
       load();
     });
-    btn(p.disabled ? "Turn back on" : "Turn off", async () => {
+    btn(p.disabled ? "Enable" : "Disable", async () => {
       const r = await call("/admin/api/person/disabled", { id: p.id, disabled: !p.disabled });
       say("peopleMsg", r.ok ? "" : r.message, "bad");
       load();
@@ -320,19 +316,23 @@ function drawPeople() {
 $("add").addEventListener("submit", async (e) => {
   e.preventDefault();
   const r = await call("/admin/api/person", { name: $("newName").value });
-  say("peopleMsg", r.ok ? "Added. Use Invite to let them in." : r.message, r.ok ? "ok" : "bad");
+  say(
+    "peopleMsg",
+    r.ok ? "Added. Select Invite to create their invite code." : r.message,
+    r.ok ? "ok" : "bad",
+  );
   if (r.ok) $("newName").value = "";
   load();
 });
 
 function editRole(role) {
-  ask(role.id ? "Change " + role.name : "New role", (b) => {
+  ask(role.id ? "Edit " + role.name : "New role", (b) => {
     input(b, "roleName", "Name", { value: role.name || "", required: true });
     const home = el("select", { id: "roleHome" }, el("option", { value: "", textContent: "No home screen" }));
     for (const o of offered) {
       home.append(el("option", { value: o.plugin, textContent: o.name, selected: role.home === o.plugin }));
     }
-    b.append(el("label", { htmlFor: "roleHome", textContent: "Lands on" }), home);
+    b.append(el("label", { htmlFor: "roleHome", textContent: "Home screen" }), home);
     for (const o of offered) {
       b.append(el("label", { textContent: o.name }));
       for (const a of o.abilities) {
@@ -384,7 +384,7 @@ function drawRoles() {
       }
     }
     const row = el("div", { className: "row", style: "margin-top:8px" });
-    const edit = el("button", { className: "small quiet", type: "button", textContent: "Change" });
+    const edit = el("button", { className: "small quiet", type: "button", textContent: "Edit" });
     edit.onclick = () => editRole(r);
     const del = el("button", { className: "small quiet", type: "button", textContent: "Remove" });
     del.onclick = async () => {
@@ -402,7 +402,7 @@ function drawRoles() {
     const b = el("button", {
       className: "small quiet",
       type: "button",
-      textContent: "Add the suggested role " + s.name + " (from " + s.from + ")",
+      textContent: "Add suggested role: " + s.name + " (" + s.from + ")",
       style: "margin-top:10px",
     });
     b.onclick = async () => {
@@ -429,25 +429,25 @@ function drawScreens() {
         el("span", {
           className: "chip",
           textContent: !o.works.length
-            ? "Needs no device"
+            ? "No device needed"
             : o.eligible.length
-            ? "No connections yet"
-            : "Nothing installed that it works with",
+            ? "No devices"
+            : "No supported devices installed",
         }),
       );}
     if (o.works.includes("any")) {
-      chips.append(el("span", { className: "chip", textContent: "Works with any kind of device" }));
+      chips.append(el("span", { className: "chip", textContent: "Supports any device" }));
     }
     item.append(chips);
     if (o.eligible.length) {
       const b = el("button", {
         className: "small quiet",
         type: "button",
-        textContent: "Choose connections",
+        textContent: "Choose devices",
         style: "margin-top:8px",
       });
       b.onclick = () =>
-        ask("What " + o.name + " may use", (x) => {
+        ask("Devices for " + o.name, (x) => {
           for (const d of o.eligible) {
             const box = el("input", {
               type: "checkbox",
@@ -455,7 +455,7 @@ function drawScreens() {
               checked: o.connections.includes(d.id),
               className: "conn",
             });
-            x.append(el("label", { className: "check" }, box, el("span", { textContent: " " + d.name })));
+            x.append(el("label", { className: "check" }, box, el("span", { textContent: d.name })));
           }
           confirmField(x);
         }, () =>
@@ -472,17 +472,22 @@ function drawScreens() {
 // What a new hub still needs, in the order it is needed. It goes away once all of it is done.
 function drawSetup() {
   const steps = [
-    [drivers.length > 0, "Add a device", "Something for the hub to talk to.", "/admin/devices"],
+    [
+      drivers.length > 0,
+      "Add a device",
+      "A mixer, a TV, or anything else the hub controls.",
+      "/admin/devices",
+    ],
     [
       offered.some((o) => o.connections.length > 0),
-      "Give a screen a device",
-      "A screen reaches nothing until you choose what it may use.",
+      "Connect a screen to a device",
+      "Screens can only use the devices you choose.",
       "/admin/screens",
     ],
     [
       people.length > 1,
-      "Add your people",
-      "Add a name, give them a role, and hand them their invitation.",
+      "Invite your team",
+      "Add people, assign roles, and send invites.",
       "/admin/people",
     ],
   ];
@@ -521,8 +526,8 @@ function needs() {
     if (d.status === "quarantined") {
       list.push({
         d,
-        text: "The hub stopped " + d.name + " for misbehaving.",
-        act: ["Release it", async () => await call("/admin/api/driver/release", { id: d.id })],
+        text: d.name + ": " + (d.health.reason || "Stopped by the hub") + ".",
+        act: ["Restart", async () => await call("/admin/api/driver/release", { id: d.id })],
       });
     } else if (d.asks.length) {
       // One plain request, that nobody warns about, can be answered where it is shown. Anything more is
@@ -532,12 +537,12 @@ function needs() {
       list.push({
         d,
         text: one
-          ? d.name + " asks to " + lower(one.words) + "."
-          : d.name + " asks for " + d.asks.length + " things.",
+          ? d.name + " requests network access: " + lower(one.words) + "."
+          : d.name + " requests network access (" + d.asks.length + " items).",
         note: one && one.advice
           ? (one.advice.say === "no"
-            ? "The store's reviewers advise against this. "
-            : "The store's reviewers expect this. ") +
+            ? "Not recommended by store reviewers: "
+            : "Expected by store reviewers: ") +
             one.advice.why
           : one && one.caution
           ? one.caution
@@ -554,32 +559,30 @@ function needs() {
               }),
           ]
           : null,
-        look: [plain ? "Look closer" : "See what it asks for", () => openAccess(d.id)],
+        look: [plain ? "Details" : "Review", () => openAccess(d.id)],
       });
     } else if (d.status !== "running" && d.status !== "starting") {
-      list.push({ d, text: d.name + " is not running." });
+      list.push({ d, text: d.name + " is stopped." });
     } else if (d.status === "running" && d.health.status !== "ok" && d.health.status !== "degraded") {
       list.push({ d, text: d.name + ": " + lower(d.health.reason || "not ready") + "." });
     }
     if (d.update && d.update.newer) {
-      list.push({ d, text: d.name + " has a newer version, " + d.update.version + ", in the store." });
+      list.push({ d, text: "Update available for " + d.name + ": version " + d.update.version + "." });
     }
   }
   // What the files in the config folder propose is answered in the Hub place, where all of it is shown.
   if (proposed.problems) {
     list.push({
       text: proposed.problems === 1
-        ? "A file in the config folder could not be read."
-        : proposed.problems + " files in the config folder could not be read.",
+        ? "1 config file has errors."
+        : proposed.problems + " config files have errors.",
       open: ["/admin/hub", "Open Hub"],
     });
   } else if (proposed.changes) {
     list.push({
-      text: "Files in the config folder propose " +
-        (proposed.changes === 1 ? "1 change" : proposed.changes + " changes") +
-        (proposed.power
-          ? ". " + proposed.power + (proposed.power === 1 ? " needs" : " need") + " your yes."
-          : "."),
+      text: (proposed.changes === 1 ? "1 config change" : proposed.changes + " config changes") +
+        " pending" +
+        (proposed.power ? ", " + proposed.power + " requiring approval." : "."),
       open: ["/admin/hub", "Open Hub"],
     });
   }
@@ -590,16 +593,16 @@ function drawHome() {
   const waiting = needs();
   const well = drivers.filter((d) => statusOf(d)[1] === "ok").length;
   $("homeStatus").textContent = !drivers.length
-    ? "Nothing is set up yet."
+    ? "No devices yet"
     : !waiting.length
-    ? "Everything is working."
+    ? "All systems normal"
     : waiting.length === 1
-    ? "Running. One thing needs you."
-    : "Running. " + waiting.length + " things need you.";
+    ? "1 item needs attention"
+    : waiting.length + " items need attention";
   $("homeDetail").textContent = !drivers.length
-    ? "Start with a device: something for the hub to talk to."
-    : well + " of " + drivers.length + (drivers.length === 1 ? " device" : " devices") + " connected. " +
-      people.length + (people.length === 1 ? " person" : " people") + " on the team.";
+    ? "Add a device to get started."
+    : well + " of " + drivers.length + (drivers.length === 1 ? " device" : " devices") + " connected · " +
+      people.length + (people.length === 1 ? " person" : " people");
   $("homeAdd").hidden = drivers.length > 0;
 
   $("needs").hidden = !waiting.length;
@@ -656,13 +659,8 @@ function drawHome() {
 // What can be added, found by typing or by browsing. Two sections: what was written for this hub, and
 // Bitfocus Companion modules, which are many, so they are browsed by maker and by kind.
 const cat = { find: "", maker: "", kind: "", asked: 0 };
-const SHORT = {
-  "It starts and describes itself. Nobody has reported using it with a device.": "Runs here",
-  "It has been proven against a stand-in for the device, not the real thing.": "Tested against a stand-in",
-  "It has been used with the real device.": "Used with the real device",
-};
 function catItem(m) {
-  const b = el("button", { type: "button", className: "small quiet", textContent: "Choose" });
+  const b = el("button", { type: "button", className: "small quiet", textContent: "Install" });
   b.onclick = () => openAdd(m.id);
   return el(
     "div",
@@ -671,7 +669,7 @@ function catItem(m) {
     el(
       "p",
       { className: "help", style: "margin:0 0 6px" },
-      [m.maker, SHORT[m.proven] || m.proven, m.here ? "On this hub" : ""].filter(Boolean).join(". ") + ".",
+      [m.maker, m.proven, m.here ? "Installed" : ""].filter(Boolean).join(" · "),
     ),
     el("p", { className: "dim", style: "margin:0 0 8px", textContent: m.description }),
     b,
@@ -690,17 +688,17 @@ async function drawCatalog(more) {
   // An answer that is not about the store at all (the hub is away, or this person was signed out) is
   // said as what it is, not as a hub with no store.
   note.textContent = companion.ok === false
-    ? companion.message + " A package file can still be added."
+    ? companion.message + " You can still install from a file."
     : !companion.on
-    ? "This hub is not set up to use a store. A package file can still be added."
+    ? "No store configured. You can still install from a file."
     : companion.message
     ? companion.message
     : !companion.signed
-    ? "This hub cannot check who published this list. You can add from it, and each thing will ask you before it reaches anything."
+    ? "Store list is not signed. Installed modules require approval for all network access."
     : !companion.total
-    ? "The store has nothing listed yet."
+    ? "The store is empty."
     : cat.find && !companion.sections.skillfully && !companion.sections.companion
-    ? "Nothing in the store matches that. A module that is not here can still be added from a file."
+    ? "No matches. You can still install a module from a file."
     : "";
   note.id = "catNote";
   note.dataset.unsigned = companion.on && !companion.message && !companion.signed ? "1" : "";
@@ -806,9 +804,9 @@ async function drawCatalog(more) {
 // say that the hub does not: what an edit would change, and anything wrong with a file. It reads only.
 let configDrawn = 0;
 const TRUST = {
-  strict: "Strict. A change that hands out power waits for your yes.",
-  hour: "Trusting. Applying does everything the files say.",
-  always: "Always trusting. Applying does everything the files say.",
+  strict: "Strict: changes that grant permissions require approval.",
+  hour: "Trusted for 1 hour: all changes apply without approval.",
+  always: "Always trusted: all changes apply without approval.",
 };
 // Do what the files say, after showing exactly what that is. approve: the keys said yes to, or "all".
 function applyConfig(title, list, approve, okText) {
@@ -826,7 +824,7 @@ function applyConfig(title, list, approve, okText) {
     x.append(
       el("p", {
         className: "help",
-        textContent: "A device restarts when its settings or what it may reach change.",
+        textContent: "Devices restart when their settings or network access change.",
       }),
     );
     confirmField(x);
@@ -861,13 +859,13 @@ function drawVersion(v) {
   const day = (iso) =>
     new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
   if (!v.running) return line("Version", v.why);
-  line("Version", "Version " + v.running.number + ", from " + day(v.running.built) + ".");
+  line("Version", v.running.number + " (" + day(v.running.built) + ")");
   if (!v.can) return line("Updates", v.why);
   const look = el("button", {
     className: "small quiet",
     type: "button",
     id: "versionLook",
-    textContent: "Look now",
+    textContent: "Check for updates",
   });
   look.onclick = async () => {
     look.disabled = true;
@@ -876,12 +874,12 @@ function drawVersion(v) {
   };
   if (!v.newer) {
     const when = v.looked
-      ? " Last looked at " +
+      ? " Last checked " +
         new Date(v.looked).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "."
       : "";
     return line(
       "Updates",
-      (v.trouble || (v.looked ? "This is the newest version." : "Not looked yet.")) + when,
+      (v.trouble || (v.looked ? "Up to date." : "Not checked yet.")) + when,
       look,
     );
   }
@@ -893,8 +891,8 @@ function drawVersion(v) {
         x.append(
           el("p", {
             className: "help",
-            textContent: "The hub stops for about a minute and comes back as version " + v.newer.number +
-              ". Everyone's screens reconnect by themselves. What the hub knows is copied first, and if the new version will not start, the hub goes back to this one. Not during a service.",
+            textContent: "The hub restarts as version " + v.newer.number +
+              ", which takes about a minute. Screens reconnect automatically. Data is backed up first, and if the new version fails to start the hub rolls back. Avoid updating during an event.",
           }),
         );
         confirmField(x);
@@ -907,11 +905,11 @@ function drawVersion(v) {
       "Update now",
     );
   line(
-    "Version " + v.newer.number + " is ready",
-    "From " + day(v.newer.built) + "." +
+    "Update available: " + v.newer.number,
+    "Released " + day(v.newer.built) + "." +
       (v.newer.notes.length ? "\n" + v.newer.notes.map((n) => "- " + n).join("\n") : "") +
       (v.newer.needsApp
-        ? "\nIt needs a newer Skillfully app. Download it and open it, and this hub's data comes with it."
+        ? "\nRequires a newer Skillfully app. Install it, and this hub's data carries over."
         : ""),
     ...(v.newer.needsApp ? [look] : [go, look]),
   );
@@ -919,7 +917,7 @@ function drawVersion(v) {
 // The hub is away for a moment. This page waits for it and says how it went.
 async function waitForVersion(was) {
   updating = true;
-  say("versionMsg", "Updating. The hub is away for a moment, and this page comes back by itself.");
+  say("versionMsg", "Updating… This page reconnects automatically.");
   for (let i = 0; i < 120; i++) {
     await new Promise((r) => setTimeout(r, 2000));
     const r = await fetch("/admin/api/all").then((x) => x.json()).catch(() => null);
@@ -930,13 +928,14 @@ async function waitForVersion(was) {
     return say(
       "versionMsg",
       now !== was
-        ? "Updated. This is version " + now + "."
-        : "The new version would not start, so the hub went back to version " + was + ". Nothing was lost.",
+        ? "Updated to version " + now + "."
+        : "Update failed: the new version did not start. Rolled back to version " + was +
+          ". No data was lost.",
       now === was ? "bad" : "ok",
     );
   }
   updating = false;
-  say("versionMsg", "The hub has not come back. Open the Skillfully app on its computer to see why.", "bad");
+  say("versionMsg", "The hub did not restart. Check the Skillfully app on the hub computer.", "bad");
 }
 
 // Asking the agent something. It stays put while the rest of the card is drawn again, so a question
@@ -949,7 +948,7 @@ $("agentAsk").onsubmit = async (e) => {
   go.disabled = true;
   $("agentAnswer").hidden = false;
   $("agentSaid").className = "dim";
-  $("agentSaid").textContent = "Looking…";
+  $("agentSaid").textContent = "Thinking…";
   $("agentLookedAt").textContent = "";
   $("agentLooked").innerHTML = "";
   const r = await call("/admin/api/agent/ask", { question });
@@ -957,17 +956,15 @@ $("agentAsk").onsubmit = async (e) => {
   // What it says is shown as words, never as a page: it is a model's answer about other people's data.
   $("agentSaid").className = r.ok ? "said" : "status bad";
   $("agentSaid").textContent = r.ok
-    ? r.answer + (r.cut ? " (It ran out of room before it finished.)" : "")
-    : r.message || "The hub could not ask it.";
+    ? r.answer + (r.cut ? " (Response truncated: token limit reached.)" : "")
+    : r.message || "Request failed.";
   if (!r.ok) return;
-  $("agentLookedAt").textContent = r.looked.length
-    ? "To answer, it looked at:"
-    : "It answered without looking at anything.";
+  $("agentLookedAt").textContent = r.looked.length ? "Activity:" : "No tools used.";
   for (const words of r.looked) $("agentLooked").append(el("li", { textContent: words }));
   $("agentLooked").append(
     el("li", {
-      textContent: "Its model was asked " + (r.steps === 1 ? "once" : r.steps + " times") + ", using " +
-        (r.tokens.in + r.tokens.out).toLocaleString() + " tokens.",
+      textContent: (r.steps === 1 ? "1 model request" : r.steps + " model requests") + ", " +
+        (r.tokens.in + r.tokens.out).toLocaleString() + " tokens",
     }),
   );
 };
@@ -1002,16 +999,15 @@ function drawAgent(a) {
       el("p", {
         className: "dim",
         textContent:
-          "An agent is someone on the team who is not a person. It has a name and roles like anyone, and can see and do only what its roles allow. It thinks with a model that you pay for, reached with a key of your own.",
+          "An AI agent is a team member backed by a language model. Like anyone on the team, it has roles, and it can only see and do what those roles allow. It uses your own API key.",
       }),
-      button("Set up the agent", () =>
-        ask("Set up the agent", (x) => {
-          input(x, "agentName", "What it is called", { value: "Agent", required: true, maxLength: 40 });
+      button("Set up agent", () =>
+        ask("Set up agent", (x) => {
+          input(x, "agentName", "Name", { value: "Agent", required: true, maxLength: 40 });
           x.append(
             el("p", {
               className: "help",
-              textContent:
-                "It starts with no roles, so it can see and do nothing until you give it some under People.",
+              textContent: "It starts with no roles and no access. Assign roles under People.",
             }),
           );
           confirmField(x);
@@ -1023,57 +1019,55 @@ function drawAgent(a) {
     el("p", {
       className: "status" + (a.ready ? " ok" : a.on ? " bad" : ""),
       id: "agentStatus",
-      textContent: a.ready ? "On." : a.on ? "On, but it cannot work. " + a.needs : "Off.",
+      textContent: a.ready ? "Enabled" : a.on ? "Error: " + a.needs : "Disabled",
     }),
   );
   const named = roles.filter((r) => a.person.roles.includes(r.id)).map((r) => r.name);
   line(
     a.person.name,
     named.length
-      ? "Its roles: " + named.join(", ") + ". It can see and do what they allow, and nothing else."
-      : "It has no roles yet, so it can see and do nothing.",
-    el("a", { className: "open", href: "/admin/people", textContent: "Its roles are set under People" }),
+      ? "Roles: " + named.join(", ") + ". Access is limited to what these roles allow."
+      : "No roles. It has no access.",
+    el("a", { className: "open", href: "/admin/people", textContent: "Manage roles in People" }),
   );
   line(
-    "What it can see",
+    "Access",
     a.sees.length
       ? a.sees.join(", ") +
-        ". As much of each as its roles allow. What it looks at is sent to its model when it is asked something."
-      : "No devices. Give it a role that can see some, and let that role's screens use them.",
+        ". Data it reads is sent to the model provider."
+      : "No devices. Assign a role with access to a screen that uses devices.",
   );
   const setKey = () =>
-    ask(a.keySet ? "Change the agent's key" : "Set the agent's key", (x) => {
-      input(x, "agentKey", "The key", { type: "password", required: true, autocomplete: "off" });
+    ask(a.keySet ? "Replace API key" : "Set API key", (x) => {
+      input(x, "agentKey", "API key", { type: "password", required: true, autocomplete: "off" });
       x.append(
         el("p", {
           className: "help",
-          textContent:
-            "Kept in the hub's database and nowhere else. It is never shown again, never written to a file and never put in the log.",
+          textContent: "Stored only in the hub's database. It is never displayed, exported, or logged.",
         }),
       );
       confirmField(x);
     }, () => sureCall("/admin/api/agent/key", { key: $("agentKey").value }));
   line(
-    "Its key",
+    "API key",
     a.keySet
-      ? "A key is set, since " + new Date(a.keySetAt).toLocaleDateString() + ". It cannot be read back."
-      : "No key yet. It reaches its model with a key from whoever provides the model.",
-    button(a.keySet ? "Change the key" : "Set the key", setKey, "agentKeySet"),
+      ? "Set " + new Date(a.keySetAt).toLocaleDateString() + ". Hidden."
+      : "Not set. Get an API key from your model provider.",
+    button(a.keySet ? "Replace" : "Set API key", setKey, "agentKeySet"),
     ...(a.keySet
       ? [
-        button("Remove the key", async () =>
-          done(await call("/admin/api/agent/key/remove", {})), "agentKeyRemove"),
+        button("Remove", async () => done(await call("/admin/api/agent/key/remove", {})), "agentKeyRemove"),
       ]
       : []),
   );
   line(
-    "Its model",
-    a.model + ", at " + a.address.replace(/^https:\/\//, ""),
+    "Model",
+    a.model + " · " + a.address.replace(/^https:\/\//, ""),
     button(
       "Change",
       () =>
         ask(
-          "The agent's model",
+          "Model",
           (x) => {
             // The models this key can use, asked of the model's service by the hub. Until the answer is
             // in, and whenever there is none, the one in use now is what is shown.
@@ -1086,9 +1080,9 @@ function drawAgent(a) {
               hidden: true,
               autocapitalize: "off",
               spellcheck: false,
-              placeholder: "The model's name, as its service spells it",
+              placeholder: "Model ID",
             });
-            other.setAttribute("aria-label", "The model's name");
+            other.setAttribute("aria-label", "Model ID");
             const note = el("p", { className: "help", id: "agentModelNote" });
             x.append(el("label", { htmlFor: "agentModel", textContent: "Model" }), sel, other, note);
             const typed = (on) => {
@@ -1100,29 +1094,29 @@ function drawAgent(a) {
               typed(sel.value === OTHER);
               if (sel.value === OTHER) other.focus();
             };
-            note.textContent = "Asking which models this key can use.";
+            note.textContent = "Loading models…";
             call("/admin/api/agent/models", {}).then((r) => {
               if (!sel.isConnected) return;
               if (!r.ok) {
                 // No list to choose from: the name is typed, as before.
                 sel.hidden = true;
                 typed(true);
-                note.textContent = (r.message || "The models could not be listed.") +
-                  " You can type its name.";
+                note.textContent = (r.message || "Could not load models.") +
+                  " Enter a model ID instead.";
                 return;
               }
               sel.innerHTML = "";
               if (!r.models.some((m) => m.id === a.model)) {
-                sel.append(option(a.model, a.model + " (in use now)"));
+                sel.append(option(a.model, a.model + " (current)"));
               }
               for (const m of r.models) {
                 sel.append(option(m.id, m.name === m.id ? m.id : m.name + " (" + m.id + ")"));
               }
-              sel.append(option(OTHER, "Another model"));
+              sel.append(option(OTHER, "Other…"));
               sel.value = a.model;
               note.textContent = "";
             });
-            const address = input(x, "agentAddress", "Where it is asked", {
+            const address = input(x, "agentAddress", "API endpoint", {
               value: a.address,
               required: true,
               autocapitalize: "off",
@@ -1132,7 +1126,7 @@ function drawAgent(a) {
               el("p", {
                 className: "help",
                 textContent:
-                  "The key is sent to this address with everything the agent is asked. Change it only to somewhere you trust with both.",
+                  "Your API key and the agent's requests are sent to this endpoint. Only use one you trust.",
               }),
             );
             // Choosing a model hands out nothing. Sending the key somewhere else does, and is confirmed.
@@ -1158,46 +1152,44 @@ function drawAgent(a) {
     ),
   );
   line(
-    "The log",
-    a.readsLog
-      ? "It may read the hub's log. What it reads is sent to its model."
-      : "It may not read the hub's log.",
-    button(a.readsLog ? "Stop it reading the log" : "Let it read the log", () => {
+    "Log access",
+    a.readsLog ? "Allowed. Log entries it reads are sent to the model provider." : "Not allowed.",
+    button(a.readsLog ? "Revoke log access" : "Allow log access", () => {
       if (a.readsLog) return call("/admin/api/agent/set", { readsLog: false }).then(done);
       ask(
-        "Let the agent read the log?",
+        "Allow log access?",
         (x) => {
           x.append(
             el("p", {
               className: "dim",
               textContent:
-                "What it reads is sent to its model, outside this hub. People are IDs in the log, never names. But names typed into your equipment are in it: an input called after a person, for one.",
+                "Log entries it reads are sent to the model provider. The log identifies people by ID, not name, but names entered on your equipment (a channel named after a person, for example) can appear in it.",
             }),
           );
           confirmField(x);
         },
         () => sureCall("/admin/api/agent/set", { readsLog: true }),
-        "Let it",
+        "Allow",
       );
     }, "agentLog"),
   );
-  const turn = button(a.on ? "Turn the agent off" : "Turn the agent on", async () => {
+  const turn = button(a.on ? "Disable agent" : "Enable agent", async () => {
     if (a.on) return done(await call("/admin/api/agent/off", {}));
     ask(
-      "Turn the agent on?",
+      "Enable agent?",
       (x) => {
         x.append(
           el("p", {
             className: "dim",
             textContent: named.length
-              ? "It will be able to see and do what its roles allow: " + named.join(", ") + "."
-              : "It has no roles yet, so it will be able to see and do nothing until you give it some.",
+              ? "It gets the access of its roles: " + named.join(", ") + "."
+              : "It has no roles, so it will have no access until you assign some.",
           }),
         );
         confirmField(x);
       },
       () => sureCall("/admin/api/agent/on", {}),
-      "Turn it on",
+      "Enable",
     );
   }, "agentTurn");
   if (!a.on && a.needs) {
@@ -1210,7 +1202,7 @@ function drawAgent(a) {
       className: "help",
       textContent: !a.on && a.needs
         ? a.needs
-        : "People whose role includes Ask the agent talk to it on the Ask screen. With Have the agent do things as well, it can set a value, press a button or draw a canvas for them: only what both it and they may change, and only after their yes each time.",
+        : "People with the Ask the agent permission use it from the Ask screen. With Have the agent do things, it can also change values, run actions and edit canvases, limited to what both of them may change and only after they approve each change.",
     }),
   );
 }
@@ -1220,9 +1212,8 @@ async function drawConfig() {
   const r = await call("/admin/api/config");
   $("secConfig").hidden = !r.ok || !r.on;
   if (!r.ok || !r.on) return;
-  $("configWhere").textContent = "Everything decided about each device is also a file, one per device, in " +
-    r.where + "/devices. A person or an agent can read them, and propose a change by editing one. " +
-    "No secret is ever written there.";
+  $("configWhere").textContent = "Each device's configuration is also stored as a file in " +
+    r.where + "/devices. Edit a file to propose a change. Secrets are never written to these files.";
   const trusting = r.trust.mode !== "strict";
   const box = $("configList");
   box.innerHTML = "";
@@ -1230,12 +1221,12 @@ async function drawConfig() {
   // How much a file may do without being asked about. Kept by the hub, never in a file.
   const change = el("button", { className: "small quiet", textContent: "Change" });
   change.onclick = () =>
-    ask("How much may the files do?", (x) => {
+    ask("Config file approval", (x) => {
       for (
         const [mode, words] of [
-          ["strict", "Strict: a change that hands out power waits for your yes"],
-          ["hour", "Trusting for an hour, then strict again by itself"],
-          ["always", "Always trusting: applying does everything the files say"],
+          ["strict", "Strict: changes that grant permissions require approval"],
+          ["hour", "Trusted for 1 hour, then strict"],
+          ["always", "Always trusted: all changes apply without approval"],
         ]
       ) {
         x.append(
@@ -1251,7 +1242,7 @@ async function drawConfig() {
         el("p", {
           className: "help",
           textContent:
-            "Whoever can write to the config folder can then let a device reach things and let people control it, without you seeing each change first.",
+            "When trusted, anyone who can write to the config folder can grant network access and enable control without your review.",
         }),
       );
       confirmField(x);
@@ -1269,14 +1260,14 @@ async function drawConfig() {
         className: "status" + (trusting ? " wait" : ""),
         style: "margin:0;flex:1",
         textContent: TRUST[r.trust.mode] +
-          (r.trust.minutes ? " Strict again in " + r.trust.minutes + " minutes." : ""),
+          (r.trust.minutes ? " Returns to strict in " + r.trust.minutes + " minutes." : ""),
       }),
       change,
     ),
   );
 
   for (const p of r.problems) {
-    box.append(el("p", { className: "status bad", textContent: p.file + " was not read: " + p.message }));
+    box.append(el("p", { className: "status bad", textContent: p.file + ": " + p.message }));
   }
   const waits = (c) => c.power && !trusting;
   for (const c of r.changes) {
@@ -1285,12 +1276,12 @@ async function drawConfig() {
       { className: "row" },
       el("span", {
         className: "chip" + (waits(c) ? " on" : ""),
-        textContent: waits(c) ? "Waits for your yes" : "Done when you apply",
+        textContent: waits(c) ? "Requires approval" : "Ready to apply",
       }),
     );
     if (waits(c) && !r.problems.length) {
-      const yes = el("button", { className: "small", textContent: "Say yes" });
-      yes.onclick = () => applyConfig("Say yes to this?", [c], [c.key], "Yes, do it");
+      const yes = el("button", { className: "small", textContent: "Approve" });
+      yes.onclick = () => applyConfig("Approve this change?", [c], [c.key], "Approve");
       row.append(yes);
     }
     box.append(
@@ -1309,7 +1300,7 @@ async function drawConfig() {
   }
   for (const n of r.notes) box.append(el("p", { className: "help", textContent: n.words }));
   if (!(r.problems.length + r.changes.length + r.notes.length)) {
-    box.append(el("p", { className: "status ok", textContent: "The files say the same as the hub." }));
+    box.append(el("p", { className: "status ok", textContent: "In sync. No pending changes." }));
   }
 
   const ready = r.changes.filter((c) => !waits(c)), waiting = r.changes.filter(waits);
@@ -1320,41 +1311,47 @@ async function drawConfig() {
       id: "configApply",
       textContent: ready.length === 1 ? "Apply 1 change" : "Apply " + ready.length + " changes",
     });
-    b.onclick = () => applyConfig("Apply what the files say", ready, [], "Apply");
+    b.onclick = () => applyConfig("Apply config changes", ready, [], "Apply");
     buttons.append(b);
   }
   if (waiting.length > 1 && !r.problems.length) {
     const b = el("button", {
       className: "small quiet",
       id: "configYesAll",
-      textContent: "Say yes to all " + waiting.length,
+      textContent: "Approve all " + waiting.length,
     });
-    b.onclick = () => applyConfig("Say yes to all of these?", r.changes, "all", "Yes, do all of it");
+    b.onclick = () => applyConfig("Approve all changes?", r.changes, "all", "Approve all");
     buttons.append(b);
   }
   box.append(buttons);
-  $("configNext").textContent = r.problems.length
-    ? "Nothing is applied while a file cannot be read. Fix or remove it first."
-    : "";
+  $("configNext").textContent = r.problems.length ? "Fix the file errors before applying changes." : "";
 }
 
 // --- Devices ---
 function statusOf(d) {
   if (d.status === "quarantined") {
-    return ["The hub stopped it for misbehaving. Release it to try again.", "bad"];
+    return [(d.health.reason || "Stopped by the hub") + ". Restart to try again.", "bad"];
   }
   if (d.asks.length) {
     return [
-      "It is waiting for you. It asks to reach " +
-      (d.asks.length === 1 ? "something" : d.asks.length + " things") + " before it can go on.",
+      "Waiting for permission: " +
+      (d.asks.length === 1 ? "1 network request" : d.asks.length + " network requests"),
       "wait",
     ];
   }
   if (d.status !== "running") {
-    return [d.status === "starting" ? "Starting" : "Not running", d.status === "starting" ? "" : "bad"];
+    return [d.status === "starting" ? "Starting" : "Stopped", d.status === "starting" ? "" : "bad"];
   }
-  if (d.health.status === "ok") return ["Connected to its device", "ok"];
-  return [d.health.reason || "Not ready", d.health.status === "degraded" ? "" : "bad"];
+  if (d.health.status === "ok") return ["Connected", "ok"];
+  const why = d.health.reason || "Not ready";
+  // A device's own word for how it is goes first; a reason without one is said to be a warning or an error.
+  const named =
+    /^(Connecting|Disconnected|Connection failed|Settings incomplete|Authentication failed|Permission denied|Error|Warning|Blocked|Invalid|Not |Failed|Crashed|Stopped|Restarted|Refused)/
+      .test(why);
+  return [
+    named ? why : (d.health.status === "degraded" ? "Warning: " : "Error: ") + why,
+    d.health.status === "degraded" ? "" : "bad",
+  ];
 }
 // Something that hands out power, done from a page and not a dialog. While the superuser's confirmation
 // holds it is simply done. Otherwise the one question is asked first, in the dialog, and then it is done.
@@ -1371,7 +1368,7 @@ async function sureDo(title, fn, part) {
       return load();
     }
   }
-  ask(title, (x) => confirmField(x), run, "Yes");
+  ask(title, (x) => confirmField(x), run, "Confirm");
 }
 
 function drawDrivers() {
@@ -1403,7 +1400,7 @@ function drawDrivers() {
         el("p", {
           className: "help",
           style: "margin:4px 0 0",
-          textContent: d.mode === "act" ? "People can control it." : "Watching only.",
+          textContent: d.mode === "act" ? "Control enabled" : "Read-only",
         }),
       ),
     );
@@ -1424,20 +1421,20 @@ async function drawTry(id) {
   const shown = r.ready.length + r.readings.length + r.actions.length;
   $("tryFind").hidden = !(typed || r.total > shown);
   $("tryNote").textContent = !r.running
-    ? "It is not running, so there is nothing to show."
+    ? "Not running."
     : !r.total
-    ? "It has reported nothing yet."
+    ? "No values reported yet."
     : r.control
-    ? "What it reports, as it changes, and what it can be told to do."
-    : "What it reports, as it changes. Its buttons work once people can control it.";
+    ? "Live values and available actions."
+    : "Live values. Actions are disabled while the device is read-only.";
   const doIt = (key, label, off, fields = []) => {
-    const b = el("button", { type: "button", className: "small quiet", textContent: "Do it", disabled: off });
+    const b = el("button", { type: "button", className: "small quiet", textContent: "Run", disabled: off });
     const toFill = fields.filter((f) => f.type !== "static-text");
     b.onclick = () => {
       if (!toFill.length) {
         return busy(
           b,
-          () => sureDo("Tell it to: " + label + "?", () => sureCall("/admin/api/driver/do", { id, key })),
+          () => sureDo("Run “" + label + "”?", () => sureCall("/admin/api/driver/do", { id, key })),
         );
       }
       // An action that needs something typed in, such as the code a device is showing, asks for it here.
@@ -1478,7 +1475,7 @@ async function drawTry(id) {
         },
         () =>
           sureCall("/admin/api/driver/do", { id, key, options: Object.fromEntries(read.map((r) => r())) }),
-        "Do it",
+        "Run",
       );
     };
     return b;
@@ -1488,7 +1485,7 @@ async function drawTry(id) {
   for (const m of r.ready) {
     if (m.group !== group) {
       group = m.group;
-      list.append(el("p", { className: "letter", textContent: group || "Ready-made" }));
+      list.append(el("p", { className: "letter", textContent: group || "Presets" }));
     }
     list.append(
       el(
@@ -1500,7 +1497,7 @@ async function drawTry(id) {
     );
   }
   if (r.ready.length && (r.readings.length || r.actions.length)) {
-    list.append(el("p", { className: "letter", textContent: "Everything else" }));
+    list.append(el("p", { className: "letter", textContent: "Other" }));
   }
   for (const x of r.readings) {
     list.append(
@@ -1522,20 +1519,20 @@ async function drawTry(id) {
           "span",
           { style: "flex:1" },
           a.label,
-          a.options ? el("span", { className: "advice", textContent: "It asks for something first." }) : "",
+          a.options ? el("span", { className: "advice", textContent: "Requires input" }) : "",
         ),
         b,
       ),
     );
   }
   if (typed && !shown) {
-    list.append(el("p", { className: "dim", textContent: "Nothing it has matches that." }));
+    list.append(el("p", { className: "dim", textContent: "No matches." }));
   }
   if (r.total > shown && !typed) {
     list.append(
       el("p", {
         className: "help",
-        textContent: "Showing " + shown + " of " + r.total + ". Type to find the rest.",
+        textContent: "Showing " + shown + " of " + r.total + ". Search to see more.",
       }),
     );
   }
@@ -1581,7 +1578,7 @@ function drawDevice(d, box) {
       el("p", { className: "status " + kind, id: "deviceStatus", textContent: words }),
     );
     if (d.status === "quarantined") {
-      s.append(button("Release it", async () => {
+      s.append(button("Restart", async () => {
         await call("/admin/api/driver/release", { id: d.id });
         load();
       }, false));
@@ -1596,9 +1593,9 @@ function drawDevice(d, box) {
       el("p", {
         className: "help",
         style: "margin-top:14px",
-        textContent: "Saving restarts this device with the new settings.",
+        textContent: "Saving restarts the device.",
       }),
-      button("Save settings", async () => {
+      button("Save", async () => {
         const r = await call("/admin/api/driver/settings", {
           id: d.id,
           settings: Object.fromEntries(read.map((r) => r()).filter(Boolean)),
@@ -1613,7 +1610,7 @@ function drawDevice(d, box) {
     );
   });
 
-  part("deviceReach", "What it may reach", (s) => {
+  part("deviceReach", "Network access", (s) => {
     const answer = (title, body) =>
       sureDo(
         title,
@@ -1624,7 +1621,7 @@ function drawDevice(d, box) {
       s.append(
         el("p", {
           className: "dim",
-          textContent: "It has no access to your network, and has asked for none.",
+          textContent: "None granted or requested.",
         }),
       );
     }
@@ -1633,8 +1630,11 @@ function drawDevice(d, box) {
         el(
           "div",
           { className: "row grant" },
-          el("span", { style: "flex:1", textContent: g.words + "." }),
-          button("Take away", () => answer("Take this away from " + d.name + "?", { revoke: [g.grant] })),
+          el("span", { style: "flex:1", textContent: g.words }),
+          button(
+            "Revoke",
+            () => answer("Revoke this permission from " + d.name + "?", { revoke: [g.grant] }),
+          ),
         ),
       );
     }
@@ -1643,8 +1643,7 @@ function drawDevice(d, box) {
         el("p", {
           className: "dim",
           style: "margin-top:12px",
-          textContent:
-            "It asks for the following. Tick what makes sense for this device. It gets nothing you leave unticked, and it may ask again as it gets further.",
+          textContent: "Requested. Allow only what this device needs. Anything left unselected is denied.",
         }),
       );
       for (const a of d.asks) {
@@ -1652,8 +1651,8 @@ function drawDevice(d, box) {
         const advice = !a.advice ? "" : el("span", {
           className: a.advice.say === "no" ? "caution" : "advice",
           textContent: (a.advice.say === "no"
-            ? "The store's reviewers advise against this. "
-            : "The store's reviewers expect this. ") + a.advice.why,
+            ? "Not recommended by store reviewers: "
+            : "Expected by store reviewers: ") + a.advice.why,
         });
         s.append(
           el(
@@ -1668,7 +1667,7 @@ function drawDevice(d, box) {
             el(
               "span",
               {},
-              a.words + ".",
+              a.words,
               a.caution ? el("span", { className: "caution", textContent: a.caution }) : "",
               advice,
             ),
@@ -1681,14 +1680,14 @@ function drawDevice(d, box) {
           "label",
           { className: "check", style: "margin-top:10px" },
           stop,
-          el("span", { textContent: "Do not ask me again about the ones I left unticked" }),
+          el("span", { textContent: "Don't ask again for unselected items" }),
         ),
-        el("p", { className: "help", textContent: "Answering restarts this device." }),
-        button("Allow what is ticked", () => {
+        el("p", { className: "help", textContent: "Applying restarts the device." }),
+        button("Allow selected", () => {
           const allow = [...s.querySelectorAll(".askBox:checked")].map((i) => i.value);
           const deny = stop.checked ? d.asks.map((a) => a.value).filter((v) => !allow.includes(v)) : [];
-          if (!allow.length && !deny.length) return say("deviceMsg", "Nothing is ticked.", "bad");
-          answer("Allow this for " + d.name + "?", { allow, deny });
+          if (!allow.length && !deny.length) return say("deviceMsg", "Select at least one item.", "bad");
+          answer("Allow network access for " + d.name + "?", { allow, deny });
         }, false),
       );
     }
@@ -1696,8 +1695,7 @@ function drawDevice(d, box) {
       s.append(
         el("p", {
           className: "help",
-          textContent: "It also tried to " + t.words + (t.times > 1 ? ", " + t.times + " times" : "") +
-            ". The hub never allows that.",
+          textContent: "Blocked: " + t.words + (t.times > 1 ? " (" + t.times + " times)" : ""),
         }),
       );
     }
@@ -1709,10 +1707,10 @@ function drawDevice(d, box) {
     const find = el("input", {
       id: "tryFind",
       type: "search",
-      placeholder: "Find a reading or an action",
+      placeholder: "Search values and actions",
       hidden: true,
     });
-    find.setAttribute("aria-label", "Find one of this device's readings or actions");
+    find.setAttribute("aria-label", "Search this device's values and actions");
     let typing;
     find.oninput = () => {
       clearTimeout(typing);
@@ -1722,7 +1720,7 @@ function drawDevice(d, box) {
       el(
         "div",
         { className: "part", id: "deviceTry" },
-        el("h3", { textContent: "Try it" }),
+        el("h3", { textContent: "Values and actions" }),
         el("p", { className: "dim", id: "tryNote" }),
         find,
         el("div", { id: "tryList" }),
@@ -1731,31 +1729,31 @@ function drawDevice(d, box) {
   }
   drawTry(d.id);
 
-  part("deviceControl", "People can control it", (s) => {
+  part("deviceControl", "Control", (s) => {
     const on = d.mode === "act";
     s.append(
       el("p", {
         className: "status" + (on ? " ok" : ""),
         textContent: on
-          ? "On. People with a screen that uses it can change it."
-          : "Off. The hub only watches it, and nothing is sent to it.",
+          ? "Control enabled. Screens that use this device can change it."
+          : "Read-only. The hub monitors this device and sends it nothing.",
       }),
-      button(on ? "Stop people controlling it" : "Let people control it", () =>
+      button(on ? "Disable control" : "Enable control", () =>
         sureDo(
-          on ? "Stop people controlling " + d.name + "?" : "Let people control " + d.name + "?",
+          on ? "Disable control of " + d.name + "?" : "Enable control of " + d.name + "?",
           () => sureCall("/admin/api/driver/mode", { id: d.id, mode: on ? "listen" : "act" }),
           s,
         ), on),
     );
   });
 
-  part("deviceScreens", "Screens that use it", (s) => {
+  part("deviceScreens", "Used by", (s) => {
     const can = offered.filter((o) => o.eligible.some((e) => e.id === d.id));
     if (!can.length) {
       s.append(
         el("p", {
           className: "dim",
-          textContent: "No screen on this hub works with this kind of device yet.",
+          textContent: "No screen on this hub supports this kind of device.",
         }),
       );
     }
@@ -1769,13 +1767,12 @@ function drawDevice(d, box) {
             "span",
             { style: "flex:1" },
             el("b", { textContent: o.name }),
-            uses ? " uses it." : " does not use it.",
+            " ",
+            el("span", { className: "dim", textContent: uses ? "· In use" : "· Not in use" }),
           ),
-          button(uses ? "Take it away" : "Let it use this", () =>
+          button(uses ? "Remove" : "Add", () =>
             sureDo(
-              uses
-                ? "Take " + d.name + " away from " + o.name + "?"
-                : "Let " + o.name + " use " + d.name + "?",
+              uses ? "Remove " + d.name + " from " + o.name + "?" : "Add " + d.name + " to " + o.name + "?",
               () =>
                 sureCall("/admin/api/screen/connections", {
                   id: o.plugin,
@@ -1794,15 +1791,14 @@ function drawDevice(d, box) {
         el(
           "p",
           { className: "dim" },
-          "From the store: Companion module " + d.module.name + " " + d.module.version +
-            (d.store.license ? ", " + d.store.license + " license" : "") + ". " + d.store.proven + " ",
+          "Companion module " + d.module.name + " " + d.module.version + ", from the store. " +
+            (d.store.license ? d.store.license + " license. " : "") + d.store.proven + ". ",
           el("a", {
             href: d.store.repo,
             target: "_blank",
             rel: "noopener noreferrer",
-            textContent: "Its author's source",
+            textContent: "Source code",
           }),
-          ".",
         ),
       );
     } else if (d.module) {
@@ -1810,11 +1806,11 @@ function drawDevice(d, box) {
         el("p", {
           className: "dim",
           textContent: "Companion module " + d.module.name + " " + d.module.version +
-            ", added from a file. Nobody has reviewed it for this hub.",
+            ", installed from a file. Not reviewed.",
         }),
       );
     } else {
-      s.append(el("p", { className: "dim", textContent: "This hub was started with it." }));
+      s.append(el("p", { className: "dim", textContent: "Configured when the hub started." }));
     }
     const row = el("div", { className: "row" });
     if (d.update) {
@@ -1822,11 +1818,10 @@ function drawDevice(d, box) {
         el("p", {
           className: "help update",
           textContent: d.update.newer
-            ? "The store has a newer version, " + d.update.version + "."
+            ? "Update available: version " + d.update.version + "."
             : d.update.rebuilt
-            ? "The store has packaged version " + d.update.version +
-              " again, with a fix to how it is put together."
-            : "The store now lists version " + d.update.version + ", which is not the one running here.",
+            ? "Version " + d.update.version + " was repackaged by the store with a build fix."
+            : "The store lists version " + d.update.version + ", which differs from the installed version.",
         }),
       );
       row.append(
@@ -1837,23 +1832,23 @@ function drawDevice(d, box) {
               const facts = el("ul", { className: "facts" });
               facts.append(
                 el("li", {
-                  textContent: "It keeps its name, its settings, and everything you allowed or refused.",
+                  textContent: "Name, settings and network permissions are kept.",
                 }),
-                el("li", { textContent: d.update.proven }),
+                el("li", { textContent: d.update.proven + "." }),
               );
               if (d.update.also.length) {
                 facts.append(
                   el("li", {
-                    textContent: "The store now also lets it, without asking you: " +
+                    textContent: "Also allowed by the store without asking: " +
                       d.update.also.map(lower).join("; ") + ".",
                   }),
                 );
               }
               facts.append(
                 el("li", {
-                  textContent: "If the new version reaches for anything else, you are asked first.",
+                  textContent: "Any other new network access requires your approval.",
                 }),
-                el("li", { textContent: "It stops for a moment while it is replaced." }),
+                el("li", { textContent: "The device restarts briefly during the update." }),
               );
               x.append(facts);
               confirmField(x);
@@ -1873,7 +1868,7 @@ function drawDevice(d, box) {
                 el("p", {
                   className: "dim",
                   textContent:
-                    "It is stopped and taken off this hub, and every screen loses it. Its settings are deleted.",
+                    "The device is stopped, removed from this hub and from every screen, and its settings are deleted.",
                 }),
               );
               confirmField(x);
@@ -1896,13 +1891,12 @@ function drawDevice(d, box) {
 function openAccess(id) {
   const d = drivers.find((x) => x.id === id);
   if (!d) return;
-  ask(d.asks.length ? "What " + d.name + " asks for" : "What " + d.name + " may reach", (x) => {
+  ask("Network access: " + d.name, (x) => {
     if (d.asks.length) {
       x.append(
         el("p", {
           className: "dim",
-          textContent:
-            "Tick what makes sense for this device. It gets nothing you leave unticked, and it may ask again as it gets further.",
+          textContent: "Requested. Allow only what this device needs. Anything left unselected is denied.",
         }),
       );
       for (const a of d.asks) {
@@ -1916,8 +1910,8 @@ function openAccess(id) {
         const advice = !a.advice ? "" : el("span", {
           className: a.advice.say === "no" ? "caution" : "advice",
           textContent: (a.advice.say === "no"
-            ? "The store's reviewers advise against this. "
-            : "The store's reviewers expect this. ") + a.advice.why,
+            ? "Not recommended by store reviewers: "
+            : "Expected by store reviewers: ") + a.advice.why,
         });
         x.append(
           el(
@@ -1927,7 +1921,7 @@ function openAccess(id) {
             el(
               "span",
               {},
-              a.words + ".",
+              a.words,
               a.caution ? el("span", { className: "caution", textContent: a.caution }) : "",
               advice,
             ),
@@ -1939,7 +1933,7 @@ function openAccess(id) {
           "label",
           { className: "check", style: "margin-top:14px" },
           el("input", { type: "checkbox", id: "stopAsking" }),
-          el("span", { textContent: "Do not ask me again about the ones I left unticked" }),
+          el("span", { textContent: "Don't ask again for unselected items" }),
         ),
       );
     }
@@ -1948,7 +1942,7 @@ function openAccess(id) {
         el("p", {
           className: "dim",
           style: "margin-top:16px",
-          textContent: "It may already do these. Tick one to take it away.",
+          textContent: "Granted. Select any to revoke.",
         }),
       );
       for (const g of d.grants) {
@@ -1957,7 +1951,7 @@ function openAccess(id) {
             "label",
             { className: "check" },
             el("input", { type: "checkbox", value: g.grant, className: "revokeBox" }),
-            el("span", { textContent: g.words + "." }),
+            el("span", { textContent: g.words }),
           ),
         );
       }
@@ -1966,13 +1960,12 @@ function openAccess(id) {
       x.append(
         el("p", {
           className: "help",
-          textContent: "It also tried to " + t.words + (t.times > 1 ? ", " + t.times + " times" : "") +
-            ". The hub never allows that.",
+          textContent: "Blocked: " + t.words + (t.times > 1 ? " (" + t.times + " times)" : ""),
         }),
       );
     }
     x.append(
-      el("p", { className: "help", style: "margin-top:14px", textContent: "Saving restarts this device." }),
+      el("p", { className: "help", style: "margin-top:14px", textContent: "Saving restarts the device." }),
     );
     confirmField(x);
   }, () => {
@@ -1987,7 +1980,7 @@ function openAccess(id) {
       deny,
       revoke: picked("revokeBox"),
     });
-  }, d.asks.length ? "Allow what is ticked" : "Save");
+  }, d.asks.length ? "Allow selected" : "Save");
 }
 
 // A device's own settings, drawn from what it says it takes, into x. Returns how to read them back.
@@ -1998,12 +1991,11 @@ function settingsFields(d, x) {
     x.append(
       el("p", {
         className: "dim",
-        textContent:
-          "It has not said what settings it takes. It may not be running. Check its status and try again.",
+        textContent: "Settings unavailable. The device may not be running.",
       }),
     );
   } else if (!fields.some((f) => f.kind !== "note")) {
-    x.append(el("p", { className: "dim", textContent: "This device has nothing to set." }));
+    x.append(el("p", { className: "dim", textContent: "No settings." }));
   }
   for (const f of fields) {
     const now = f.id in d.settings ? d.settings[f.id] : f.default;
@@ -2051,7 +2043,7 @@ function settingsFields(d, x) {
         autocomplete: "off",
       });
       if (secret) {
-        field.placeholder = d.secretsSet.includes(f.id) ? "Set. Leave blank to keep it." : "Not set";
+        field.placeholder = d.secretsSet.includes(f.id) ? "Saved. Leave blank to keep." : "Not set";
       }
       if (number && f.min !== undefined) field.min = f.min;
       if (number && f.max !== undefined) field.max = f.max;
@@ -2112,7 +2104,7 @@ function openAdd(storeId) {
         if (st.advance.length) {
           facts.append(
             el("li", {
-              textContent: "The store lets it, without asking you: " + st.advance.map((w) =>
+              textContent: "Allowed by the store without asking: " + st.advance.map((w) =>
                 w.charAt(0).toLowerCase() + w.slice(1)
               ).join("; ") + ".",
             }),
@@ -2121,15 +2113,15 @@ function openAdd(storeId) {
         if (!st.signed) {
           facts.append(
             el("li", {
-              textContent:
-                "This hub cannot check who published the store's list, so nothing is allowed in advance.",
+              textContent: "The store list is not signed, so nothing is allowed in advance.",
             }),
           );
         }
         for (const a of st.advises) {
           facts.append(
             el("li", {
-              textContent: (a.say === "no" ? "Its reviewers advise against " : "Its reviewers expect ") +
+              textContent:
+                (a.say === "no" ? "Not recommended by store reviewers: " : "Expected by store reviewers: ") +
                 a.about + ". " + a.why,
             }),
           );
@@ -2137,31 +2129,31 @@ function openAdd(storeId) {
         facts.append(
           el("li", {
             textContent: st.advance.length
-              ? "Before it reaches anything else, you are asked first."
-              : "Before it reaches anything, you are asked first.",
+              ? "Any other network access requires your approval."
+              : "All network access requires your approval.",
           }),
         );
         facts.append(
-          el("li", { textContent: "It can read its own folder, and no other file on this computer." }),
+          el("li", { textContent: "File access is limited to its own folder." }),
         );
         if (st.notes) facts.append(el("li", { textContent: st.notes }));
         const src = el("a", {
           href: st.source,
           target: "_blank",
           rel: "noopener noreferrer",
-          textContent: "its author's source",
+          textContent: "source code",
         });
-        facts.append(el("li", {}, "Built by the store from ", src, "."));
+        facts.append(el("li", {}, "Built by the store from its ", src, "."));
       } else for (const n of r.notes) facts.append(el("li", { textContent: n }));
       rest.append(facts);
-      input(rest, "devName", "What do you call this device?", {
+      input(rest, "devName", "Name", {
         value: title,
         required: true,
         maxLength: 80,
       });
-      rest.append(el("label", { textContent: "Which screens may use it?" }));
+      rest.append(el("label", { textContent: "Screens" }));
       if (!r.screens.length) {
-        rest.append(el("p", { className: "dim", textContent: "No screen on this hub works with it yet." }));
+        rest.append(el("p", { className: "dim", textContent: "No screen on this hub supports it." }));
       }
       for (const sc of r.screens) {
         rest.append(
@@ -2176,14 +2168,14 @@ function openAdd(storeId) {
       rest.append(
         el("p", {
           className: "help",
-          textContent: "You can change this later under Screens. It starts out listening.",
+          textContent: "You can change this later. New devices start read-only.",
         }),
       );
       confirmField(rest);
       const back = el("button", {
         type: "button",
         className: "small quiet",
-        textContent: "Choose something else",
+        textContent: "Back",
         style: "margin-top:12px",
       });
       back.onclick = () => {
@@ -2202,7 +2194,7 @@ function openAdd(storeId) {
 
     if (storeId) {
       // Chosen in the catalog: get it from the store, check it, and show what it is.
-      pick.append(el("p", { className: "dim", textContent: "Getting it from the store and checking it" }));
+      pick.append(el("p", { className: "dim", textContent: "Downloading and verifying…" }));
       call("/admin/api/store/fetch", { id: storeId }).then((got) => {
         if (!got.ok) return say("dlgMsg", got.message, "bad");
         chosen(got);
@@ -2210,21 +2202,21 @@ function openAdd(storeId) {
       return;
     }
     // From a file.
-    pick.append(el("h3", { textContent: "From a file", style: "font-size:15px;margin:18px 0 0" }));
+    pick.append(el("h3", { textContent: "Install from file", style: "font-size:15px;margin:18px 0 0" }));
     pick.append(
       el("p", {
         className: "help",
         textContent:
-          "Many devices have a Bitfocus Companion module that is not in the store. Download that module's package (a file ending in .tgz) and choose it here.",
+          "Select a Bitfocus Companion module package (.tgz) to install a module that is not in the store.",
       }),
     );
-    const file = input(pick, "pkg", "The module's package", {
+    const file = input(pick, "pkg", "Module package", {
       type: "file",
       accept: ".tgz,.tar.gz,application/gzip",
     });
     file.onchange = async () => {
       if (!file.files[0]) return;
-      say("dlgMsg", "Checking the package");
+      say("dlgMsg", "Verifying package…");
       let r;
       try {
         r = await (await fetch("/admin/api/module/inspect", {
@@ -2233,20 +2225,20 @@ function openAdd(storeId) {
           body: file.files[0],
         })).json();
       } catch {
-        r = { ok: false, message: "The hub could not read that file." };
+        r = { ok: false, message: "Could not read the file." };
       }
       if (!r.ok) return say("dlgMsg", r.message, "bad");
       chosen(r);
     };
   }, async () => {
-    if (!seen) return { ok: false, message: "Choose something first." };
+    if (!seen) return { ok: false, message: "Select a package first." };
     const r = await sureCall("/admin/api/module/add", {
       upload: seen.upload,
       name: $("devName").value,
       screens: [...document.querySelectorAll(".useScreen:checked")].map((i) => i.value),
     });
     if (r.ok) {
-      say("driversMsg", r.name + " was added. Fill in its settings next.", "ok");
+      say("driversMsg", "Added " + r.name + ". Next, fill in its settings.", "ok");
       // Adding ends on the new device's own address, where everything else about it is.
       history.replaceState(null, "", deviceAt(r.id));
       showPlace();
@@ -2278,11 +2270,11 @@ $("policy").addEventListener("submit", (e) => {
   if ($("ps").checked) {
     policy.superuser = { kind: $("sk").value, minLength: Number($("sl").value), mixed: $("pm").checked };
   }
-  ask("Change how people sign in", (b) => {
+  ask("Change sign-in requirements", (b) => {
     b.append(
       el("p", {
         className: "dim",
-        textContent: "This applies the next time someone chooses a PIN or password. Nobody is signed out.",
+        textContent: "Applies the next time someone sets a PIN or password. No one is signed out.",
       }),
     );
     confirmField(b);
