@@ -948,13 +948,54 @@ function drawAgent(a) {
         ask(
           "The agent's model",
           (x) => {
-            input(x, "agentModel", "Model", {
+            // The models this key can use, asked of the model's service by the hub. Until the answer is
+            // in, and whenever there is none, the one in use now is what is shown.
+            const OTHER = "\u0000other";
+            const option = (value, textContent) => el("option", { value, textContent });
+            const sel = el("select", { id: "agentModel" }, option(a.model, a.model));
+            const other = el("input", {
+              id: "agentModelOther",
               value: a.model,
-              required: true,
+              hidden: true,
               autocapitalize: "off",
               spellcheck: false,
+              placeholder: "The model's name, as its service spells it",
             });
-            input(x, "agentAddress", "Where it is asked", {
+            other.setAttribute("aria-label", "The model's name");
+            const note = el("p", { className: "help", id: "agentModelNote" });
+            x.append(el("label", { htmlFor: "agentModel", textContent: "Model" }), sel, other, note);
+            const typed = (on) => {
+              other.hidden = !on;
+              other.required = on;
+              other.style.marginTop = sel.hidden ? "" : "8px";
+            };
+            sel.onchange = () => {
+              typed(sel.value === OTHER);
+              if (sel.value === OTHER) other.focus();
+            };
+            note.textContent = "Asking which models this key can use.";
+            call("/admin/api/agent/models", {}).then((r) => {
+              if (!sel.isConnected) return;
+              if (!r.ok) {
+                // No list to choose from: the name is typed, as before.
+                sel.hidden = true;
+                typed(true);
+                note.textContent = (r.message || "The models could not be listed.") +
+                  " You can type its name.";
+                return;
+              }
+              sel.innerHTML = "";
+              if (!r.models.some((m) => m.id === a.model)) {
+                sel.append(option(a.model, a.model + " (in use now)"));
+              }
+              for (const m of r.models) {
+                sel.append(option(m.id, m.name === m.id ? m.id : m.name + " (" + m.id + ")"));
+              }
+              sel.append(option(OTHER, "Another model"));
+              sel.value = a.model;
+              note.textContent = "";
+            });
+            const address = input(x, "agentAddress", "Where it is asked", {
               value: a.address,
               required: true,
               autocapitalize: "off",
@@ -967,11 +1008,22 @@ function drawAgent(a) {
                   "The key is sent to this address with everything the agent is asked. Change it only to somewhere you trust with both.",
               }),
             );
-            confirmField(x);
+            // Choosing a model hands out nothing. Sending the key somewhere else does, and is confirmed.
+            address.oninput = () => {
+              const moved = address.value.trim().replace(/\/+$/, "") !== a.address;
+              const field = $("confirm");
+              if (moved && !field) confirmField(x);
+              else if (!moved && field) {
+                x.querySelector('label[for="confirm"]')?.remove();
+                field.remove();
+              }
+            };
           },
           () =>
             sureCall("/admin/api/agent/set", {
-              model: $("agentModel").value,
+              model: $("agentModel").hidden || $("agentModelOther").required
+                ? $("agentModelOther").value
+                : $("agentModel").value,
               address: $("agentAddress").value,
             }),
         ),

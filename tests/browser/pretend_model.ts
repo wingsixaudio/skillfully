@@ -8,6 +8,16 @@ const heard: { key: string | null; text: string }[] = [];
 Deno.serve(
   { hostname: "127.0.0.1", port, onListen: () => console.log(`MODEL listening on ${port}`) },
   async (req) => {
+    // Asked which models it has, it has two.
+    if (req.method === "GET" && new URL(req.url).pathname === "/v1/models") {
+      return Response.json({
+        data: [
+          { type: "model", id: "pretend-large-2", display_name: "Pretend Large 2" },
+          { type: "model", id: "pretend-small-2", display_name: "Pretend Small 2" },
+        ],
+        has_more: false,
+      });
+    }
     if (req.method === "GET") {
       return Response.json({
         asked: heard.length,

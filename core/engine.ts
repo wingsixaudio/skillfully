@@ -19,7 +19,7 @@ import type { Agent } from "./agent.ts";
 import { look, type Looking, toolsFor } from "./agent_tools.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { type Log, newId } from "./log.ts";
-import { askModel, type Message, ModelError, type ModelTuning } from "./model.ts";
+import { askModel, listModels, type Message, ModelError, type ModelTuning, type Offered } from "./model.ts";
 import type { Screens } from "./screens.ts";
 
 export interface EngineTuning extends ModelTuning {
@@ -387,6 +387,49 @@ export class Engine {
       messages.push({ role: "user", content: results });
     }
     return failed("too_much", "It kept looking and did not come to an answer.", maxSteps);
+  }
+
+  /**
+   * The models the agent's key may use, as its model's service lists them, for a superuser choosing one.
+   * The key is sent where it is already sent, and the asking is on the record.
+   */
+  async models(
+    by: Person,
+  ): Promise<{ ok: true; models: Offered[] } | { ok: false; code: string; message: string }> {
+    const { agent, log } = this.deps;
+    const key = agent.keyForChoosing();
+    if (!key) {
+      return {
+        ok: false,
+        code: "no_key",
+        message: "Set its key first, and the models that key can use are listed here.",
+      };
+    }
+    const note = (data: Record<string, unknown>) =>
+      log.append({
+        type: "skillfully.agent.models",
+        source: "core",
+        subject: agent.about().person?.id,
+        actor: by.id,
+        via: "admin",
+        data,
+      });
+    try {
+      const models = await listModels(
+        { address: agent.about().address, key },
+        this.#stop.signal,
+        this.tuning,
+      );
+      note({ found: models.length });
+      return { ok: true, models };
+    } catch (err) {
+      const code = err instanceof ModelError ? err.code : "broken";
+      const message = err instanceof ModelError
+        ? err.message
+        : "The hub could not ask which models there are.";
+      note({ code });
+      return { ok: false, code, message };
+    }
   }
 
   /** Stop whatever is being answered, and wait for it to end. */
