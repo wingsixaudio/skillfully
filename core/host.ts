@@ -15,7 +15,8 @@ import type {
 } from "../contract/mod.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { type Ask, classify, covered, declared } from "./asks.ts";
-import { type Log, newId } from "./log.ts";
+import { type Log, type LogEntry, newId } from "./log.ts";
+import { Moves } from "./travel.ts";
 import {
   type Held,
   type PluginGateway,
@@ -50,6 +51,10 @@ export interface Tuning {
   cpuWindowMs?: number;
   /** Where the runtime notes what this plugin tries to use. With it, the hub can ask a superuser about each. */
   auditPath?: string;
+  /** How long a value is still before its move is over and written to the log. */
+  restMs?: number;
+  /** A move that goes on longer than this is written and begun again. */
+  longestMoveMs?: number;
 }
 
 /** What the hub holds for one driver: what was chosen for it, what it was allowed, and what it was refused. */
@@ -59,6 +64,8 @@ export interface HeldByHub extends Held {
 }
 
 interface Pending {
+  /** A later step of a move already under way: it is written with the move, not on its own. */
+  folded?: boolean;
   value: Value;
   ctx: SetContext & { traceid: string };
   superseded: number;
@@ -144,6 +151,31 @@ export class PluginHost {
     this.mode = held.mode;
     this.granted = held.granted;
     this.#denied = held.denied ?? [];
+    this.#moves = new Moves({
+      restMs: this.tuning.restMs ?? 500,
+      longestMs: this.tuning.longestMoveMs ?? 5000,
+      write: (move) => {
+        const board = move.hand.via === "board";
+        this.log.append({
+          type: board ? "skillfully.state.moved" : "skillfully.command.moved",
+          source: this.#source,
+          subject: `${this.id}:${move.key}`,
+          actor: move.hand.actor,
+          via: move.hand.via,
+          traceid: move.traceid,
+          parentid: move.parentid,
+          data: {
+            key: move.key,
+            from: move.from,
+            value: move.value,
+            ...(move.requested !== undefined ? { requested: move.requested, adjusted: !!move.adjusted } : {}),
+            steps: move.steps,
+            ...(board ? {} : { overtaken: move.overtaken }),
+            ms: Math.round(move.lastAt - move.startedAt),
+          },
+        });
+      },
+    });
     // What its manifest asks for and nobody has answered yet is a question, like anything it tries later.
     for (const grant of manifest.permissions?.network ?? []) {
       if (!this.granted.includes(grant) && !this.#denied.includes(grant)) {
@@ -282,7 +314,7 @@ export class PluginHost {
   }
 
   /** Write an entry that a plugin caused directly. Budgeted, so a plugin cannot fill the log. */
-  #plog(input: Parameters<Log["append"]>[0]): void {
+  #plog(input: Parameters<Log["append"]>[0]): LogEntry | undefined {
     const now = Date.now();
     this.#logTokens = Math.min(
       LOG_BURST,
@@ -294,8 +326,11 @@ export class PluginHost {
       return;
     }
     this.#logTokens--;
-    this.log.append(input);
+    return this.log.append(input);
   }
+
+  /** Values on the move: written as their first step and where they came to rest. See travel.ts. */
+  #moves: Moves;
 
   #onMessage(m: Exclude<FromPlugin, Hello>): void {
     this.#lastHeard = Date.now();
@@ -365,15 +400,30 @@ export class PluginHost {
       });
     }
     const keys = Object.keys(atDevice);
-    if (keys.length) {
+    const atBoard = { via: "board" };
+    const one = keys.length === 1 && !full && typeof atDevice[keys[0]].value === "number";
+    if (one && this.#moves.continues(keys[0], atBoard)) {
+      // A fader being ridden at the desk: a later step of a move that is already in the log.
+      this.#moves.step(keys[0], atDevice[keys[0]].value);
+    } else if (keys.length) {
+      for (const key of keys) this.#moves.rest(key);
       // One entry for one message, however many values moved: a scene recall is one event, not 1,500.
-      this.#plog({
+      const entry = this.#plog({
         type: "skillfully.state.changed",
         source: this.#source,
         subject: keys.length === 1 ? `${this.id}:${keys[0]}` : this.id,
         via: "board",
         data: { count: keys.length, changes: atDevice, ...(full ? { foundBy: "resync" } : {}) },
       });
+      if (one && entry) {
+        this.#moves.begin(keys[0], atBoard, {
+          traceid: entry.traceid,
+          parentid: entry.id,
+          from: atDevice[keys[0]].before,
+          value: atDevice[keys[0]].value,
+          startedAt: performance.now(),
+        });
+      }
     }
     if (full) {
       for (const key of [...this.state.keys()]) if (!(key in values)) this.state.delete(key);
@@ -492,6 +542,10 @@ export class PluginHost {
       for (const [key, item] of items) {
         set[key] = item.value;
         item.sentAt = performance.now();
+        // A later step of a move this hand already has under way is written with the move.
+        // Only a number is a thing that moves. A switch turned on and off again was on, and the log says so.
+        item.folded = typeof item.value === "number" && this.#moves.continues(key, item.ctx);
+        if (item.folded) continue;
         item.sentId = this.log.append({
           type: "skillfully.command.sent",
           source: "core",
@@ -561,17 +615,34 @@ export class PluginHost {
         this.state.set(key, value);
         if (before !== value) changed[key] = value;
         const adjusted = value !== item.value;
-        this.log.append({
-          ...base,
-          type: "skillfully.command.confirmed",
-          data: { key, requested: item.value, value, before, adjusted, ms },
-        });
+        if (item.folded && this.#moves.has(key)) {
+          this.#moves.step(key, value, item.value, adjusted, item.superseded);
+        } else {
+          const first = this.log.append({
+            ...base,
+            type: "skillfully.command.confirmed",
+            data: { key, requested: item.value, value, before, adjusted, ms },
+          });
+          if (typeof value === "number") {
+            this.#moves.begin(key, item.ctx, {
+              traceid: item.ctx.traceid,
+              parentid: first.id,
+              from: before,
+              value,
+              requested: item.value,
+              adjusted,
+              startedAt: item.sentAt ?? performance.now(),
+            });
+          } else this.#moves.rest(key);
+        }
         item.resolve({ ok: true, superseded: false, value, requested: item.value, adjusted });
       } else {
         // The contract says every value is answered exactly once. No answer is a broken plugin.
         const error = errors[key] && !(key in values)
           ? errors[key]
           : { code: "internal", message: "the plugin did not give one clear answer for this value" };
+        // What went wrong is written in full, after the move it ended.
+        this.#moves.rest(key);
         this.log.append({
           ...base,
           type: "skillfully.command.failed",
@@ -597,6 +668,7 @@ export class PluginHost {
 
   #failItems(items: Map<string, Pending>, code: string, message: string): void {
     for (const [key, item] of items) {
+      this.#moves.rest(key);
       this.log.append({
         type: "skillfully.command.failed",
         source: "core",
@@ -831,6 +903,7 @@ export class PluginHost {
 
   #onExit(info: { code: number; expected: boolean; stderr: string }): void {
     this.#proc = undefined;
+    this.#moves.restAll();
     const held = this.status === "stopped" || this.status === "quarantined";
     if (!held) this.status = "down";
     if (this.#inflight) {
@@ -866,6 +939,7 @@ export class PluginHost {
     if (mode === this.mode) return;
     const before = this.mode;
     this.mode = mode;
+    this.#moves.restAll();
     this.log.append({
       type: "skillfully.plugin.mode",
       source: "core",
@@ -895,6 +969,7 @@ export class PluginHost {
 
   async stop(): Promise<void> {
     this.status = "stopped";
+    this.#moves.restAll();
     clearInterval(this.#ticker);
     clearInterval(this.#watchdog);
     clearTimeout(this.#restartTimer);

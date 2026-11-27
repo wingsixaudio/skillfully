@@ -409,6 +409,18 @@ happens whole or not at all, and data in a shape newer than the hub knows is ref
 message. It is shape 1 and there are no steps yet. This is here before the first hub is in anyone's hands,
 because afterwards is too late to add it cleanly. `core/shape.ts` says how to add a step.
 
+**The log says where a value went, not every place it passed through.** A fader being dragged is thirty
+changes a second, and each was two log entries. The log is there to say who changed what, from what to what,
+when, and what went wrong, for a person or an agent asking afterwards. Nobody asking that needs the forty
+positions in between. So a move is written as its first step, in full and at once, and one closing entry when
+the value has been still for half a second: where it started, where it rested, how many steps reached the
+device, how many were overtaken, and how long it took. The first step is written as it happens so that a hub
+that stops mid-move still has a record that it began. Only steps by the same person through the same screen
+are one move. Anyone else touching the value, a failure, a switch to watched-only or the device stopping ends
+it at once, and what ended it is written in full after it. A move longer than five seconds is written and
+begun again, so the log is never far behind. Actions are never folded: every press counts. A fader ridden at
+the desk is written the same way. What screens are told has not changed: every step still reaches every phone.
+
 **A device is paced from its first command, not by a clock.** A device is still sent commands no faster than
 it said it can take them. But the first change after a quiet moment goes at once and the pacing starts from
 it, so a press is not held for the rest of a tick it had no part in.
@@ -419,11 +431,11 @@ was the simplest thing and grew with the number of documents times the number of
 
 ## Open, and worth deciding before the next stage
 
-- **How long the log is kept.** It is append-only and nothing is removed, and a fader being moved writes sixty
-  entries a second, about 700 bytes each. A year is several gigabytes. Two things would hold it down without
-  giving up the record: write a fader's travel as what it started at and what it ended at, with how many steps
-  in between, and not as every step; and start a new log file each month, keeping older months as files that
-  can be moved off the hub. Neither is done, because both change what the log promises.
+- **How long the log is kept.** It is append-only and nothing is removed. Now that a move is written as two or
+  three entries and not sixty a second, it grows by what people do, not by how long a thumb is down, and a
+  year is far smaller than it was (`docs/performance.md` has the measure). It still has no end. Starting a new
+  log file each month, with older months as files that can be moved off the hub, would give it one. Not done:
+  it is no longer pressing, and it touches every reader of the log.
 - **Screens say which values they are showing.** Today a phone is sent every value it may see. On a large
   board that is a megabyte to show a few dozen. It needs a message in the contract.
 
