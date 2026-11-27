@@ -38,11 +38,19 @@ class Lamp extends InstanceBase {
 			off: { name: 'Turn off', options: [], callback: async () => this.send('off') },
 			level: {
 				name: 'Set level',
-				options: [{ type: 'number', id: 'level', label: 'Level', default: 50, min: 0, max: 100 }],
+				options: [
+					{ type: 'static-text', id: 'about', label: 'About', value: 'Full is <i>100</i>.' },
+					{ type: 'number', id: 'level', label: 'Level', default: 50, min: 0, max: 100 },
+				],
 				callback: async (action) => this.send(`level ${Number(action.options.level)}`),
 			},
 			snoop: { name: 'Try to reach past the sandbox', options: [], callback: async () => this.snoop() },
-			pair: { name: 'Pair with the lamp', options: [], callback: async () => this.pair() },
+			// Its only option is a note, as a module's pairing action often has: nothing to fill in.
+			pair: {
+				name: 'Pair with the lamp',
+				options: [{ type: 'static-text', id: 'info', label: 'Information', value: 'The lamp blinks <b>twice</b> when it is paired.' }],
+				callback: async () => this.pair(),
+			},
 			lookup: { name: 'Ask about the computer, the way libraries do', options: [], callback: async () => this.lookup() },
 			'bad name!': { name: 'An action whose id a key cannot hold', options: [], callback: async () => {} },
 		})

@@ -445,6 +445,11 @@ async def main():
             if (await reading.inner_text()).strip() == "on": break
             await owner.wait_for_timeout(100)
         check("the device added a minute ago can be used from Controls", (await reading.inner_text()).strip() == "on", await reading.inner_text())
+        pair_row = cf.locator(".row", has_text="generic/action/pair")
+        check("an action whose only option is a note is a plain button", await pair_row.get_by_role("button", name="Do it").count() == 1 and await pair_row.get_by_role("button", name="Options").count() == 0, await pair_row.inner_text())
+        level_row = cf.locator(".row", has_text="generic/action/level")
+        await level_row.get_by_role("button", name="Options").click()
+        check("a note among an action's options is read, not filled in", "Full is 100." in await level_row.locator(".opts .note").inner_text() and await level_row.locator(".opts input").count() == 1, await level_row.locator(".opts").inner_text())
         if shots: await owner.screenshot(path=f"{shots}/8-controls-lamp.png", full_page=True)
 
         # --- Canvas: screens put together from JSON, by a person or by whoever can write a file ---
