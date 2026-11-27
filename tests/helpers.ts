@@ -1,4 +1,4 @@
-import { type Hub, type PluginConfig, startHub } from "../core/hub.ts";
+import { type Hub, type HubOptions, type PluginConfig, startHub } from "../core/hub.ts";
 import type { DriverChoices } from "../core/devices.ts";
 import type { PluginHost } from "../core/host.ts";
 import type { LogEntry } from "../core/log.ts";
@@ -38,8 +38,12 @@ export interface TestHub extends Hub {
 }
 
 /** Start a claimed hub with these plugins, plus the one-fader screen so a test phone has something to connect as. */
-export async function hubWith(plugins: PluginConfig[], dbPath = ":memory:"): Promise<TestHub> {
-  const hub = await startHub({ dbPath, plugins: [...plugins, { dir: FADER }] });
+export async function hubWith(
+  plugins: PluginConfig[],
+  dbPath = ":memory:",
+  more: Partial<HubOptions> = {},
+): Promise<TestHub> {
+  const hub = await startHub({ dbPath, plugins: [...plugins, { dir: FADER }], ...more });
   await [...hub.hosts.values()][0]?.whenReady();
   const claimed = await hub.accounts.claim(hub.accounts.claimCode, "Owner", OWNER_PIN, "test");
   if (!claimed.ok) throw new Error(claimed.message);

@@ -808,9 +808,43 @@ function applyConfig(title, list, approve, okText) {
  * The agent: who it is, the key it reaches a model with, and whether it is on. The key goes one way. Once
  * kept it is never shown again, here or anywhere.
  */
+// Asking the agent something. It stays put while the rest of the card is drawn again, so a question
+// being typed and an answer being read are not swept away.
+$("agentAsk").onsubmit = async (e) => {
+  e.preventDefault();
+  const question = $("agentQuestion").value.trim();
+  if (!question) return;
+  const go = $("agentAskGo");
+  go.disabled = true;
+  $("agentAnswer").hidden = false;
+  $("agentSaid").className = "dim";
+  $("agentSaid").textContent = "Looking…";
+  $("agentLookedAt").textContent = "";
+  $("agentLooked").innerHTML = "";
+  const r = await call("/admin/api/agent/ask", { question });
+  go.disabled = false;
+  // What it says is shown as words, never as a page: it is a model's answer about other people's data.
+  $("agentSaid").className = r.ok ? "said" : "status bad";
+  $("agentSaid").textContent = r.ok
+    ? r.answer + (r.cut ? " (It ran out of room before it finished.)" : "")
+    : r.message || "The hub could not ask it.";
+  if (!r.ok) return;
+  $("agentLookedAt").textContent = r.looked.length
+    ? "To answer, it looked at:"
+    : "It answered without looking at anything.";
+  for (const words of r.looked) $("agentLooked").append(el("li", { textContent: words }));
+  $("agentLooked").append(
+    el("li", {
+      textContent: "Its model was asked " + (r.steps === 1 ? "once" : r.steps + " times") + ", using " +
+        (r.tokens.in + r.tokens.out).toLocaleString() + " tokens.",
+    }),
+  );
+};
+
 function drawAgent(a) {
   const box = $("agent");
   if (!box || !a) return;
+  $("agentAsk").hidden = !a.ready;
   box.innerHTML = "";
   const line = (label, words, ...buttons) =>
     box.append(
@@ -868,6 +902,13 @@ function drawAgent(a) {
       ? "Its roles: " + named.join(", ") + ". It can see and do what they allow, and nothing else."
       : "It has no roles yet, so it can see and do nothing.",
     el("a", { className: "open", href: "/admin/people", textContent: "Its roles are set under People" }),
+  );
+  line(
+    "What it can see",
+    a.sees.length
+      ? a.sees.join(", ") +
+        ". As much of each as its roles allow. What it looks at is sent to its model when it is asked something."
+      : "No devices. Give it a role that can see some, and let that role's screens use them.",
   );
   const setKey = () =>
     ask(a.keySet ? "Change the agent's key" : "Set the agent's key", (x) => {
@@ -986,7 +1027,7 @@ function drawAgent(a) {
       className: "help",
       textContent: !a.on && a.needs
         ? a.needs
-        : "This is who the agent is. Nothing can be asked of it yet: that is the next thing to be built.",
+        : "For now it can only look and answer. It cannot change anything.",
     }),
   );
 }

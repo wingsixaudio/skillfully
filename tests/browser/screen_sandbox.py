@@ -704,6 +704,36 @@ async def main():
         robin = owner.locator("#people .item", has=owner.locator("h3", has_text="Robin"))
         check("under People it is one of the team, marked as the agent, with roles to give and no way to sign in", "Agent" in await robin.inner_text() and await robin.get_by_role("button", name="Roles").count() == 1 and await robin.get_by_role("button", name="Invite").count() == 0 and await robin.get_by_role("button", name="Reset sign-in").count() == 0, await robin.inner_text())
 
+        # --- Asking it something. It thinks with a pretend model on this computer. ---
+        model = f"http://127.0.0.1:{os.environ.get('MODEL_PORT', '7009')}"
+        heard = lambda: json.loads(urllib.request.build_opener(urllib.request.ProxyHandler({})).open(model + "/heard").read())
+        await place("Hub"); await owner.wait_for_selector("#agentStatus")
+        told = await owner.locator("#secAgent").inner_text()
+        check("on, it can be asked something, and the card says it can see no devices yet and how to change that", await owner.locator("#agentAsk").is_visible() and "No devices. Give it a role" in told, told)
+        await owner.click("#agentModelSet"); await owner.fill("#agentAddress", model); await ok_dialog()
+        await owner.wait_for_function("(m) => document.querySelector('#secAgent').innerText.includes(m.replace('http://', ''))", arg=model)
+        await owner.fill("#agentQuestion", "Is anything not working?"); await owner.click("#agentAskGo")
+        await owner.locator("#agentSaid.said").wait_for(timeout=15000)
+        check("with no roles it looks, sees nothing, and says so", await owner.locator("#agentSaid").inner_text() == "I cannot see any devices yet." and "Listed the devices: none in reach" in await owner.locator("#agentLooked").inner_text(), await owner.locator("#agentAnswer").inner_text())
+        # Given a musician's role, it sees what a musician with no mix of their own sees: the names on the board.
+        await place("People"); await owner.wait_for_selector("#people .item")
+        await robin.get_by_role("button", name="Roles").click()
+        await owner.locator("#dlgBody label.check", has_text="Musician").locator("input").check()
+        await ok_dialog()
+        await place("Hub"); await owner.locator("#secAgent", has_text="What it can see").wait_for()
+        await owner.wait_for_function("() => /What it can see\\s+Simulated board\\./.test(document.querySelector('#secAgent').innerText)")
+        check("given a role, the card names the devices it can now see", True)
+        await owner.fill("#agentQuestion", "Is anything not working?"); await owner.press("#agentQuestion", "Enter")
+        await owner.locator("#agentSaid.said", has_text="Simulated board").wait_for(timeout=15000)
+        answer = await owner.locator("#agentAnswer").inner_text()
+        check("asked again, it answers from what it can see, and the page says what it looked at and what that cost", "I can see Simulated board (48 values). Nothing looks wrong." in answer and "Listed the devices: Simulated board" in answer and "Its model was asked 2 times, using 1,880 tokens." in answer, answer)
+        await owner.fill("#agentQuestion", "And now?")
+        await owner.wait_for_timeout(4600)
+        check("the answer and a question being typed stay put while the page keeps itself current", "Nothing looks wrong." in await owner.locator("#agentSaid").inner_text() and await owner.input_value("#agentQuestion") == "And now?")
+        h = heard()
+        check("its model heard the key in the one place it belongs, and no person's name at all", h["asked"] == 4 and set(h["keys"]) == {secret_key} and secret_key not in h["text"] and "Sam" not in h["text"] and "Evan" not in h["text"], str(h["keys"]))
+        if shots: await owner.screenshot(path=f"{shots}/13-agent-asked.png", full_page=True)
+
         check("no page errors", not unexpected, "; ".join(unexpected))
         await b.close()
 

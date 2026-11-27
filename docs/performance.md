@@ -76,6 +76,26 @@ Seven changes did that:
 Saving a document also told every phone on the screen about every document the screen keeps. It now tells them
 about the one that changed (`doc`, see the contract).
 
+## The agent, looking
+
+The agent answers questions by looking through what the hub holds, inside the hub's own process. Measured on a
+33,024-value board with `deno run -A tools/bench/agent.ts`. "Held" is the longest everything else on the hub
+was kept waiting.
+
+| What it does                                   | Held, before | Held, now | Takes  |
+| ---------------------------------------------- | ------------ | --------- | ------ |
+| List the devices and what each holds           | 40 ms        | 7 ms      | 9 ms   |
+| Search a device's values by words              | 74 ms        | 8 ms      | 22 ms  |
+| Read every value of one kind, by a star        | 17 ms        | 8 ms      | 30 ms  |
+| Read two values by name                        | under 0.1 ms | the same  | 0.1 ms |
+| Read the log, going back five thousand entries | 10 ms        | 5 ms      | 28 ms  |
+
+Before, each went through everything in one go. Now what kind of value each name is gets worked out once and
+kept, which screens reach a device is worked out once for each look and not once for each value, and whatever
+goes through a lot stops every few thousandths of a second to let everything else have a turn. It takes a
+little longer and holds nothing up. The model's own thinking is seconds and happens somewhere else, so none of
+this is what a person waits for.
+
 ## What is still true
 
 These are not fixed. They are in the order they would bite.
@@ -102,3 +122,5 @@ These are not fixed. They are in the order they would bite.
 - More than two devices at once, or any Companion module under load.
 - A small computer such as a Raspberry Pi. Disk writes there are slower, which is what change 2 is for.
 - More than 66 phones.
+- The agent against a real model. Every test uses a pretend one on the same computer, so how long a real
+  answer takes, and what it costs, is not known yet.

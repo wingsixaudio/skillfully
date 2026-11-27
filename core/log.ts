@@ -144,26 +144,44 @@ export class Log {
 
   /** Read entries, oldest first. */
   read(
-    q: { type?: string; traceid?: string; afterSeq?: number; limit?: number; newest?: boolean } = {},
+    q: {
+      type?: string;
+      traceid?: string;
+      afterSeq?: number;
+      beforeSeq?: number;
+      limit?: number;
+      newest?: boolean;
+    } = {},
   ): LogEntry[] {
     // The newest few, with nothing else asked: answered from memory. Every screen that shows what just
     // happened asks this after every change, and reading and unpacking a thousand rows each time was
     // the most expensive thing the hub did.
     const limit = Math.min(Math.max(q.limit ?? 200, 1), 5000);
-    if (q.newest && !q.type && !q.traceid && q.afterSeq === undefined && limit <= TAIL) {
+    if (
+      q.newest && !q.type && !q.traceid && q.afterSeq === undefined && q.beforeSeq === undefined &&
+      limit <= TAIL
+    ) {
       return this.#tail.slice(-limit);
     }
     return this.#query(q);
   }
 
   #query(
-    q: { type?: string; traceid?: string; afterSeq?: number; limit?: number; newest?: boolean },
+    q: {
+      type?: string;
+      traceid?: string;
+      afterSeq?: number;
+      beforeSeq?: number;
+      limit?: number;
+      newest?: boolean;
+    },
   ): LogEntry[] {
     const where: string[] = [];
     const args: (string | number)[] = [];
     if (q.type) (where.push("type = ?"), args.push(q.type));
     if (q.traceid) (where.push("traceid = ?"), args.push(q.traceid));
     if (q.afterSeq !== undefined) (where.push("seq > ?"), args.push(q.afterSeq));
+    if (q.beforeSeq !== undefined) (where.push("seq < ?"), args.push(q.beforeSeq));
     const limit = Math.min(Math.max(q.limit ?? 200, 1), 5000);
     const sql = `SELECT * FROM log ${where.length ? "WHERE " + where.join(" AND ") : ""}
                  ORDER BY seq ${q.newest ? "DESC" : "ASC"} LIMIT ${limit}`;

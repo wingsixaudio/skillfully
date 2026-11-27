@@ -36,7 +36,11 @@ hub=$!
 lamp_port=${LAMP_PORT:-7007}
 deno run --no-prompt --allow-net="127.0.0.1:$lamp_port" tests/browser/pretend_lamp.ts "$lamp_port" >"$data/lamp.log" 2>&1 &
 lamp=$!
-trap 'kill "$hub" "$lamp" "$store" 2>/dev/null || true; rm -rf "$data"' EXIT
+# A pretend model for the agent the test sets up, so no key and no real model are needed.
+model_port=${MODEL_PORT:-7009}
+deno run --no-prompt --allow-net="127.0.0.1:$model_port" tests/browser/pretend_model.ts "$model_port" >"$data/model.log" 2>&1 &
+model=$!
+trap 'kill "$hub" "$lamp" "$store" "$model" 2>/dev/null || true; rm -rf "$data"' EXIT
 
 # A new hub prints the code that claims it. Wait for it.
 code=""
@@ -51,4 +55,4 @@ if [ -z "$code" ]; then
   exit 1
 fi
 
-BROWSER="$browser" LAMP_PORT="$lamp_port" STORE_PORT="$store_port" python3 tests/browser/screen_sandbox.py "http://127.0.0.1:$port" "$code" ${2:+"$2"}
+BROWSER="$browser" LAMP_PORT="$lamp_port" STORE_PORT="$store_port" MODEL_PORT="$model_port" python3 tests/browser/screen_sandbox.py "http://127.0.0.1:$port" "$code" ${2:+"$2"}

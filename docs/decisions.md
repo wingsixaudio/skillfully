@@ -425,6 +425,48 @@ Where the model is can be changed, and since the key is sent there, only to an a
 or one on the hub's own computer. Making the agent, giving it a key, switching it on, letting it read the log
 and pointing it somewhere else each need the superuser's own PIN. Taking any of those away never does.
 
+**The agent's engine runs inside the hub, and the model is trusted with nothing.** A question goes to the
+agent's model with the tools it may ask for. The model asks to look at something, the hub looks on its behalf
+and tells it what it found, and so on until there is an answer. The model chooses what to ask for. It never
+chooses what it is told: that is decided by the hub, each time, in `core/agent_tools.ts`. For now every tool
+only reads: the devices, their values, and the log. A run is stopped after eight turns of the model or ninety
+seconds, and two questions are worked on at once at most. The engine speaks one way of asking a model, the
+Messages API, from one file (`core/model.ts`), so another way of asking is one more file and no change to the
+rest. The key is sent to the address a superuser chose and nowhere that address points on to: a redirect is
+refused.
+
+**The agent is never told more than the person asking may see.** What a run may look at is what the agent's
+own roles let it see, and of that, only what the person asking may see for themselves. An agent given the
+whole board does not become a way round the limits of a musician who is given one mix: asked by the musician,
+it sees one mix. A superuser already sees everything, so their questions are held only to the agent's own
+reach. Something out of reach is answered exactly as if it did not exist. The agent has no screen in front of
+it, so its reach is all its screens put together: for each screen its roles give it something on, the
+connections approved for that screen, as far as its abilities there go (`core/reach.ts`). It is not another
+way of being allowed something.
+
+**What the agent reads is data.** Names typed into equipment, messages from drivers and entries of the log go
+to the model as the result of a tool. What the hub itself says to the model is written by the hub and holds
+nothing a device, a plugin or another person wrote, and it is the same from the first turn to the last. That
+does not make a model immune to a name that gives orders. What makes it harmless is the rest: the model can
+ask only for the tools it was offered, each is checked against the run's reach when it is asked for, and
+asking for anything else is refused and written down. The hub's own code names no kind of device, so the
+examples in the tools' descriptions are made from the kinds of value the run can see.
+
+**People stay IDs, and names never leave the hub.** The model is told who is asking and who it is as IDs. The
+log it reads has IDs. It answers with IDs, and the hub puts names in their place on the way back: every name
+for a superuser, "you" and "someone else" for anyone else. Reading the log is a switch of the agent's own that
+starts off. With it on, the agent reads only entries about values and devices it can already see, and a person
+who asks comes by the log through the agent only if one of their own screens already shows it to them.
+
+**What a run did is in the log. What was said is not.** Under one trace: who asked and from where, each time
+the model was asked with how long it took and how many tokens it used, each thing looked at with how much came
+back, and how it ended, with the reason in words when it failed. Each of those is the agent's own entry, under
+its own ID. The question and the answer are not written there, and neither is anything that was read.
+
+**Looking through a large board takes turns.** Going through thirty thousand values to list what a device
+holds would keep everything else on the hub waiting. Whatever goes through a lot stops every few thousandths
+of a second and lets a fader move. `docs/performance.md` has the numbers.
+
 **A screen can say which values it is showing, and is then sent only those.** The hub holds every value of
 every device and decides what each phone is sent, so narrowing that can only be done by the hub: a screen
 could otherwise only ignore what had already crossed the wifi. A screen's manifest may say
@@ -524,6 +566,15 @@ was the simplest thing and grew with the number of documents times the number of
   They are out of the log and off the page, and they are not encrypted at rest.
 - **Parts of a module's settings form.** A setting that picks several things at once is not shown, and a
   module's rule for when to show a setting is ignored: every setting is always shown.
+- **The agent only looks.** It cannot change a value, press anything or write a canvas yet. Asking it is a box
+  on the Hub place, for superusers, with no conversation: each question starts from nothing. A place of its
+  own where anyone it is allowed to answer can talk to it, with a yes asked for whenever it wants to do
+  something, is next.
+- **Nothing limits what the agent spends.** Every use of its model is in the log with its tokens, and one
+  question is at most eight turns. There is no cap by the day or the month.
+- **Skills are not yet given to the agent.** A skill is text that teaches an agent one procedure, and the hub
+  loads them. The engine does not offer them to the model yet. When it does, a skill will be something the
+  agent can read, and never a way to reach more.
 - **An agent that guides a contributor.** Checking a plugin, proving a driver, reporting what it asks for and
   adding it are each one command. A skill that chains them, from an idea to a pull request on the store, is
   the intended way in for someone who has never contributed.

@@ -197,16 +197,15 @@ their open screens are disconnected and come back under the new rules or not at 
 
 ## Planned, not built
 
-| Piece                                    | What it would be                                                                                                                                                             |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Service**                              | A background program that uses capabilities the way a screen does: automation, scheduling, an agent's own process. Same `uses` rule, same driver-style sandbox               |
-| **Rule**                                 | "When this, do that" as data, switched on by a person                                                                                                                        |
-| **Screens described as data**            | A screen given as a description and drawn from trusted components, so an agent can author one without writing code. It would be one more screen, running in the same sandbox |
-| **Agent access**                         | A thin MCP server over the catalog and the log, so an agent sees what a screen can see and is held to a `uses` list like a screen is                                         |
-| **Install, update, rollback, uninstall** | Today plugins are folders the hub scans at start                                                                                                                             |
-| **A place for plugins to keep data**     | The team roster and saved mixes need somewhere to live. Screens cannot store anything yet                                                                                    |
-| **Abilities for skills**                 | A skill would declare abilities the same way a screen does, and an agent would get them through a role                                                                       |
-| **HTTPS**                                | Sign-in is unprotected on the network today                                                                                                                                  |
+| Piece                                    | What it would be                                                                                                                                                                                                    |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Service**                              | A background program that uses capabilities the way a screen does: automation, scheduling, an agent's own process. Same `uses` rule, same driver-style sandbox                                                      |
+| **Rule**                                 | "When this, do that" as data, switched on by a person                                                                                                                                                               |
+| **An agent from outside**                | The hub has an agent of its own, which looks and answers (`core/engine.ts`). Still planned: a way in for an agent that runs somewhere else, such as an MCP server, held to an account and its roles in the same way |
+| **Install, update, rollback, uninstall** | Today plugins are folders the hub scans at start                                                                                                                                                                    |
+| **A place for plugins to keep data**     | The team roster and saved mixes need somewhere to live. Screens cannot store anything yet                                                                                                                           |
+| **Abilities for skills**                 | A skill would declare abilities the same way a screen does, and an agent would get them through a role                                                                                                              |
+| **HTTPS**                                | Sign-in is unprotected on the network today                                                                                                                                                                         |
 
 See `docs/decisions.md` for what was decided, tested and left open, and `CONTRIBUTING.md` for how to write
 each kind of plugin.
