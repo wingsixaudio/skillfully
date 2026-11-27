@@ -347,3 +347,40 @@ Deno.test("asking the agent is an ability like any other: given by a role, on a 
   for (const p of [fader, controls, ask, later]) await p.close();
   await t.done();
 });
+
+Deno.test("a model that thinks before it speaks: its thinking goes back as it came, and nowhere else", async () => {
+  const THOUGHT = {
+    type: "thinking",
+    thinking: "They want to know what is connected. I should list the devices.",
+    signature: "EqQBCgIYAhIM-signed-by-the-service",
+  };
+  const HIDDEN = { type: "redacted_thinking", data: "b3BhcXVlIHRvIGV2ZXJ5b25l" };
+  const t = await withTalk((_sent, nth) =>
+    nth === 1
+      ? pieces([THOUGHT, HIDDEN, says("Let me look."), uses("devices")])
+      : pieces([THOUGHT, says("One board.")])
+  );
+  const { hub, model } = t;
+  const phone = await Phone.connect(hub, await t.member("Sam"), "ask");
+  phone.ask("What is connected?");
+  await until("it has answered", finished(phone));
+  assertEquals(phone.heard.at(-1).outcome, { type: "success" });
+  assertEquals(words(phone), "Let me look.One board.");
+  // The service will only take a turn back whole: the thinking with every piece of it, and its signature.
+  assertEquals(model.sent[1].body.messages[1].content.slice(0, 3), [THOUGHT, HIDDEN, {
+    type: "text",
+    text: "Let me look.",
+  }]);
+  // What it thought is not said to the person, and is not written down.
+  assert(!JSON.stringify(phone.heard).includes("I should list"));
+  assert(!JSON.stringify(hub.log.read({ limit: 5000 })).includes("I should list"));
+  // What is kept of the conversation is what was said. The next question carries no old thinking.
+  phone.ask("And now?");
+  await until("it has answered again", finished(phone, 2));
+  assertEquals(model.sent[2].body.messages.slice(0, 2), [
+    { role: "user", content: [{ type: "text", text: "What is connected?" }] },
+    { role: "assistant", content: [{ type: "text", text: "One board." }] },
+  ]);
+  await phone.close();
+  await t.done();
+});

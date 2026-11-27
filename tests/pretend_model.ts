@@ -88,6 +88,28 @@ export function pieces(content: unknown[], size = 4): Response {
         });
         if (at === 0) events.push({ type: "ping" });
       }
+    } else if (b.type === "thinking") {
+      // A model that thinks first: its thinking in pieces, then its signature, as the service sends them.
+      events.push({
+        type: "content_block_start",
+        index,
+        content_block: { type: "thinking", thinking: "", signature: "" },
+      });
+      for (let at = 0; at < b.thinking.length; at += 7) {
+        events.push({
+          type: "content_block_delta",
+          index,
+          delta: { type: "thinking_delta", thinking: b.thinking.slice(at, at + 7) },
+        });
+      }
+      events.push({
+        type: "content_block_delta",
+        index,
+        delta: { type: "signature_delta", signature: b.signature },
+      });
+    } else if (b.type !== "tool_use") {
+      // Anything else arrives whole.
+      events.push({ type: "content_block_start", index, content_block: b });
     } else {
       const json = JSON.stringify(b.input);
       const half = Math.ceil(json.length / 2);
