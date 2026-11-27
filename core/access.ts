@@ -16,10 +16,16 @@ const ALL: Pattern[] = [["**"]];
  * screen has been approved for. It never covers the hub's log, which is always asked for by name.
  */
 export const ANY = "any";
+/**
+ * In `uses` and in an ability's `allows`, this name stands for the documents the hub keeps for the screen:
+ * "read" to be given them, "write" to change them. An ability can name which, as `keys`.
+ */
+export const DOCUMENTS = "documents";
 /** Names that mean something to the hub itself, so no capability may take them. */
-export const RESERVED = ["log", ANY];
+export const RESERVED = ["log", ANY, DOCUMENTS];
+/** "any" is every kind of device. It never reaches the hub's log or a screen's documents: those are asked for by name. */
 const covers = (name: string, capability: string) =>
-  name === capability || (name === ANY && capability !== "log");
+  name === capability || (name === ANY && capability !== "log" && capability !== DOCUMENTS);
 
 export class Access {
   /** Capability to the patterns a person may read and may write. */

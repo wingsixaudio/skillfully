@@ -15,6 +15,7 @@ import type { SkillManifest } from "../contract/mod.ts";
 import { Accounts } from "./accounts.ts";
 import { adminApi } from "./admin.ts";
 import { Config } from "./config.ts";
+import { Documents } from "./documents.ts";
 import { Approvals } from "./approvals.ts";
 import { Capabilities, CAPABILITIES_DIR } from "./capabilities.ts";
 import { Devices, type DriverChoices } from "./devices.ts";
@@ -132,7 +133,14 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     note: (type, who, data) => log.append({ type, source: "core", ...who, data }),
   });
   registry.onChange((id, before, after) => config.recordChanged(id, before, after));
-  const screens: Screens = new Screens({ accounts, approvals, capabilities, devices, log });
+  const screens: Screens = new Screens({
+    accounts,
+    approvals,
+    capabilities,
+    devices,
+    documents: new Documents(dataDir),
+    log,
+  });
   const hosts = devices.hosts;
   const taken = (id: string) => hosts.has(id) || screens.all.has(id) || skills.has(id);
 

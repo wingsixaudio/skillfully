@@ -5,7 +5,8 @@
 // the signed-in person's roles go.
 
 import type { Ability, ScreenManifest, Value, Values } from "../contract/mod.ts";
-import { Access, ANY } from "./access.ts";
+import { Access, ANY, DOCUMENTS } from "./access.ts";
+import { Documents } from "./documents.ts";
 import type { Accounts, Person } from "./accounts.ts";
 import type { Approvals } from "./approvals.ts";
 import type { Capabilities } from "./capabilities.ts";
@@ -41,6 +42,8 @@ export class Screens {
       approvals: Approvals;
       capabilities: Capabilities;
       devices: Devices;
+      /** Where a screen's documents are kept. */
+      documents: Documents;
       log: Log;
     },
   ) {
@@ -216,10 +219,82 @@ export class Screens {
     return response;
   }
 
+  /**
+   * What a screen asks about its documents. A screen that did not say it uses documents, or a person none
+   * of whose abilities reach them, is told so and given nothing. Whatever the screen sends, a document is
+   * changed only by someone allowed to change that document, and the change is on the record with who made
+   * it. Never what was in it.
+   */
+  async #documents(
+    c: Connection,
+    m: { type?: string; id?: unknown; doc?: unknown; ref?: unknown },
+    via: string,
+  ): Promise<void> {
+    const { documents, log } = this.deps;
+    const ref = m.ref ?? null;
+    const mayWrite = (id: string) => c.access.canWrite(`${DOCUMENTS}/${id}`);
+    const given = async () =>
+      (await documents.list(c.screen.id)).filter((d) => c.access.canRead(`${DOCUMENTS}/${d.id}`)).map((
+        d,
+      ) => ({
+        ...d,
+        write: mayWrite(d.id),
+      }));
+    if (m.type === "docs") {
+      if (!c.access.sees(DOCUMENTS)) return tell(c.socket, { type: "docs", ref, ok: false, docs: [] });
+      // Whether this person could make a new one: asked of a name nothing has yet.
+      return tell(c.socket, { type: "docs", ref, ok: true, docs: await given(), create: mayWrite("new") });
+    }
+    const id = typeof m.id === "string" ? m.id : "";
+    const refuse = (message: string) => tell(c.socket, { type: "doc-ack", ref, id, ok: false, message });
+    const problem = Documents.problem(c.screen.id, m.id, m.type === "doc-put" ? m.doc : undefined);
+    if (problem) return refuse(problem);
+    if (!mayWrite(id)) {
+      log.append({
+        type: "skillfully.document.refused",
+        source: "core",
+        subject: `${c.screen.id}:${id}`,
+        actor: c.person.id,
+        via,
+      });
+      return refuse(`You are not allowed to change ${id} in ${c.screen.name}.`);
+    }
+    try {
+      if (m.type === "doc-put") await documents.put(c.screen.id, id, m.doc as Record<string, unknown>);
+      else await documents.remove(c.screen.id, id);
+    } catch (err) {
+      return refuse(String((err as Error).message).slice(0, 200));
+    }
+    log.append({
+      type: m.type === "doc-put" ? "skillfully.document.saved" : "skillfully.document.removed",
+      source: "core",
+      subject: `${c.screen.id}:${id}`,
+      actor: c.person.id,
+      via,
+    });
+    tell(c.socket, { type: "doc-ack", ref, id, ok: true });
+    // Everyone looking at this screen sees the change, each given only what they may read.
+    for (const other of this.#connections) {
+      if (other.screen.id !== c.screen.id || !other.access.sees(DOCUMENTS)) continue;
+      const mine = (await documents.list(other.screen.id)).filter((d) =>
+        other.access.canRead(`${DOCUMENTS}/${d.id}`)
+      ).map((d) => ({ ...d, write: other.access.canWrite(`${DOCUMENTS}/${d.id}`) }));
+      tell(other.socket, {
+        type: "docs",
+        ref: null,
+        ok: true,
+        docs: mine,
+        create: other.access.canWrite(`${DOCUMENTS}/new`),
+      });
+    }
+  }
+
   async #onMessage(c: Connection, raw: string): Promise<void> {
     const { devices, approvals, log } = this.deps;
     let m: {
       type?: string;
+      id?: unknown;
+      doc?: unknown;
       plugin?: unknown;
       key?: unknown;
       value?: unknown;
@@ -233,6 +308,10 @@ export class Screens {
       return;
     }
     const via = `screen/${c.screen.id}`;
+    // A screen's documents: given to whoever may read them, changed only by whoever may write that one.
+    if (m.type === "docs" || m.type === "doc-put" || m.type === "doc-remove") {
+      return await this.#documents(c, m, via);
+    }
     if (m.type === "set" && typeof m.key === "string" && typeof m.plugin === "string") {
       const traceid = newId();
       const host = devices.hosts.get(m.plugin);

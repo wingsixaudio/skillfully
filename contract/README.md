@@ -163,8 +163,8 @@ From the hub:
 }
 ```
 
-- **uses**: capability names, each `read` or `write`. `log` is the hub's log. This is the most the screen may
-  ever do, for anyone.
+- **uses**: capability names, each `read` or `write`. `log` is the hub's log. `documents` is the documents the
+  hub keeps for this screen (below). This is the most the screen may ever do, for anyone.
 - **abilities**: what the screen offers that a role can switch on. Each says what it `allows`: a whole
   capability (`"read"` or `"write"`), or only certain `keys`. In a key, a star stands for any one part, and a
   part in braces is filled from the person. An ability may not allow anything outside `uses`.
@@ -181,17 +181,22 @@ From the screen:
 | `{ type: "ready" }`                        | The screen has loaded. The hub answers with `hello` and the state.                                                             |
 | `{ type: "set", plugin, key, value, ref }` | Ask for a value to be set. The person needs an ability that allows writing that key.                                           |
 | `{ type: "log", limit, ref }`              | Ask for recent log entries. The person needs an ability that allows `log`, and gets entries about values they can already see. |
+| `{ type: "docs", ref }`                    | Ask for this screen's documents. The person needs an ability that allows `documents`.                                          |
+| `{ type: "doc-put", id, doc, ref }`        | Keep a document, whole, under a name. The person needs an ability that allows writing `documents`, or that document by name.   |
+| `{ type: "doc-remove", id, ref }`          | Remove a document. The same ability as keeping it.                                                                             |
 
 To the screen:
 
-| Message                                                                               | Meaning                                                                                                 |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `{ type: "link", up }`                                                                | Whether the hub can be reached                                                                          |
-| `{ type: "hello", screen, me, abilities, plugins }`                                   | Who is signed in (`id`, `name`, `slots`), the abilities they were granted, and the drivers they may see |
-| `{ type: "plugins", plugins }`                                                        | The same list, when a driver's status or mode changes                                                   |
-| `{ type: "state", plugin, full, values }`                                             | Values, limited to what this person may see                                                             |
-| `{ type: "ack", ref, ok, value, requested, adjusted }` or `{ ..., ok: false, error }` | The answer to a `set`                                                                                   |
-| `{ type: "log", ref, entries }`                                                       | The answer to a `log`                                                                                   |
+| Message                                                                               | Meaning                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `{ type: "link", up }`                                                                | Whether the hub can be reached                                                                                                                                                       |
+| `{ type: "hello", screen, me, abilities, plugins }`                                   | Who is signed in (`id`, `name`, `slots`), the abilities they were granted, and the drivers they may see                                                                              |
+| `{ type: "plugins", plugins }`                                                        | The same list, when a driver's status or mode changes                                                                                                                                |
+| `{ type: "state", plugin, full, values }`                                             | Values, limited to what this person may see                                                                                                                                          |
+| `{ type: "ack", ref, ok, value, requested, adjusted }` or `{ ..., ok: false, error }` | The answer to a `set`                                                                                                                                                                |
+| `{ type: "log", ref, entries }`                                                       | The answer to a `log`                                                                                                                                                                |
+| `{ type: "docs", ref, ok, docs, create }`                                             | The answer to a `docs`, and sent again to everyone on the screen whenever a document changes. Each of `docs` is `{ id, doc, write }`. `create` says whether this person may add one. |
+| `{ type: "doc-ack", ref, id, ok }` or `{ ..., ok: false, message }`                   | The answer to a `doc-put` or a `doc-remove`                                                                                                                                          |
 
 A screen does not say who the person is. The hub knows from their sign-in.
 
@@ -205,6 +210,14 @@ A screen does not say who the person is. The hub knows from their sign-in.
 - Tells the screen only about values the person may see.
 - Refuses a `set` the person was not granted, and writes the attempt to the log with the screen's name and the
   person's ID.
+- Keeps a screen's documents for it. A screen has nowhere of its own to keep anything, so a screen made of
+  something a person puts together (a canvas of buttons, a set list) asks the hub to keep it. A document is a
+  JSON object of at most 64 KB under a name of lower-case letters, digits and dashes; a screen may have 200.
+  To the hub it is data: it is never read for meaning, and the screen checks what is in it. They are files
+  under `config/screens/<screen id>/` in the data folder, so a person or an agent can read and write them
+  there too. An ability says who may read and who may change them, for all of them (`"documents": "write"`) or
+  by name (`{ "access": "write", "keys": ["main"] }`). A change is logged with who made it, never with what it
+  was.
 - Refuses a connection from any browser page that is not the hub's own, and from anyone not signed in.
 - Disconnects the screen at once when the person's roles or slots change, or they are signed out.
 

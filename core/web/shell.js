@@ -38,8 +38,9 @@
       }
       return;
     }
-    // A screen may ask for two things. Whether it gets them is the hub's decision.
-    if ((e.data.type === "set" || e.data.type === "log") && ws && ws.readyState === 1) {
+    // A screen may ask for a few things, by name. Whether it gets them is the hub's decision.
+    const asks = ["set", "log", "docs", "doc-put", "doc-remove"];
+    if (asks.includes(e.data.type) && ws && ws.readyState === 1) {
       ws.send(JSON.stringify(e.data));
     }
   });
