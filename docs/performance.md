@@ -27,23 +27,25 @@ everyone else was kept waiting.
 
 ## What it showed, and what changed
 
-| What a person feels                                    | At first       | Now         |
-| ------------------------------------------------------ | -------------- | ----------- |
-| A press after a quiet moment, until the device has it  | 21 ms          | 1.6 ms      |
-| Sixteen faders moving, the slowest 1 in 20 changes     | 99 ms          | 37 ms       |
-| The same, the slowest 1 in 100                         | 131 ms         | 58 ms       |
-| Changes dropped because a newer one overtook them      | 1,474 of 4,711 | 70 of 4,720 |
-| How often a watcher's screen is brought up to date     | 22 a second    | 30 a second |
-| The hub's loop held up while sixteen faders move       | 80 ms          | 4 ms        |
-| Log entries written while they move, for ten seconds   | about 9,200    | 64          |
-| Fifty phones connecting at once, small board           | 197 ms         | 50 ms       |
-| Fifty phones connecting at once, 33,024-value board    | 3.1 s          | 0.7 s       |
-| The hub's loop held up while they connect, large board | 1.7 s          | 39 ms       |
-| A musician connecting, large board                     | 58 ms          | 25 ms       |
+| What a person feels                                     | At first       | Now         |
+| ------------------------------------------------------- | -------------- | ----------- |
+| A press after a quiet moment, until the device has it   | 21 ms          | 1.6 ms      |
+| Sixteen faders moving, the slowest 1 in 20 changes      | 99 ms          | 37 ms       |
+| The same, the slowest 1 in 100                          | 131 ms         | 58 ms       |
+| Changes dropped because a newer one overtook them       | 1,474 of 4,711 | 70 of 4,720 |
+| How often a watcher's screen is brought up to date      | 22 a second    | 30 a second |
+| The hub's loop held up while sixteen faders move        | 80 ms          | 4 ms        |
+| Log entries written while they move, for ten seconds    | about 9,200    | 64          |
+| Fifty phones connecting at once, small board            | 197 ms         | 50 ms       |
+| Fifty phones connecting at once, 33,024-value board     | 3.1 s          | 0.7 s       |
+| A Canvas phone showing eight faders, 33,024-value board | 1.1 MB sent    | 2.3 kB sent |
+| A musician on the ear-mix screen, same board            | 20 kB sent     | 1.3 kB sent |
+| The hub's loop held up while they connect, large board  | 1.7 s          | 39 ms       |
+| A musician connecting, large board                      | 58 ms          | 25 ms       |
 
 The rows from "Sixteen faders" to "held up" are `faders+log`, which is what a room of musicians really does.
 
-Six changes did that:
+Seven changes did that:
 
 1. **The newest of the log is answered from memory.** Every screen that shows what just happened asks for the
    recent log after every change. Each ask read a thousand rows from the database and unpacked them. With
@@ -66,6 +68,11 @@ Six changes did that:
    been still for half a second. `docs/decisions.md` says exactly what is and is not folded. Every step still
    reaches every phone: this is only about what is written down.
 
+7. **A screen says which values it is showing.** A phone was sent every value its person may see. A screen can
+   now say `"values": "asked"` in its manifest and send a `watch` with what it is showing, and is sent those
+   and nothing else. Canvas and the ear-mix screen do. Controls does not: it is the screen for seeing
+   everything. This is only what the hub passes on. The device still tells the hub everything.
+
 Saving a document also told every phone on the screen about every document the screen keeps. It now tells them
 about the one that changed (`doc`, see the contract).
 
@@ -73,10 +80,9 @@ about the one that changed (`doc`, see the contract).
 
 These are not fixed. They are in the order they would bite.
 
-- **A phone is sent everything it may see.** A Controls or Canvas phone on a 33,024-value board is sent 1.1 MB
-  when it connects, though a canvas shows a few dozen values. Sharing the working-out made this cheap for the
-  hub. It is still a lot for a phone on poor wifi. The answer is for a screen to say which values it is
-  showing. That is a change to the contract.
+- **Controls is sent everything.** A technician's phone on Controls with a 33,024-value board is still sent
+  1.1 MB when it connects. It shows a hundred and fifty rows and a search box. Sending it only what matches
+  the search would need the hub to do the searching.
 - **Every role change reconnects every phone.** It is simple and it is right: nobody keeps reach they no
   longer have. With a large board and many phones it is a burst of work, 0.7 s for fifty.
 - **A device's whole state has to fit in one 8 MB message.** That is roughly 190,000 values.

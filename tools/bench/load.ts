@@ -21,7 +21,15 @@ class Phone {
   #acks = new Map<number, (m: Msg) => void>();
   #ref = 0;
   onState: ((m: Msg) => void) | null = null;
-  static connect(member: { token: string }, screen: string): Promise<Phone> {
+  /**
+   * `shows` is for a screen that asks for the values it shows: what it shows, by device, worked out from
+   * the hello. Such a screen is ready when it has been answered. One given null is ready when greeted.
+   */
+  static connect(
+    member: { token: string },
+    screen: string,
+    shows?: ((hello: Msg) => Record<string, string[]>) | null,
+  ): Promise<Phone> {
     return new Promise((resolve, reject) => {
       const p = new Phone();
       const t0 = performance.now();
@@ -29,16 +37,24 @@ class Phone {
         headers: { cookie: `sk_session=${member.token}` },
       }) as WebSocket;
       p.#ws = ws;
-      let fulls = 0;
+      let fulls = 0, wanted: number | undefined;
       ws.onmessage = (e) => {
         p.received++;
         p.bytes += (e.data as string).length;
         const m = JSON.parse(e.data as string);
-        if (m.type === "hello") p.hello = m;
+        if (m.type === "hello") {
+          p.hello = m;
+          if (shows === null) resolve(p);
+          else if (shows) {
+            const keys = shows(m);
+            wanted = Object.keys(keys).length;
+            ws.send(JSON.stringify({ type: "watch", keys }));
+          }
+        }
         if (m.type === "state") {
           if (m.full) {
             p.values += Object.keys(m.values).length;
-            if (++fulls === p.hello.plugins.length) {
+            if (++fulls === (wanted ?? p.hello.plugins.length)) {
               p.fullAt = performance.now() - t0;
               resolve(p);
             }
@@ -76,6 +92,17 @@ const stats = (xs: number[]) => ({
   max: pct(xs, 1),
 });
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** What the ear-mix screen shows: the name of input 1 and its send into this person's own bus. */
+const ears = (hello: Msg) => ({
+  [info.board]: ["console/input/1/name", `console/input/1/bus/${hello.me.slots.ears}/level`],
+});
+/** A canvas page of eight faders with their names, as the "My ears" canvas shows. */
+const eightFaders = (bus: number) => () => ({
+  [info.board]: Array.from({ length: 8 }, (_, i) => [
+    `console/input/${i + 1}/name`,
+    `console/input/${i + 1}/bus/${bus}/level`,
+  ]).flat(),
+});
 const out: Record<string, unknown> = { scenario, values: info.values };
 
 if (scenario === "connect") {
@@ -88,14 +115,22 @@ if (scenario === "connect") {
     info.members.watchers.slice(0, 50).map((m: Msg) => Phone.connect(m, "controls")),
   );
   out.fiftyPhones = { allMs: Math.round(performance.now() - t0), each: stats(many.map((p) => p.fullAt)) };
-  const ears = await Phone.connect(info.members.players[0], "one-fader");
-  out.musician = { ms: Math.round(ears.fullAt), values: ears.values, kb: Math.round(ears.bytes / 1000) };
-  for (const p of [...many, ears]) p.close();
+  const player = await Phone.connect(info.members.players[0], "one-fader", ears);
+  out.musician = { ms: Math.round(player.fullAt), values: player.values, bytes: player.bytes };
+  // A phone on Canvas showing eight faders, and fifty of them at once.
+  const canvas = await Phone.connect(info.members.tech[1], "canvas", eightFaders(1));
+  out.canvasPhone = { ms: Math.round(canvas.fullAt), values: canvas.values, bytes: canvas.bytes };
+  const t1 = performance.now();
+  const canvases = await Promise.all(
+    info.members.players.map((m: Msg, i: number) => Phone.connect(m, "canvas", eightFaders(i + 1))),
+  );
+  out.sixteenCanvasPhones = { allMs: Math.round(performance.now() - t1) };
+  for (const p of [...many, player, canvas, ...canvases]) p.close();
 }
 
 if (scenario === "roundtrip") {
   // One person, one fader, one change at a time: the floor under everything else.
-  const p = await Phone.connect(info.members.players[0], "one-fader");
+  const p = await Phone.connect(info.members.players[0], "one-fader", ears);
   const times: number[] = [];
   for (let i = 0; i < 1500; i++) {
     const t = performance.now();
@@ -115,7 +150,9 @@ if (scenario === "faders" || scenario === "faders+log") {
   const watchers = await Promise.all(
     info.members.watchers.slice(0, 50).map((m: Msg) => Phone.connect(m, "controls")),
   );
-  const players = await Promise.all(info.members.players.map((m: Msg) => Phone.connect(m, "one-fader")));
+  const players = await Promise.all(
+    info.members.players.map((m: Msg) => Phone.connect(m, "one-fader", ears)),
+  );
   const before = watchers.map((w) => w.received);
   const times: number[] = [];
   let sent = 0, superseded = 0, failed = 0;
@@ -166,7 +203,7 @@ if (scenario === "faders" || scenario === "faders+log") {
 
 if (scenario === "tap") {
   // A button pressed, or a fader touched, after a quiet moment: how long until the device has it.
-  const p = await Phone.connect(info.members.players[0], "one-fader");
+  const p = await Phone.connect(info.members.players[0], "one-fader", ears);
   const times: number[] = [];
   for (let i = 0; i < 60; i++) {
     await sleep(120 + Math.random() * 60);
@@ -180,7 +217,7 @@ if (scenario === "tap") {
 
 if (scenario === "log") {
   // What a musician's screen asks for after every change: the recent log, as they may see it.
-  const p = await Phone.connect(info.members.players[0], "one-fader");
+  const p = await Phone.connect(info.members.players[0], "one-fader", ears);
   const times: number[] = [];
   for (let i = 0; i < 200; i++) {
     const t = performance.now();
@@ -209,10 +246,12 @@ if (scenario === "docs") {
       ),
     }],
   };
-  const tech = await Phone.connect(info.members.tech[0], "canvas");
+  const tech = await Phone.connect(info.members.tech[0], "canvas", null);
   for (let i = 0; i < 40; i++) await tech.ask({ type: "doc-put", id: `bench-${i}`, doc });
-  const others = await Promise.all(info.members.tech.slice(1).map((m: Msg) => Phone.connect(m, "canvas")));
-  const players = await Promise.all(info.members.players.map((m: Msg) => Phone.connect(m, "canvas")));
+  const others = await Promise.all(
+    info.members.tech.slice(1).map((m: Msg) => Phone.connect(m, "canvas", null)),
+  );
+  const players = await Promise.all(info.members.players.map((m: Msg) => Phone.connect(m, "canvas", null)));
   const times: number[] = [];
   for (let i = 0; i < 20; i++) {
     const t = performance.now();

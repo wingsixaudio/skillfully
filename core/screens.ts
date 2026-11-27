@@ -13,6 +13,7 @@ import type { Capabilities } from "./capabilities.ts";
 import type { Devices } from "./devices.ts";
 import type { PluginHost } from "./host.ts";
 import { type Log, type LogEntry, newId } from "./log.ts";
+import { readWatch, type Watch, watches } from "./watching.ts";
 
 export interface Screen {
   manifest: ScreenManifest;
@@ -24,6 +25,10 @@ interface Connection {
   screen: ScreenManifest;
   person: Person;
   access: Access;
+  /** What the screen has said it is showing, by device. Absent: it is sent everything its person may see. */
+  watch?: Map<string, Watch>;
+  /** The same text for any two connections that are watching the same things. */
+  watchId: string;
 }
 
 const capabilityOf = (key: string) => key.slice(0, key.indexOf("/"));
@@ -54,13 +59,17 @@ export class Screens {
       const said = new Map<string, string | null>();
       for (const c of this.#connections) {
         if (!approvals.allowed(c.screen.id, host.id)) continue;
-        let text = said.get(c.access.readsAs);
+        // A screen that said what it is showing hears about that, and about nothing else.
+        const watch = c.watch?.get(host.id);
+        if (c.watch && !watch) continue;
+        const same = watch ? `${c.access.readsAs}\n${c.watchId}` : c.access.readsAs;
+        let text = said.get(same);
         if (text === undefined) {
-          const mine = this.#only(c, values);
+          const mine = this.#only(c, values, watch);
           text = Object.keys(mine).length
             ? JSON.stringify({ type: "state", plugin: host.id, full: false, values: mine })
             : null;
-          said.set(c.access.readsAs, text);
+          said.set(same, text);
         }
         if (text && c.socket.readyState === WebSocket.OPEN) c.socket.send(text);
       }
@@ -157,8 +166,42 @@ export class Screens {
       health: h.health,
     };
   }
-  #only(c: Connection, values: Values): Values {
-    return Object.fromEntries(Object.entries(values).filter(([k]) => c.access.canRead(k)));
+  #only(c: Connection, values: Values, watch?: Watch): Values {
+    return Object.fromEntries(
+      Object.entries(values).filter(([k]) => (!watch || watches(watch, k)) && c.access.canRead(k)),
+    );
+  }
+
+  /**
+   * A screen says which values it is showing. It is sent what each device holds of those now, as the
+   * whole of what it will be told about that device, and from here on only changes to those. Asking for
+   * something that is not this person's to see gets nothing: a watch narrows, and never widens.
+   */
+  #watch(c: Connection, given: unknown): void {
+    const read = readWatch(given);
+    if (!read) return;
+    c.watch = read.watch;
+    c.watchId = read.id;
+    for (const h of this.#visible(c)) {
+      const watch = c.watch.get(h.id);
+      if (!watch) continue;
+      if (watch.all) {
+        if (c.socket.readyState === WebSocket.OPEN) c.socket.send(this.#everything(c, h));
+        continue;
+      }
+      const values: Values = {};
+      // A value asked for by name is looked up. Only a name with a star in it means going through them all.
+      for (const key of watch.exact) {
+        const value = h.state.get(key);
+        if (value !== undefined && c.access.canRead(key)) values[key] = value;
+      }
+      if (watch.patterns.length) {
+        for (const [key, value] of h.state) {
+          if (!(key in values) && watches(watch, key) && c.access.canRead(key)) values[key] = value;
+        }
+      }
+      tell(c.socket, { type: "state", plugin: h.id, full: true, values });
+    }
   }
   /**
    * Everything a device holds that one person may see, as the message a screen is sent when it connects.
@@ -220,7 +263,15 @@ export class Screens {
     const access = this.accessFor(me, screen);
     if (access.empty) return new Response("this screen is not one of yours", { status: 403 });
     const { socket, response } = Deno.upgradeWebSocket(req);
-    const c: Connection = { socket, screen, person: me, access };
+    // A screen that asks for what it shows is sent no values until it has asked.
+    const c: Connection = {
+      socket,
+      screen,
+      person: me,
+      access,
+      watch: screen.values === "asked" ? new Map() : undefined,
+      watchId: "[]",
+    };
     socket.onopen = () => {
       this.#connections.add(c);
       const mine = this.#visible(c);
@@ -233,7 +284,7 @@ export class Screens {
         plugins: mine.map((h) => this.describe(h, c)),
         capabilities: this.#definitionsFor(c),
       });
-      for (const h of mine) socket.send(this.#everything(c, h));
+      if (!c.watch) { for (const h of mine) socket.send(this.#everything(c, h)); }
     };
     socket.onclose = () => this.#connections.delete(c);
     socket.onmessage = (e) => {
@@ -326,12 +377,14 @@ export class Screens {
       ref?: unknown;
       limit?: unknown;
       traceid?: unknown;
+      keys?: unknown;
     };
     try {
       m = JSON.parse(raw);
     } catch {
       return;
     }
+    if (m.type === "watch") return this.#watch(c, m.keys);
     const via = `screen/${c.screen.id}`;
     // A screen's documents: given to whoever may read them, changed only by whoever may write that one.
     if (m.type === "docs" || m.type === "doc-put" || m.type === "doc-remove") {

@@ -66,6 +66,8 @@ export interface ScreenManifest extends ManifestBase {
   entry: string;
   /** Capability name (or "log") to the most the screen may ever use. */
   uses: Record<string, Access>;
+  /** "asked": sent no values until it says which it is showing. Left out, it is sent all it may see. */
+  values?: "all" | "asked";
   /** What the screen offers that a role can switch on. */
   abilities: Ability[];
   /** Starter roles the screen suggests. */

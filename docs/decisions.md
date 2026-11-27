@@ -409,6 +409,17 @@ happens whole or not at all, and data in a shape newer than the hub knows is ref
 message. It is shape 1 and there are no steps yet. This is here before the first hub is in anyone's hands,
 because afterwards is too late to add it cleanly. `core/shape.ts` says how to add a step.
 
+**A screen can say which values it is showing, and is then sent only those.** The hub holds every value of
+every device and decides what each phone is sent, so narrowing that can only be done by the hub: a screen
+could otherwise only ignore what had already crossed the wifi. A screen's manifest may say
+`"values":
+"asked"`. It is then sent nothing when it connects, sends a `watch` naming the values on the page
+in view, and is sent those and changes to those. Asking for something that is not the person's to see gets
+nothing: a watch narrows and never widens. Any screen may send a `watch`, and a screen that never does is sent
+everything as before, so nothing already written breaks. The hub matches value names and knows nothing about
+what a screen is. Canvas asks for exactly what the pieces it just drew are tied to. This is the platform's job
+and not a plugin's for the same reason permissions are: it is the hub that sends.
+
 **The log says where a value went, not every place it passed through.** A fader being dragged is thirty
 changes a second, and each was two log entries. The log is there to say who changed what, from what to what,
 when, and what went wrong, for a person or an agent asking afterwards. Nobody asking that needs the forty
@@ -436,9 +447,6 @@ was the simplest thing and grew with the number of documents times the number of
   year is far smaller than it was (`docs/performance.md` has the measure). It still has no end. Starting a new
   log file each month, with older months as files that can be moved off the hub, would give it one. Not done:
   it is no longer pressing, and it touches every reader of the log.
-- **Screens say which values they are showing.** Today a phone is sent every value it may see. On a large
-  board that is a megabyte to show a few dozen. It needs a message in the contract.
-
 - **Giving a role one canvas and not another.** Canvas's abilities are for the whole screen: "use everything
   on a canvas" reaches every connection Canvas was given, and a person is shown every canvas that has
   something of theirs on it. A video volunteer who should have the switcher canvas and nothing else cannot be

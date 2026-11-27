@@ -290,7 +290,11 @@ export class Phone {
       this.messages.push(m);
       if (m.type === "hello") this.hello = m;
       if (m.type === "hello" || m.type === "plugins") this.plugins = m.plugins;
-      if (m.type === "state") Object.assign(this.values[m.plugin] ??= {}, m.values);
+      // A full state is the whole of what this phone is told about that device, and takes the place of what it had.
+      if (m.type === "state") {
+        if (m.full) this.values[m.plugin] = { ...m.values };
+        else Object.assign(this.values[m.plugin] ??= {}, m.values);
+      }
       if (["ack", "log", "docs", "doc-ack"].includes(m.type)) this.#acks.get(m.ref)?.(m);
     };
     ws.onclose = (e) => (this.closed = e.code);
@@ -302,14 +306,32 @@ export class Phone {
   }
 
   /** Connect as a person. Give a name to have a musician made for the occasion. */
-  static async connect(hub: TestHub, who: Member | string, screen = "one-fader"): Promise<Phone> {
+  /**
+   * A screen that asks for the values it shows is played here as one that shows everything its person may
+   * see, so a test reads what that is. Pass `shows: false` to say nothing, and ask with `watch` yourself.
+   */
+  static async connect(
+    hub: TestHub,
+    who: Member | string,
+    screen = "one-fader",
+    opts: { shows?: boolean } = {},
+  ): Promise<Phone> {
     const member = typeof who === "string" ? await hub.member(who) : who;
+    const asks = hub.screens.get(screen)?.manifest.values === "asked" && opts.shows !== false;
     return await new Promise((resolve, reject) => {
       // deno-lint-ignore no-explicit-any
       const ws = new (WebSocket as any)(`ws://127.0.0.1:${hub.port}/ws?screen=${screen}`, {
         headers: { cookie: `sk_session=${member.token}` },
       }) as WebSocket;
       const phone = new Phone(ws, member.id);
+      if (asks) {
+        ws.addEventListener("message", (e) => {
+          const m = JSON.parse(e.data);
+          if (m.type === "hello") {
+            phone.watch(Object.fromEntries(m.plugins.map((p: { id: string }) => [p.id, ["**"]])));
+          }
+        });
+      }
       ws.onopen = () => resolve(phone);
       ws.onerror = () => reject(new Error("the phone could not connect"));
     });
@@ -325,6 +347,11 @@ export class Phone {
 
   set(key: string, value: unknown, plugin = "sim-console"): Promise<Msg> {
     return this.#ask({ type: "set", plugin, key, value });
+  }
+
+  /** Say which values this screen is showing. Nothing answers but the values themselves. */
+  watch(keys: unknown): void {
+    this.#ws.send(JSON.stringify({ type: "watch", keys }));
   }
 
   log(limit = 50): Promise<Msg> {
