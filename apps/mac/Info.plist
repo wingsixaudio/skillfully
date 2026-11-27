@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Skillfully</string>
+  <key>CFBundleDisplayName</key><string>Skillfully</string>
+  <key>CFBundleIdentifier</key><string>live.skillfully.hub</string>
+  <key>CFBundleExecutable</key><string>Skillfully</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>__NUMBER__</string>
+  <key>CFBundleVersion</key><string>__NUMBER__</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSLocalNetworkUsageDescription</key><string>Skillfully talks to your team's equipment, such as a soundboard, on this network, and to the phones your team uses.</string>
+</dict>
+</plist>

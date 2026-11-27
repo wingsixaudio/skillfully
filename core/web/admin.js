@@ -91,7 +91,9 @@ addEventListener("popstate", () => {
   showPlace();
   drawDrivers();
 });
-showPlace();
+// Shown once the rest of this file has been read: a page opened at the address of a place deep in it
+// draws that place with things that are defined further down.
+queueMicrotask(showPlace);
 
 // One dialog, reused. fill() builds the fields; done() returns a result with ok, or nothing to close.
 function ask(title, fill, done, okText = "Save") {
@@ -666,7 +668,11 @@ async function drawCatalog(more) {
   ]);
   if (mine !== cat.asked) return; // something newer was typed or chosen while this was on its way
   const note = $("catNote");
-  note.textContent = !companion.on
+  // An answer that is not about the store at all (the hub is away, or this person was signed out) is
+  // said as what it is, not as a hub with no store.
+  note.textContent = companion.ok === false
+    ? companion.message + " A package file can still be added."
+    : !companion.on
     ? "This hub is not set up to use a store. A package file can still be added."
     : companion.message
     ? companion.message

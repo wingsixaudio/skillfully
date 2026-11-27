@@ -133,6 +133,79 @@ Deno.test("a Companion module is held to the same sandbox as any driver", async 
   }
 });
 
+Deno.test("a module that asks about the computer is told nothing about it, and carries on", async () => {
+  const lamp = pretendLamp();
+  const { hub, host, close } = await dropIn({
+    granted: ["{host}:{port}"],
+    // Something typed, on an earlier hub, into the box Companion fills in by searching.
+    settings: { host: "127.0.0.1", port: lamp.port, bonjour_host: "true" },
+    mode: "act",
+  });
+  try {
+    await until("the module is connected", () => host.state.get(READING("power")) === "off");
+    // The way a library does it: a program run from inside a callback, and questions about the system.
+    assert((await host.set(ACTION("lookup"), true, { via: "test" })).ok);
+    await until(
+      "it has its answers",
+      () => String(host.state.get(READING("lookup")) ?? "").startsWith("{"),
+      8000,
+    );
+    assertEquals(JSON.parse(String(host.state.get(READING("lookup")))), {
+      run: "EPERM", // the program was not run, and the module was told so where it expected to be told
+      name: "skillfully-hub", // the same on every hub
+      release: "0.0.0",
+      cards: 0, // no network cards to list
+      user: "module",
+      elsewhere: false, // a file that is not its own is, to it, not there
+      own: true, // and its own still is
+      found: null, // what was typed into a box the form does not show is not handed to it
+    });
+    // It is noted once, by the program's name and nothing it was passed.
+    const refused = ofType(hub, "skillfully.plugin.event").filter((e) => e.data.name === "module.refused");
+    assertEquals(refused.map((e) => (e.data.detail as { what: string }).what), [
+      "run a program on this computer: arp",
+    ]);
+    assert(!JSON.stringify(hub.log.read({ limit: 500 })).includes("secret/argument"));
+    // None of that is a failure: the lamp is as well as it was.
+    assertEquals(host.health.status, "ok");
+    assert((await host.set(ACTION("on"), true, { via: "test" })).ok);
+    await until("the lamp still answers", () => host.state.get(READING("power")) === "on");
+  } finally {
+    await close();
+    lamp.close();
+  }
+});
+
+Deno.test("a setting filled in a way the module does not accept is said, and not handed to it", async () => {
+  const lamp = pretendLamp();
+  const { host, close } = await dropIn({
+    granted: ["{host}:{port}"],
+    settings: { host: "lamp.local", port: lamp.port },
+    mode: "act",
+  });
+  try {
+    await until(
+      "the device says which setting",
+      () => String(host.health.reason ?? "").includes("Lamp address"),
+    );
+    assertEquals(host.health.status, "down");
+    assertEquals(
+      host.health.reason,
+      "“Lamp address” is not filled in the way this module accepts. Put that right under Settings.",
+    );
+    // What the module then says about having no address does not replace it.
+    await new Promise((r) => setTimeout(r, 600));
+    assert(String(host.health.reason).includes("Lamp address"), String(host.health.reason));
+    // A box Companion fills in by searching is not offered: the hub does not search.
+    const ids = (host.settingsForm ?? []).map((f) => f.id);
+    assertEquals(ids.includes("bonjour_host"), false);
+    assertEquals(ids.includes("host"), true);
+  } finally {
+    await close();
+    lamp.close();
+  }
+});
+
 Deno.test("dropped in with nothing said about the network, a module can reach nothing on it", async () => {
   const lamp = pretendLamp();
   const { host, installed, close } = await dropIn({

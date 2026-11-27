@@ -101,11 +101,116 @@ jobs:
           path: shots
           if-no-files-found: ignore
 
-  # A real Companion module, built from its own source and run against a pretend plug. It depends on someone
-  # else's repository and on npm, so it reports and does not decide whether a change can merge.
+  # The Mac app: built on a Mac, for both kinds of Mac, then started with no window to prove that the app
+  # just made carries a hub that runs. The disk image is kept with the run, so a pull request that
+  # changes the app can be tried by downloading it.
+  mac:
+    name: Mac app
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Pack the hub
+        run: deno run --allow-read --allow-write=dist --allow-run --allow-env --allow-net tools/bundle.ts
+      - name: Build the app and its disk image
+        run: apps/mac/build.sh dist/skillfully-hub-*.tgz "$RUNNER_TEMP/mac"
+      - name: The app starts the hub it carries, with nothing fetched
+        run: |
+          "$RUNNER_TEMP/mac/Skillfully.app/Contents/MacOS/Skillfully" --selftest --home="$RUNNER_TEMP/home-arm"
+          test -f "$RUNNER_TEMP/home-arm/current"
+      - name: And on an Intel Mac, as far as this machine can pretend to be one
+        run: |
+          if arch -x86_64 /usr/bin/true 2> /dev/null; then
+            arch -x86_64 "$RUNNER_TEMP/mac/Skillfully.app/Contents/MacOS/Skillfully" --selftest --home="$RUNNER_TEMP/home-intel"
+          else
+            echo "::notice::This machine cannot run Intel programs, so the Intel half was built and not run."
+          fi
+      - name: It moves to a newer version when the hub asks, and goes back from one that will not start
+        run: |
+          home="$RUNNER_TEMP/home-moves"
+          for v in 998-aaaaaaa 999-bbbbbbb; do
+            mkdir -p "$home/versions/$v/core"
+            cp apps/mac/selftest/pretend_version.ts "$home/versions/$v/core/main.ts"
+          done
+          echo 998-aaaaaaa > "$home/current"
+          echo 999-bbbbbbb > "$home/next"
+          "$RUNNER_TEMP/mac/Skillfully.app/Contents/MacOS/Skillfully" --selftest --home="$home"
+          test "$(cat "$home/current")" = 998-aaaaaaa
+          grep -q "^999-bbbbbbb stopped at once" "$home/went-back"
+          test ! -e "$home/next"
+      - name: Opened the way a person opens it, it shows its window, runs the hub, and stops it on Quit
+        run: |
+          app="$RUNNER_TEMP/mac/Skillfully.app/Contents/MacOS/Skillfully"
+          home="$RUNNER_TEMP/home-window"
+          mkdir -p "$RUNNER_TEMP/shots"
+          field() { deno eval 'console.log(JSON.parse(Deno.readTextFileSync(Deno.args[0]))[Deno.args[1]] ?? "")' "$home/status.json" "$1"; }
+          "$app" --home="$home" --no-browser &
+          pid=$!
+          for i in $(seq 1 60); do [ -f "$home/status.json" ] && break; sleep 1; done
+          test -f "$home/status.json" || { cat "$home/logs/hub.log"; exit 1; }
+          url=$(field url); hub=$(field pid); code=$(field claimCode)
+          curl -fsS "$url/auth/me" | grep -q '"claimed":false'
+          sleep 4
+          kill -0 "$pid"
+          screencapture -x "$RUNNER_TEMP/shots/1-first-owner.png" || true
+          # The code is for the window, not for the file the hub's output is kept in.
+          ! grep -q "$code" "$home/logs/hub.log"
+          # Someone becomes its owner, and asks about the store, from a real Mac.
+          curl -fsS -c "$RUNNER_TEMP/jar" -H "origin: $url" -H 'content-type: application/json' \
+            -d "{\"code\":\"$code\",\"name\":\"Robin\",\"secret\":\"84726193\"}" "$url/auth/claim" | grep -q '"ok":true'
+          curl -fsS -b "$RUNNER_TEMP/jar" "$url/admin/api/store?find=&section=companion&maker=&kind=&after=0" > "$RUNNER_TEMP/store.json"
+          jq -c '{ok, on, signed, total, message}' "$RUNNER_TEMP/store.json"
+          test "$(jq -r .on "$RUNNER_TEMP/store.json")" = true
+          sleep 5
+          kill -0 "$pid"
+          screencapture -x "$RUNNER_TEMP/shots/2-running.png" || true
+          # Quit, as the Mac asks an app to: the hub is stopped first.
+          kill -TERM "$pid"
+          for i in $(seq 1 30); do kill -0 "$pid" 2> /dev/null || break; sleep 0.5; done
+          ! kill -0 "$pid" 2> /dev/null || { echo "The app did not quit when asked."; ps -p "$pid","$hub" -o pid,stat,command || true; sample "$pid" 1 2>&1 | head -70; kill -9 "$pid"; exit 1; }
+          ! kill -0 "$hub" 2> /dev/null
+      - name: Forced to quit, it does not leave the hub running behind it
+        run: |
+          app="$RUNNER_TEMP/mac/Skillfully.app/Contents/MacOS/Skillfully"
+          home="$RUNNER_TEMP/home-forced"
+          "$app" --home="$home" --no-browser &
+          pid=$!
+          for i in $(seq 1 60); do [ -f "$home/status.json" ] && break; sleep 1; done
+          hub=$(deno eval 'console.log(JSON.parse(Deno.readTextFileSync(Deno.args[0])).pid)' "$home/status.json")
+          kill -0 "$hub"
+          kill -9 "$pid"
+          wait "$pid" || true
+          for i in $(seq 1 20); do kill -0 "$hub" 2> /dev/null || break; sleep 0.5; done
+          ! kill -0 "$hub" 2> /dev/null
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Skillfully-mac-window
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Skillfully-mac
+          path: ${{ runner.temp }}/mac/Skillfully.dmg
+          retention-days: 14
+
+  # Real Companion modules, built from their own source. One drives a pretend plug. The other has a library
+  # that asks a great deal of the computer it is on, and is shown to start and report for itself all the
+  # same, on a Mac too, where what such a library tries is different. They depend on other people's
+  # repositories and on npm, so they report and do not decide whether a change can merge.
   companion:
-    name: Real Companion module (reported, not required)
-    runs-on: ubuntu-latest
+    name: Real Companion modules on ${{ matrix.os }} (reported, not required)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     continue-on-error: true
     steps:
@@ -120,6 +225,8 @@ jobs:
         run: deno cache core/main.ts
       - name: TP-Link Kasa module, switching a pretend plug through the hub
         run: tests/compat/kasa.sh
+      - name: Android TV module, whose library asks about the computer, starting and reporting for itself
+        run: tests/compat/androidtv.sh
 
   # Plain words on what each changed plugin asks for, shown on the pull request's checks page.
   plugin-report:

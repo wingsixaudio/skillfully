@@ -110,6 +110,24 @@ own folder. No write, no environment, no subprocess. The module is shown an empt
 to "Companion" are answered by the bridge. A test module tries all of it and is refused each time. Where
 Companion would give a module the whole network, this hub makes the grant visible.
 
+**A module is told no in a way it can take.** Modules are written for a place where they may run programs and
+ask the computer about itself, and the libraries they use do both without a second thought: to learn a
+device's network card, or to tell a device who is calling. The sandbox refuses all of it, and that does not
+change. But it refused in the middle of the attempt, in words about something else, where no module could
+catch it, and a module that only wanted to be polite to a television stopped working. So the bridge answers
+first, for every module alike. Running a program fails the way it does on a computer that lacks the program,
+with an error handed to the module where it expects one, and the program's name, never what was passed to it,
+is noted once. Questions about the computer get the same plain answers on every hub. Whether a file outside
+the module's folder is there is answered no. A refusal that still gets through is said in words about what the
+module tried, and the device is called less than it could be, not down: the module is still running.
+
+**A module's own rules for its settings are held to, in the module's process.** A module can say how a setting
+must be written, as a pattern. The hub's form ignored that, so an address typed wrongly reached the module and
+failed in the module's words or none. The pattern is the module's code, and a pattern can be written to take
+for ever, so it is never run in the hub or sent to a page. The bridge tries it beside the module. A setting
+that does not fit is not handed over, and the device says which one until it is put right. The box Companion
+fills in by searching the network is not shown, because the hub does not search.
+
 **Two wide network grants exist, and both are named.** `lan` is any private address plus the addresses devices
 use to find each other, and never the internet or the hub's own computer. `listen` is ports on the hub's
 computer for devices to answer on. A device added from the admin page is given neither by default: it asks for
@@ -547,6 +565,24 @@ Everything else about updating is in the hub, where it is tested. A Mac app, a W
 computer with neither all do those three things and nothing more, so the next kind of computer is a small job.
 The runtime travels with the app, and a version that needs a newer one says so.
 
+**On a Mac the hub is an icon.** A team downloads one file, drags it to Applications and opens it. The app
+starts the hub, opens it in a browser, shows a first owner their code in a window, and sits in the menu bar
+saying whether the hub is running and what address phones use. Quitting it stops the hub. It is one file of
+Swift with one small window: how the hub is, and Open, Stop, Start, Restart and Quit. The first version had no
+window, only the mark in the menu bar, on the thought that everything a person does is in the browser. The
+first person to open it could not find how to stop it. A thing that is running needs an obvious place that
+says so and stops it. Closing the window leaves the hub running behind the mark in the menu bar, and the
+window says that.
+
+**A hub never outlives the app that started it.** The app holds the hub's input open and says nothing through
+it. When the app is gone, however it went, that closes, and the hub stops. An app that is forced to quit
+cannot tidy up, so the tidying cannot be the app's job. A hub that stops by itself is started again by the
+app, up to a few times in ten minutes. It carries the runtime for both kinds of Mac and one version of the
+hub, so it starts with no internet and nothing is installed first. The hub's data is kept outside the app, so
+a newer app is dragged over the old one and nothing is lost. The hub keeps the port it had, since phones
+remember the address. Every pull request builds the app on a Mac, starts the hub from inside it, and proves it
+moves on and goes back, because nobody can click an icon in a check.
+
 **Looking through a large board takes turns.** Going through thirty thousand values to list what a device
 holds would keep everything else on the hub waiting. Whatever goes through a lot stops every few thousandths
 of a second and lets a fader move. `docs/performance.md` has the numbers.
@@ -678,18 +714,28 @@ was the simplest thing and grew with the number of documents times the number of
   done by the module. The bridge refuses both and records that the module asked.
 - **A module's stored settings.** Companion keeps a module's settings and upgrades them between versions. The
   hub hands settings over fresh at each start, so a module's upgrade scripts never run.
+- **The Mac app is not signed.** Without an Apple developer account, a Mac has to be told once to open it
+  anyway, under Privacy & Security. Signing is in the build already. Having Apple check each build, which is
+  what removes that step, needs the account and is not wired up.
+- **A Windows app.** The same three things in another language. Not started.
 - **License.** Not chosen.
 
 ## Not tested
 
 - Any real soundboard. Everything here runs against the simulated board.
+- The Mac app, beyond what a check can do. Every check builds it on a Mac, opens it the way a person does,
+  takes a picture of its window, claims the hub, reads the real store through it, quits it and forces it to
+  quit. No check presses a button in the window, starts it at login, or sees what the Mac asks the first time
+  an unsigned app is opened. One person has run it, on an Intel Mac.
 - Windows, on a real machine. The tests pass on Linux, macOS and Windows on GitHub's machines, and the
   real-browser test passes in Chrome and WebKit there. On Windows the hub cannot yet read a plugin's memory or
   processor use, so those limits are not enforced and their tests are skipped. Windows does not yet block a
   merge.
 - Safari on a real phone. WebKit on Linux is the same engine, not the same browser.
-- More than two Companion modules. A module written for the tests runs in every check, and the real TP-Link
-  Kasa module is built from its source and run against a pretend plug in a check that reports and does not
-  block. No module has driven real equipment through the hub.
+- More than a few Companion modules. A module written for the tests runs in every check. Two real ones are
+  built from their source in a check that reports and does not block: the TP-Link Kasa module drives a pretend
+  plug, and the Android TV module, whose library asks a great deal of the computer it is on, is shown to start
+  and report for itself on Linux and on a Mac. No module has driven real equipment through the hub in a check,
+  and the Android TV module has not been paired with a television by anyone.
 - More than a handful of phones at once.
 - Meters. The contract has no message for them yet.

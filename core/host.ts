@@ -730,6 +730,8 @@ export class PluginHost {
     } catch {
       return;
     }
+    // Stopped while the file was being read: there is nobody left to ask, and the log may be closed.
+    if (this.status === "stopped") return;
     if (bytes.length < this.#auditAt) this.#auditAt = 0;
     const fresh = bytes.subarray(this.#auditAt);
     const end = fresh.lastIndexOf(10); // only whole lines
@@ -772,6 +774,7 @@ export class PluginHost {
   async #watch(): Promise<void> {
     const now = Date.now();
     if (this.#auditTick++ % 4 === 0) await this.#readAudit();
+    if (this.status === "stopped") return;
 
     // One summary a second at most, however long the flood lasts.
     if (

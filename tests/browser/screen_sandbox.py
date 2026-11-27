@@ -179,6 +179,8 @@ async def main():
         pg.on("pageerror", lambda e: errors.append(str(e)))
         await pg.goto(base + "/")
         check("someone who is not signed in is sent to sign in", pg.url.endswith("/signin"), pg.url)
+        # The sign-in page has finished asking the hub what it needs before anything else is typed in the bar.
+        await pg.wait_for_selector("#name")
         await pg.goto(f"{base}/join#{invite}")
         await pg.fill("#secret", SAM_PIN); await pg.fill("#again", SAM_PIN); await pg.click("#go")
         await pg.wait_for_url("**/s/one-fader"); await pg.wait_for_timeout(900)
@@ -294,6 +296,10 @@ async def main():
         await owner.click("#addDevice")
         check("Add a device opens the catalog, at an address of its own", owner.url.endswith("/admin/devices/add") and await places_shown() == ["devices/add"], owner.url)
         await owner.wait_for_selector("#catCompanion:not([hidden]) #catList .maker")
+        # Opened straight at that address (a bookmark, or the page loaded again), it is the same catalog.
+        await owner.goto(base + "/admin/devices/add")
+        await owner.wait_for_selector("#catCompanion:not([hidden]) #catList .maker")
+        check("the catalog can be opened at its own address, not only by pressing the button", await places_shown() == ["devices/add"])
         told = await owner.locator("#catalog").inner_text()
         check("Bitfocus Companion modules are a section of their own, with credit and what running one means", "Bitfocus Companion modules" in told and "published by Bitfocus" in told and "asks you before one reaches anything" in told, told)
         check("the hub knows who signed the store's list, so the page does not warn about it", await owner.locator("#catNote").get_attribute("data-unsigned") == "" and "cannot check who published" not in told, told)

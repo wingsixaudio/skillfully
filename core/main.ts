@@ -104,7 +104,9 @@ console.log(
 for (const h of hub.hosts.values()) console.log(`  driver ${h.id}: ${h.status}, mode ${h.mode}`);
 for (const id of hub.screens.keys()) console.log(`  screen ${id}`);
 for (const id of hub.skills.keys()) console.log(`  skill  ${id}`);
-if (hub.accounts.claimCode) {
+// An installed hub's first owner is shown the code by the app that started it, which reads it from the
+// status file below. It is not also written where the hub's output is kept.
+if (hub.accounts.claimCode && !home) {
   console.log(
     `\nThis hub has no owner yet. Open it in a browser and enter this code to become its first superuser:`,
   );
@@ -135,5 +137,15 @@ async function leave(code: number) {
   Deno.exit(code);
 }
 const stop = () => leave(0);
+// --stay-with-app: the app that started the hub holds the hub's input open, and the hub stops when that
+// closes. An app that crashes or is forced to quit closes it without doing anything, so a hub never
+// outlives the only thing a person has for stopping it.
+if (Deno.args.includes("--stay-with-app")) {
+  (async () => {
+    const buf = new Uint8Array(64);
+    while ((await Deno.stdin.read(buf).catch(() => null)) !== null) { /* nothing is said this way */ }
+    await leave(0);
+  })();
+}
 Deno.addSignalListener("SIGINT", stop);
 if (Deno.build.os !== "windows") Deno.addSignalListener("SIGTERM", stop); // Windows has no such signal
