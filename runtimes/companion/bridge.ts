@@ -210,7 +210,10 @@ function fromModule(m: Wire): void {
         health,
         health === "ok"
           ? undefined
-          : `${IN_WORDS[status] ?? `It reports ${status.replaceAll("_", " ")}`}${said}`,
+          : (`${IN_WORDS[status] ?? `It reports ${status.replaceAll("_", " ")}`}${said}` + whyLately()).slice(
+            0,
+            300,
+          ),
       );
       break;
     }
@@ -415,6 +418,7 @@ function registered(m: Wire, data: any): void {
 
 function installHost(): void {
   refuseRunning();
+  passOnErrors();
   sayNothingOfThisComputer();
   filesElsewhereAreNotThere();
   // The few environment values a module reads, and nothing from the real environment.
@@ -615,6 +619,42 @@ function refusal(message: string): string {
     sys: `ask about this computer${about}`,
     ffi: "load a program library",
   } as Record<string, string>)[kind] ?? `${kind}${about}`;
+}
+
+/**
+ * When a module cannot reach its device, the reason is an error its library prints and nobody reads:
+ * "connection refused", "no route to host". A module's own words about it are usually only "check the
+ * address". So an error a module prints is passed on, as the kind of error and its message and nothing
+ * else: what a module prints as plain words could be anything, and is not passed on. It goes beside what
+ * the module says is wrong, where a person is looking, and into the log, the same error once a minute.
+ */
+let lastError: { what: string; at: number } | undefined;
+/** The error behind a module's "something is wrong", when it printed one in the last minute and a half. */
+const whyLately = () =>
+  lastError && Date.now() - lastError.at < 90_000 ? `. Its error: ${lastError.what}` : "";
+function passOnErrors(): void {
+  const seen = new Map<string, number>();
+  let window = Date.now(), count = 0;
+  for (const level of ["error", "warn"] as const) {
+    const was = console[level].bind(console);
+    console[level] = (...said: unknown[]) => {
+      was(...said);
+      for (const s of said) {
+        const e = s as { message?: unknown; code?: unknown; name?: unknown } | null;
+        if (!e || typeof e !== "object" || typeof e.message !== "string" || !e.message) continue;
+        const told = plainer(e.message);
+        const what = `${typeof e.code === "string" && !told.includes(e.code) ? `${e.code}: ` : ""}${told}`
+          .slice(0, 160);
+        const now = Date.now();
+        lastError = { what, at: now };
+        if (now - window > 60_000) (window = now, count = 0);
+        if (now - (seen.get(what) ?? 0) < 60_000 || count >= 10) continue;
+        seen.set(what, now);
+        count++;
+        link?.event("module.error", { message: what });
+      }
+    };
+  }
 }
 
 // The sandbox refusing something the module tried is worth saying plainly, and is not a reason to stop.

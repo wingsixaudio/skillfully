@@ -7,7 +7,10 @@ import { readPackage, startHub, writePackage } from "../../mod.ts";
 
 const [pkg, dataDir, ...rest] = Deno.args;
 const granted = rest.filter((a) => a.startsWith("--grant=")).map((a) => a.slice(8));
-const pairs = rest.filter((a) => !a.startsWith("--grant="));
+// --press=<action> presses one of its actions, and --says=<words> is what the device must then say.
+const press = rest.find((a) => a.startsWith("--press="))?.slice(8);
+const says = rest.find((a) => a.startsWith("--says="))?.slice(7);
+const pairs = rest.filter((a) => !a.startsWith("--"));
 const settings = Object.fromEntries(pairs.map((p) => [p.split("=")[0], p.slice(p.indexOf("=") + 1)]));
 const installed = await writePackage(await readPackage(await Deno.readFile(pkg)), dataDir);
 const hub = await startHub({
@@ -45,6 +48,18 @@ try {
   );
   console.log(`      it says: ${host.health.status}${host.health.reason ? `, ${host.health.reason}` : ""}`);
   check("its settings came out as a form", (host.settingsForm ?? []).length > 0);
+  if (press && says) {
+    // With nothing answering at its address, what the device says is not only "check the address": the
+    // error its library printed is beside it, so a person can tell a wrong address from a blocked one.
+    await host.set(`generic/action/${press}`, true, { via: "compat" });
+    let reason = "";
+    for (const end = Date.now() + 60000; Date.now() < end && !reason.includes(says);) {
+      await new Promise((r) => setTimeout(r, 300));
+      reason = String(host.health.reason ?? "");
+    }
+    console.log(`      after ${press} it says: ${reason}`);
+    check("when it cannot reach its device, it says why", reason.includes(says), reason);
+  }
   check(
     "the form has no box that promises a search the hub does not do",
     !(host.settingsForm ?? []).some((f) => /bonjour/i.test(f.id)),
