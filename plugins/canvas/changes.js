@@ -172,10 +172,22 @@
 
   /** A new piece of a kind, at the size that kind usually wants. Whatever ties it to a device is added by whoever adds it. */
   function fresh(type, columns = 4) {
-    const size =
-      { label: [2, 1], readout: [2, 1], button: [1, 1], toggle: [2, 1], slider: [1, 4], clock: [4, 2] }[type];
+    const size = {
+      label: [2, 1],
+      readout: [2, 1],
+      button: [1, 1],
+      toggle: [2, 1],
+      slider: [1, 4],
+      meter: [4, 1],
+      light: [2, 1],
+      stepper: [2, 1],
+      countdown: [4, 2],
+      clock: [4, 2],
+    }[type] ?? [2, 1];
     const at = [1, 1, Math.min(size[0], columns), size[1]];
-    return type === "label" ? { type, at, text: "Label" } : { type, at };
+    if (type === "label") return { type, at, text: "Label" };
+    if (type === "countdown") return { type, at, until: "10:00" };
+    return { type, at };
   }
 
   /** A canvas with one empty page. */

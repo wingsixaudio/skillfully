@@ -60,15 +60,21 @@ filled in from the person looking, so one canvas is everybody's own mix.
 
 Every piece has `type` and `at`. A piece tied to a device has a `key`, and may name a `device`.
 
-| Type      | What it is                                                              | Its own words                                                    |
-| --------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `label`   | Words on the canvas                                                     | `text`, `size` (`small`, `normal`, `large`)                      |
-| `readout` | A value, shown                                                          | `key`, `device`, `title`                                         |
-| `button`  | Triggers an action, or sets a value to one thing                        | `key`, `device`, `title`, `value`, `lit`, `color`                |
-| `toggle`  | A switch between two values                                             | `key`, `device`, `title`, `on`, `off`, `color`                   |
-| `slider`  | A value you drag. Taller than wide it stands up, otherwise it lies down | `key`, `device`, `title`, `min`, `max`, `step`, `sends`, `shows` |
-| `clock`   | The time                                                                | `title`, `seconds`                                               |
-| `group`   | Pieces placed together, which can repeat                                | `title`, `pieces`, `repeat`                                      |
+| Type        | What it is                                                              | Its own words                                                    |
+| ----------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `label`     | Words on the canvas                                                     | `text`, `size` (`small`, `normal`, `large`)                      |
+| `readout`   | A value, shown                                                          | `key`, `device`, `title`                                         |
+| `button`    | Triggers an action, or sets a value to one thing                        | `key`, `device`, `title`, `value`, `lit`, `color`                |
+| `toggle`    | A switch between two values                                             | `key`, `device`, `title`, `on`, `off`, `color`                   |
+| `slider`    | A value you drag. Taller than wide it stands up, otherwise it lies down | `key`, `device`, `title`, `min`, `max`, `step`, `sends`, `shows` |
+| `stepper`   | A number with a button each side, down and up by a step                 | `key`, `device`, `title`, `min`, `max`, `step`, `sends`, `shows` |
+| `choice`    | One of a few, in a row, with the one in use lit                         | `key`, `device`, `title`, `options`, `sends`, `shows`, `color`   |
+| `meter`     | A number shown as a bar, for looking at. Taller than wide it stands up  | `key`, `device`, `title`, `min`, `max`, `color`                  |
+| `light`     | Lit while a value is one thing: on air, recording, live, muted          | `key`, `device`, `title`, `is`, `color`                          |
+| `goto`      | A button that goes to another page of this canvas                       | `page`, `title`, `color`                                         |
+| `countdown` | Counts down to a time of day, then counts up                            | `until`, `title`                                                 |
+| `clock`     | The time                                                                | `title`, `seconds`                                               |
+| `group`     | Pieces placed together, which can repeat                                | `title`, `pieces`, `repeat`                                      |
 
 - **`key`** is a value or an action of a device, as the Controls screen lists them: the kind of device, a
   slash, then the value. `console/input/1/bus/2/level`, `switch/outlet/3/on`, `generic/ready/lamp_on`.
@@ -102,6 +108,36 @@ Every piece has `type` and `at`. A piece tied to a device has a `key`, and may n
     "title": "Volume"
   }
   ```
+
+- A **stepper** takes a number down or up by `step` (1 if left out) with each press, and stops at `min` and
+  `max`. Two columns wide or more it has a button each side; one column wide it shows only its number, with
+  the buttons under it. It is for what is set in small exact steps: a transpose, a channel number, a gain to
+  the decibel. It can be tied to an action that takes a number with `sends` and `shows`, as a slider can.
+- A **choice** is a row of `options`, each `{ "value": ..., "title": "..." }`: what pressing it sends, and its
+  words. 2 to 12 of them. The one the value holds now is lit. Taller than wide, the options stand in a column.
+  Tied to an action, `sends` is the option the value goes in and `shows` is what says which is in use. Without
+  `shows`, the last one pressed is lit.
+
+  ```json
+  {
+    "type": "choice",
+    "at": [1, 3, 4, 1],
+    "key": "generic/action/power",
+    "sends": "power",
+    "options": [{ "value": "power_on", "title": "On" }, { "value": "power_off", "title": "Off" }],
+    "title": "Power"
+  }
+  ```
+- A **meter** shows a number as a bar and changes nothing. Its range is the device's, or `min` and `max`, or 0
+  to 100. A number a device reports as words still works.
+- A **light** is lit while its value is `is` (`true` if left out). In `red` it is an on-air light. Taller than
+  one row, the light is larger and its name is under it.
+- A **goto** button goes to the page named in `page`, as it is written in this canvas. It is how a canvas with
+  a main page and pages behind it is got around: a "Lights" button on the main page, a "Back" button on the
+  Lights page.
+- A **countdown** counts down to `until`, a time of day on a 24-hour clock such as `"10:30"`. It turns orange
+  in the last five minutes and red once the time has passed, when it counts up. Two hours after the time, it
+  is counting to the same time the next day. It is the same on every phone, because it is the time of day.
 
 ## Groups
 

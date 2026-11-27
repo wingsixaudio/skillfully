@@ -87,12 +87,46 @@ Deno.test("what is wrong with a canvas is said in words, and the schema refuses 
       canvas([{ type: "slider", at: [1, 1], key: "a/b", shows: { key: "a/c" } }]),
     ],
     ['has "script", which a canvas does not have', { ...canvas([]), script: "alert(1)" }],
+    [
+      'needs "options": 2 to 12',
+      canvas([{ type: "choice", at: [1, 1], key: "a/b", options: [{ value: 1 }] }]),
+    ],
+    [
+      "option 2 is {",
+      canvas([{ type: "choice", at: [1, 1], key: "a/b", options: [{ value: 1 }, { value: 2, name: "x" }] }]),
+    ],
+    [
+      "two of its options send 1",
+      canvas([{ type: "choice", at: [1, 1], key: "a/b", options: [{ value: 1 }, { value: 1, title: "x" }] }]),
+    ],
+    [
+      'a stepper that "sends" needs "min" and "max"',
+      canvas([{ type: "stepper", at: [1, 1], key: "generic/action/channel", sends: "n" }]),
+    ],
+    [
+      '"is" is the value that lights it',
+      canvas([{ type: "light", at: [1, 1], key: "a/b", is: { on: true } }]),
+    ],
+    ['needs "until"', canvas([{ type: "countdown", at: [1, 1], until: "25:00" }])],
+    ['needs "page"', canvas([{ type: "goto", at: [1, 1] }])],
+    [
+      'goes to the page "Lights", which this canvas does not have',
+      canvas([{ type: "goto", at: [1, 1], page: "Lights" }]),
+    ],
+    ['has "step", which a meter does not have', canvas([{ type: "meter", at: [1, 1], key: "a/b", step: 2 }])],
   ];
   for (const [words, doc] of wrong) {
     const problems: string[] = C.check(doc);
     assert(problems.some((p) => p.includes(words)), `${words}: ${JSON.stringify(problems)}`);
     // The schema cannot count columns, so that one is the checker's alone.
-    if (!words.startsWith("reaches past") && !words.includes("less than")) {
+    // Nor can it tell two options apart by their value alone, or know the names of a canvas's pages.
+    const checkerOnly = [
+      "reaches past",
+      "less than",
+      "two of its options",
+      "which this canvas does not have",
+    ];
+    if (!checkerOnly.some((w) => words.includes(w))) {
       assert(!valid(doc), `the schema took: ${words}`);
     }
   }
@@ -108,6 +142,57 @@ Deno.test("what is wrong with a canvas is said in words, and the schema refuses 
   }]);
   assertEquals(C.check(volume), []);
   assert(valid(volume), "the schema refuses the slider the guide shows");
+  // Every kind of piece, written as the guide says, on a canvas of two pages.
+  const every = {
+    kind: "canvas",
+    name: "Everything",
+    pages: [
+      {
+        name: "Main",
+        pieces: [
+          { type: "stepper", at: [1, 1, 2, 1], key: "console/input/1/trim", step: 0.5, min: -12, max: 12 },
+          {
+            type: "stepper",
+            at: [3, 1, 2, 1],
+            key: "generic/action/channel",
+            sends: "n",
+            min: 1,
+            max: 99,
+            shows: { key: "generic/reading/channel" },
+          },
+          {
+            type: "choice",
+            at: [1, 2, 4, 1],
+            key: "generic/action/power",
+            sends: "power",
+            options: [{ value: "power_on", title: "On" }, { value: "power_off", title: "Off" }],
+            color: "green",
+          },
+          {
+            type: "choice",
+            at: [1, 3, 1, 3],
+            key: "switch/outlet/1/on",
+            options: [{ value: true }, { value: false }],
+          },
+          { type: "meter", at: [2, 3, 3, 1], key: "generic/reading/volume_level", min: 0, max: 100 },
+          { type: "light", at: [2, 4, 3, 1], key: "generic/reading/recording", is: "yes", color: "red" },
+          { type: "countdown", at: [1, 6, 4, 2], until: "10:30", title: "Service starts" },
+          { type: "goto", at: [1, 8, 2, 1], page: "Lights" },
+        ],
+      },
+      { name: "Lights", pieces: [{ type: "goto", at: [1, 1], page: "Main", title: "Back" }] },
+    ],
+  };
+  assertEquals(C.check(every), []);
+  assert(valid(every), "the schema refuses a piece the guide shows");
+  // Laid out, each keeps what it needs to be drawn.
+  const laid = C.layout(every, 0, {}).pieces;
+  assertEquals(laid.find((p: { type: string }) => p.type === "choice").options.length, 2);
+  assertEquals(laid.find((p: { type: string }) => p.type === "countdown").until, "10:30");
+  assertEquals(laid.find((p: { type: string }) => p.type === "goto").page, "Lights");
+  assertEquals(laid.find((p: { type: string; sends?: string }) => p.type === "stepper" && p.sends).shows, {
+    key: "generic/reading/channel",
+  });
   // Groups can only go so deep, and a page only holds so much.
   // deno-lint-ignore no-explicit-any
   let deep: any = { type: "clock", at: [1, 1] };

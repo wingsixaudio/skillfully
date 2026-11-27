@@ -155,6 +155,16 @@ goes in. It does the action once, when it is let go: doing it at every step of a
 to do something thirty times a second. Where it rests comes from a reading it is pointed at, usually the
 device's own report of what the action sets, and a number reported as words is still a number.
 
+**Canvas has a piece for each thing a team keeps building by hand.** An agent asked for a remote, a status
+board or a run sheet reached for buttons with lights to make a choice of input, a readout to show a level, and
+had nothing for a countdown or for going between pages. Six pieces were added, each one small and each written
+the way the others are, so an agent learns them from the same guide: a stepper (down and up by a step), a
+choice (one of a few, the one in use lit), a meter (a number as a bar), a light (on air, recording), a
+countdown to a time of day, and a goto button for the pages of a canvas. A stepper and a choice can do an
+action, as a slider can. A countdown is the same on every phone, because it counts to a time of day and not
+from when someone pressed it. The options of a choice and where a goto button goes are written by the agent or
+in the canvas's file: Arrange shows them and can move, resize or remove the piece, and has no list editor.
+
 **A canvas uses the room a wide screen has.** Canvases are drawn for a phone, a few columns of thumb-sized
 pieces. On a computer's screen that was a narrow strip down the middle. A canvas is now drawn larger to fill
 the room there is, everything on it together, up to one and three quarters its size, so its proportions are

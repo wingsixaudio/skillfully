@@ -168,6 +168,146 @@
           }
         },
         {
+          "title": "A number shown as a bar, which cannot be changed from here. Taller than wide, it stands up",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "key"],
+          "properties": {
+            "type": { "const": "meter" },
+            "at": { "$ref": "#/$defs/at" },
+            "key": { "$ref": "#/$defs/key" },
+            "device": { "$ref": "#/$defs/device" },
+            "title": { "$ref": "#/$defs/text" },
+            "min": { "description": "Left out, the device's own range is used, or 0.", "type": "number" },
+            "max": { "description": "Left out, the device's own range is used, or 100.", "type": "number" },
+            "color": { "$ref": "#/$defs/color" }
+          }
+        },
+        {
+          "title": "A light: lit while a value is one thing. For on air, recording, live, muted",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "key"],
+          "properties": {
+            "type": { "const": "light" },
+            "at": { "$ref": "#/$defs/at" },
+            "key": { "$ref": "#/$defs/key" },
+            "device": { "$ref": "#/$defs/device" },
+            "title": { "$ref": "#/$defs/text" },
+            "is": {
+              "description": "The value that lights it. Left out, it is true.",
+              "$ref": "#/$defs/scalar"
+            },
+            "color": { "$ref": "#/$defs/color" }
+          }
+        },
+        {
+          "title": "One of a few: a row of choices, with the one in use lit. For an input, a scene, a mode",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "key", "options"],
+          "dependentRequired": { "shows": ["sends"] },
+          "properties": {
+            "type": { "const": "choice" },
+            "at": { "$ref": "#/$defs/at" },
+            "key": { "$ref": "#/$defs/key" },
+            "device": { "$ref": "#/$defs/device" },
+            "title": { "$ref": "#/$defs/text" },
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 12,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["value"],
+                "properties": {
+                  "value": { "$ref": "#/$defs/scalar" },
+                  "title": { "type": "string", "maxLength": 40 }
+                }
+              }
+            },
+            "sends": {
+              "description": "For a key that is an action: the id of the action's option the chosen value goes in.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "shows": {
+              "description": "With sends: the value that says which is in use now.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key"],
+              "properties": { "key": { "$ref": "#/$defs/key" }, "device": { "$ref": "#/$defs/device" } }
+            },
+            "color": { "$ref": "#/$defs/color" }
+          }
+        },
+        {
+          "title": "A number with a button each side, to take it down or up by a step",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "key"],
+          "dependentRequired": { "sends": ["min", "max"], "shows": ["sends"] },
+          "properties": {
+            "type": { "const": "stepper" },
+            "at": { "$ref": "#/$defs/at" },
+            "key": { "$ref": "#/$defs/key" },
+            "device": { "$ref": "#/$defs/device" },
+            "title": { "$ref": "#/$defs/text" },
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "step": { "description": "Left out, 1.", "type": "number", "exclusiveMinimum": 0 },
+            "sends": {
+              "description": "For a key that is an action that takes a number: the id of the option the number goes in.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "shows": {
+              "description": "With sends: the value that says what the number is now.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key"],
+              "properties": { "key": { "$ref": "#/$defs/key" }, "device": { "$ref": "#/$defs/device" } }
+            }
+          }
+        },
+        {
+          "title": "A countdown to a time of day, such as when a service starts. After it, it counts up",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "until"],
+          "properties": {
+            "type": { "const": "countdown" },
+            "at": { "$ref": "#/$defs/at" },
+            "title": { "$ref": "#/$defs/text" },
+            "until": {
+              "description": "The time of day, on a 24-hour clock: \"10:30\", \"18:00\".",
+              "type": "string",
+              "pattern": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$"
+            }
+          }
+        },
+        {
+          "title": "A button that goes to another page of this canvas",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "page"],
+          "properties": {
+            "type": { "const": "goto" },
+            "at": { "$ref": "#/$defs/at" },
+            "title": { "$ref": "#/$defs/text" },
+            "page": {
+              "description": "The name of the page, as it is written in this canvas.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
+            },
+            "color": { "$ref": "#/$defs/color" }
+          }
+        },
+        {
           "title": "The time",
           "type": "object",
           "additionalProperties": false,
