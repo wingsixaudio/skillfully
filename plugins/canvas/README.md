@@ -105,6 +105,22 @@ A name in braces is filled in when the canvas is shown: first from the group a p
 slots of the person looking (the same slots a superuser sets under People, such as `ears`). A piece whose key
 needs a slot nobody has set for that person says so, and sends nothing.
 
+## Arranging on the screen
+
+Someone who may arrange canvases has an Arrange button on each one, and "An empty canvas" to start from.
+
+- **Choose, then drag.** A first touch chooses a piece. Dragging a chosen piece moves it by whole cells, and
+  dragging its corner sizes it. The arrow keys move it, and with Shift they size it.
+- **Add** asks what the new piece is tied to, from a list of what the screen's devices have. Type to narrow
+  it: "input 3 bus 2".
+- **The sheet** for a chosen piece holds everything the file can say about it. A number in its key can be
+  switched to "each item of the group" or "each person's own" without typing braces.
+- **Put in a group**, then set the group to repeat, to turn one strip into eight.
+- **Nothing is kept until Done.** Undo steps back one change at a time, and Cancel loses them all after
+  asking. What Done keeps is checked first, and is the same file a person or an agent could have written.
+
+While arranging, pieces show what the devices hold and do nothing when touched.
+
 ## Who can do what
 
 | Ability                           | What it lets a person do                                        |
@@ -113,7 +129,7 @@ needs a slot nobody has set for that person says so, and sends nothing.
 | Use everything on a canvas        | Press and drag anything, on any of the screen's connections     |
 | See my own ear mix on a canvas    | Open them, and see input names and the sends into their own bus |
 | Adjust my own ear mix on a canvas | Change the sends into their own bus, and nothing else           |
-| Add and remove canvases           | Start a canvas, and remove one                                  |
+| Arrange canvases                  | Start a canvas, arrange what is on one, and remove one          |
 
 A canvas does not widen anyone's reach. A piece that is not a person's to change is drawn dimmed and says why
 when touched, and the hub refuses it whatever the screen sends.
@@ -136,8 +152,6 @@ row of sources with the live one lit, camera presets, and a run sheet across thr
 
 ## What it cannot do yet
 
-- **Arranging by dragging.** For now a canvas is started from the ones offered on the screen, or written as a
-  file.
 - **Meters.** The hub has no message for them yet.
 - **A button that acts on press and again on release**, for moving a camera while it is held.
 - **Companion's own button feedback.** A button is lit from a reading, with `lit`.

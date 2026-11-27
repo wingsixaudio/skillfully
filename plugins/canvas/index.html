@@ -458,7 +458,288 @@
       background: var(--accent);
       color: #000;
     }
+    /* Arranging: the grid shows, pieces are chosen and dragged, and a sheet says what the chosen one is */
+    #bar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .tools {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    button.on {
+      background: var(--accent);
+      color: #000;
+    }
+    button.bad {
+      color: var(--bad);
+    }
+    button:disabled {
+      opacity: .4;
+    }
+    .cell {
+      border: 1px dashed var(--rail);
+      border-radius: 10px;
+    }
+    .slot {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      border-radius: 14px;
+      cursor: pointer;
+    }
+    .slot > .piece {
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    .slot:focus-visible {
+      outline: 2px solid var(--text);
+      outline-offset: 2px;
+    }
+    .sel {
+      scroll-margin: 72px 0 calc(56dvh + 24px);
+    }
+    .slot.sel {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      touch-action: none;
+      cursor: grab;
+      z-index: 2;
+    }
+    .slot.clash::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border: 2px dashed var(--bad);
+      border-radius: 14px;
+      pointer-events: none;
+    }
+    .outline {
+      position: relative;
+      margin: -4px;
+      border: 1px dashed var(--dim);
+      border-radius: 16px;
+      pointer-events: none;
+    }
+    .outline.sel {
+      border: 2px solid var(--accent);
+      z-index: 2;
+    }
+    .tab {
+      position: absolute;
+      top: -10px;
+      left: 10px;
+      max-width: calc(100% - 20px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 18px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: var(--rail);
+      pointer-events: auto;
+      cursor: pointer;
+    }
+    .sel .tab {
+      background: var(--accent);
+      color: #000;
+      touch-action: none;
+      cursor: grab;
+    }
+    .grip {
+      position: absolute;
+      right: -9px;
+      bottom: -9px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 3px solid var(--chassis);
+      pointer-events: auto;
+      touch-action: none;
+      cursor: nwse-resize;
+    }
+    #panel {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      max-height: 52dvh;
+      overflow-y: auto;
+      background: var(--panel);
+      border-top: 1px solid var(--rail);
+      border-radius: 18px 18px 0 0;
+      padding: 14px max(14px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom))
+        max(14px, env(safe-area-inset-left));
+      display: grid;
+      gap: 12px;
+      z-index: 5;
+    }
+    body.sheeting {
+      padding-bottom: 56dvh;
+    }
+    .pickHead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .pickHead h2 {
+      font-size: 17px;
+      font-weight: 600;
+      margin: 0;
+    }
+    .field {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+      font-size: 13px;
+      color: var(--dim);
+    }
+    .field input[type="text"],
+    .field input[type="number"],
+    .field select,
+    #picker input {
+      font: inherit;
+      font-size: 15px;
+      color: var(--text);
+      background: var(--rail);
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 9px 12px;
+      min-height: 40px;
+      width: 100%;
+      min-width: 0;
+    }
+    .field input:focus-visible,
+    #picker input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .field code {
+      font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text);
+      overflow-wrap: anywhere;
+      flex: 1;
+      min-width: 0;
+    }
+    .field small {
+      font-size: 12px;
+    }
+    .with {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .with input {
+      flex: 1;
+    }
+    .parts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 10px;
+    }
+    .stepper {
+      grid-template-columns: 1fr auto auto auto;
+      align-items: center;
+    }
+    .stepper b {
+      min-width: 28px;
+      text-align: center;
+      color: var(--text);
+      font-size: 15px;
+      font-variant-numeric: tabular-nums;
+    }
+    .stepper button {
+      min-width: 44px;
+      font-size: 18px;
+      padding: 4px;
+    }
+    .tick {
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      color: var(--text);
+    }
+    .tick input {
+      width: 22px;
+      height: 22px;
+      accent-color: var(--accent);
+    }
+    .hint {
+      margin: 0;
+      font-size: 13px;
+      color: var(--dim);
+      line-height: 1.4;
+    }
+    #picker {
+      position: fixed;
+      inset: 0;
+      z-index: 6;
+      background: var(--chassis);
+      padding: 14px max(14px, env(safe-area-inset-right)) 14px max(14px, env(safe-area-inset-left));
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 12px;
+    }
+    #pickList {
+      overflow-y: auto;
+      display: grid;
+      align-content: start;
+      gap: 6px;
+    }
+    .pick {
+      display: grid;
+      gap: 2px;
+      text-align: left;
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-weight: 500;
+    }
+    .pick span {
+      font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--dim);
+      overflow-wrap: anywhere;
+    }
+    @media (min-width: 900px) {
+      #panel {
+        left: auto;
+        top: 0;
+        width: 360px;
+        max-height: none;
+        border-top: 0;
+        border-left: 1px solid var(--rail);
+        border-radius: 0;
+        align-content: start;
+      }
+      body.sheeting {
+        padding-bottom: 72px;
+        padding-right: 376px;
+      }
+      .sel {
+        scroll-margin: 72px 0;
+      }
+      #picker {
+        left: auto;
+        width: 360px;
+        border-left: 1px solid var(--rail);
+        background: var(--panel);
+      }
+      .pick {
+        background: var(--well);
+      }
+    }
     #said {
+      z-index: 7;
       position: fixed;
       left: 50%;
       bottom: max(14px, env(safe-area-inset-bottom));
@@ -481,6 +762,14 @@
       :root {
         --gap: 6px;
       }
+      /* On a phone the light says it is connected. The word is kept for when it is not. */
+      .led.on + #linkText {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
     }
     @media (prefers-reduced-motion: reduce) {
       button.piece {
@@ -494,10 +783,12 @@
       <header>
         <h1 id="name"></h1>
         <select id="pick" aria-label="Canvas" hidden></select>
+        <button id="arrange" class="quiet" type="button" hidden>Arrange</button>
         <button id="more" class="quiet" type="button" aria-expanded="false" hidden>Canvases</button>
         <div class="link"
           aria-live="polite"><i class="led" id="led"></i><span id="linkText">Connecting</span></div>
       </header>
+      <div id="bar" hidden></div>
       <div id="pages" role="tablist" aria-label="Pages" hidden></div>
       <p id="notes"></p>
       <div id="scroll">
@@ -506,10 +797,14 @@
       <section id="shelf" class="card" aria-label="Canvases" hidden></section>
       <section id="blank" class="card" hidden></section>
     </main>
+    <section id="panel" aria-label="The chosen piece" hidden></section>
+    <section id="picker" aria-label="Choose a value" hidden></section>
     <p id="said" role="status"></p>
 
     <script src="canvas.js"></script>
     <script src="starters.js"></script>
+    <script src="changes.js"></script>
+    <script src="arrange.js"></script>
     <script>
     // This page runs in the hub's sandbox. It has no network and no access to the hub's own pages. What it
     // knows arrives as a message from the page around it, and what it wants goes out the same way.
@@ -535,6 +830,8 @@
       const subs = new Map(); // "device|key" -> Set of functions to call with the new value
       const asked = new Map(); // ref -> { ok(message), fail(message) }
       let clocks = [], wanted = null;
+      /** While a canvas is being arranged: the working copy and what is chosen on it. See arrange.js. */
+      let arr = null;
 
       // --- Saying things ---
 
@@ -629,11 +926,14 @@
 
       // --- The pieces ---
 
-      const placed = (e, p) => {
-        e.classList.add("piece");
+      const where = (e, p) => {
         e.style.gridColumn = p.col + " / span " + p.wide;
         e.style.gridRow = p.row + " / span " + p.tall;
         return e;
+      };
+      const placed = (e, p) => {
+        e.classList.add("piece");
+        return where(e, p);
       };
       /** A piece that cannot be used looks it, and says why when it is touched. */
       function off(e, t) {
@@ -915,10 +1215,10 @@
 
       function drawHead() {
         const c = current();
-        const many = canvases.length > 1;
+        const many = canvases.length > 1 && !arr;
         $("name").hidden = many;
         $("pick").hidden = !many;
-        $("name").textContent = c ? c.doc.name || c.id : "Canvas";
+        $("name").textContent = arr ? arr.doc.name : c ? c.doc.name || c.id : "Canvas";
         const pick = $("pick");
         pick.innerHTML = "";
         for (const x of canvases) {
@@ -927,23 +1227,104 @@
           );
         }
         const more = $("more");
-        more.hidden = !(mayCreate || canvases.some((x) => x.write)) || !canvases.length;
+        more.hidden = !(mayCreate || canvases.some((x) => x.write)) || !canvases.length || !!arr;
         more.setAttribute("aria-expanded", String(shelf));
+        $("arrange").hidden = !!arr || shelf || !c || !c.write || !!c.problems.length;
 
         const pages = $("pages");
         pages.innerHTML = "";
-        const list = c && !c.problems.length ? c.doc.pages : [];
-        pages.hidden = list.length < 2 || shelf;
+        const list = arr ? arr.doc.pages : c && !c.problems.length ? c.doc.pages : [];
+        const on = arr ? arr.page : page;
+        pages.hidden = (list.length < 2 && !arr) || shelf;
         list.forEach((pg, i) => {
           const b = el("button", { type: "button", textContent: pg.name });
           b.setAttribute("role", "tab");
-          b.setAttribute("aria-selected", String(i === page));
+          b.setAttribute("aria-selected", String(i === on));
           b.onclick = () => {
+            if (arr) return arr.setPage(i);
             page = i;
             draw();
           };
           pages.append(b);
         });
+        if (arr) {
+          const b = el("button", { type: "button", id: "addPage", textContent: "+ Page" });
+          b.onclick = () => arr.addPage();
+          pages.append(b);
+        }
+      }
+
+      /**
+       * The board while it is being arranged: every cell shown, every piece drawn as it is in use but
+       * unable to act, and each wrapped in something that can be chosen and dragged. A group shows as an
+       * outline with a tab to take hold of.
+       */
+      function drawArranging(board, plan) {
+        for (let row = 1; row <= plan.rows + 2; row++) {
+          for (let col = 1; col <= plan.columns; col++) {
+            board.append(where(el("i", { className: "cell" }), { col, row, wide: 1, tall: 1 }));
+          }
+        }
+        // Two pieces on the same cell are allowed, and shown, since it is rarely what was meant.
+        const on = new Map();
+        for (const p of plan.pieces) {
+          if (p.type === "group") continue;
+          for (let x = p.col; x < p.col + p.wide; x++) {
+            for (let y = p.row; y < p.row + p.tall; y++) on.set(x + "," + y, (on.get(x + "," + y) || 0) + 1);
+          }
+        }
+        const clashes = (p) => {
+          for (let x = p.col; x < p.col + p.wide; x++) {
+            for (let y = p.row; y < p.row + p.tall; y++) if (on.get(x + "," + y) > 1) return true;
+          }
+          return false;
+        };
+        let gripped = false;
+        const grip = (e, p) => {
+          if (gripped || (p.path !== arr.touched && plan.pieces.some((x) => x.path === arr.touched))) return;
+          gripped = true;
+          e.append(el("i", { className: "grip" }));
+        };
+        for (const p of plan.pieces) {
+          const chosen = C.edit.written(p.path) === arr.selected;
+          if (p.type === "group") {
+            const written = C.edit.spot(arr.doc, arr.page, p.path).piece;
+            const r = written.repeat;
+            const times = r ? (r.each ? r.each.length : r.to - r.from + 1) : 0;
+            const tab = el("span", {
+              className: "tab",
+              tabIndex: 0,
+              textContent: (typeof p.title === "string" && p.title ? p.title : "Group") +
+                (times ? " × " + times : ""),
+            });
+            tab.setAttribute("role", "button");
+            const box = where(el("div", { className: "outline" + (chosen ? " sel" : "") }, tab), p);
+            box.dataset.path = p.path;
+            if (chosen) grip(box, p);
+            board.append(box);
+            continue;
+          }
+          const made = MAKE[p.type](p);
+          made.classList.add("piece");
+          made.inert = true;
+          const slot = where(
+            el(
+              "div",
+              { className: "slot" + (chosen ? " sel" : "") + (clashes(p) ? " clash" : ""), tabIndex: 0 },
+              made,
+            ),
+            p,
+          );
+          slot.dataset.path = p.path;
+          slot.setAttribute("role", "button");
+          slot.setAttribute(
+            "aria-label",
+            p.type + (made.textContent ? ": " + made.textContent.trim().slice(0, 60) : ""),
+          );
+          slot.setAttribute("aria-pressed", String(chosen));
+          if (chosen) grip(slot, p);
+          board.append(slot);
+        }
       }
 
       function drawBoard() {
@@ -954,6 +1335,17 @@
         blank.innerHTML = "";
         notes.innerHTML = "";
         const c = current();
+        document.body.classList.toggle("sheeting", !!arr && !$("panel").hidden);
+        if (arr) {
+          $("scroll").hidden = false;
+          blank.hidden = true;
+          const plan = C.layout(arr.doc, arr.page, me.slots || {});
+          board.style.setProperty("--cols", plan.columns);
+          board.style.maxWidth = plan.columns * 132 + "px";
+          drawArranging(board, plan);
+          clocks.forEach((tick) => tick());
+          return;
+        }
         $("scroll").hidden = !c || !!c.problems.length || shelf;
         blank.hidden = shelf || !!(c && !c.problems.length);
         if (shelf) return;
@@ -1026,10 +1418,57 @@
         toHub({ type: "doc-put", id, doc, ref });
       }
 
+      const slug = (name) =>
+        String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50) || "canvas";
+
+      /** Start arranging a canvas. A new one is not kept anywhere until Done. */
+      function arrange(id, doc, fresh) {
+        shelf = false;
+        arr = globalThis.SkillfullyCanvasArrange.start({
+          id,
+          doc,
+          fresh,
+          page: fresh ? 0 : page,
+          el,
+          say,
+          board: $("board"),
+          bar: $("bar"),
+          panel: $("panel"),
+          picker: $("picker"),
+          plugins: () => plugins,
+          values: (plugin) => values.get(plugin) || new Map(),
+          defs: () => defs,
+          slots: () => me.slots || {},
+          draw,
+          save: (_, made, done) => {
+            // A new canvas takes its file name from the name it was given.
+            const as = fresh ? unused(slug(made.name)) : id;
+            asked.set(++ref, {
+              doc: (m) => {
+                if (m.ok) wanted = as;
+                done(m);
+              },
+            });
+            toHub({ type: "doc-put", id: as, doc: made, ref });
+          },
+          done: () => {
+            page = arr.page;
+            arr.stop();
+            arr = null;
+            draw();
+          },
+        });
+        draw();
+      }
+      $("arrange").onclick = () => {
+        const c = current();
+        if (c && c.write && !c.problems.length) arrange(c.id, c.doc, false);
+      };
+
       function drawShelf() {
         const box = $("shelf");
         box.innerHTML = "";
-        const open = shelf || (greeted && answered && !canvases.length && mayCreate);
+        const open = !arr && (shelf || (greeted && answered && !canvases.length && mayCreate));
         box.hidden = !open;
         if (!open) return;
         if (!canvases.length) $("blank").hidden = true;
@@ -1060,6 +1499,21 @@
                 "This screen has not been given a device yet. A superuser chooses its connections under Screens, and what there is to start from shows up here.",
             }));
           }
+          const empty = el("button", { type: "button", className: "on", id: "startEmpty", textContent: "Start" });
+          empty.onclick = () => arrange(null, C.edit.blank("New canvas"), true);
+          box.append(
+            el(
+              "div",
+              { className: "item" },
+              el(
+                "div",
+                {},
+                el("b", { textContent: "An empty canvas" }),
+                el("span", { textContent: "One page with nothing on it, to arrange yourself." }),
+              ),
+              empty,
+            ),
+          );
           for (const s of starts) {
             const add = el("button", { type: "button", className: "on", textContent: "Add" });
             add.onclick = () => keep(unused(s.id), s.doc);
@@ -1117,7 +1571,7 @@
         }
         const c = current();
         if (c && !c.problems.length && page >= c.doc.pages.length) page = 0;
-        if (!canvases.length) shelf = false;
+        if (!canvases.length || arr) shelf = false;
         drawHead();
         drawBoard();
         drawShelf();
