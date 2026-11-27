@@ -148,6 +148,18 @@ up after a second and a half. An action that pairs does not finish until someone
 it looked like a failure while it was working. Companion does not wait on an action. After that second and a
 half a press is now answered as begun, and an action that fails later is noted in the log.
 
+**A slider can do an action that takes a number.** Many devices take a volume or a level as an action with a
+number in it, not as a value that can be set. A slider could only set a value, so the agent, asked for a
+volume slider on a television, had to say it could not. A slider can now name the action's option its number
+goes in. It does the action once, when it is let go: doing it at every step of a drag would be the device told
+to do something thirty times a second. Where it rests comes from a reading it is pointed at, usually the
+device's own report of what the action sets, and a number reported as words is still a number.
+
+**A canvas uses the room a wide screen has.** Canvases are drawn for a phone, a few columns of thumb-sized
+pieces. On a computer's screen that was a narrow strip down the middle. A canvas is now drawn larger to fill
+the room there is, everything on it together, up to one and three quarters its size, so its proportions are
+the ones it was drawn with. It is never made smaller than it was drawn.
+
 **A device that cannot be reached says why.** A module that cannot reach its device usually says only "check
 the address". The reason is an error its library prints, which nothing kept, so a person had nowhere to read
 it and could only guess. An error a module prints is now put beside what the module says is wrong, and noted

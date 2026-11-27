@@ -60,15 +60,15 @@ filled in from the person looking, so one canvas is everybody's own mix.
 
 Every piece has `type` and `at`. A piece tied to a device has a `key`, and may name a `device`.
 
-| Type      | What it is                                                              | Its own words                                     |
-| --------- | ----------------------------------------------------------------------- | ------------------------------------------------- |
-| `label`   | Words on the canvas                                                     | `text`, `size` (`small`, `normal`, `large`)       |
-| `readout` | A value, shown                                                          | `key`, `device`, `title`                          |
-| `button`  | Triggers an action, or sets a value to one thing                        | `key`, `device`, `title`, `value`, `lit`, `color` |
-| `toggle`  | A switch between two values                                             | `key`, `device`, `title`, `on`, `off`, `color`    |
-| `slider`  | A value you drag. Taller than wide it stands up, otherwise it lies down | `key`, `device`, `title`, `min`, `max`, `step`    |
-| `clock`   | The time                                                                | `title`, `seconds`                                |
-| `group`   | Pieces placed together, which can repeat                                | `title`, `pieces`, `repeat`                       |
+| Type      | What it is                                                              | Its own words                                                    |
+| --------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `label`   | Words on the canvas                                                     | `text`, `size` (`small`, `normal`, `large`)                      |
+| `readout` | A value, shown                                                          | `key`, `device`, `title`                                         |
+| `button`  | Triggers an action, or sets a value to one thing                        | `key`, `device`, `title`, `value`, `lit`, `color`                |
+| `toggle`  | A switch between two values                                             | `key`, `device`, `title`, `on`, `off`, `color`                   |
+| `slider`  | A value you drag. Taller than wide it stands up, otherwise it lies down | `key`, `device`, `title`, `min`, `max`, `step`, `sends`, `shows` |
+| `clock`   | The time                                                                | `title`, `seconds`                                               |
+| `group`   | Pieces placed together, which can repeat                                | `title`, `pieces`, `repeat`                                      |
 
 - **`key`** is a value or an action of a device, as the Controls screen lists them: the kind of device, a
   slash, then the value. `console/input/1/bus/2/level`, `switch/outlet/3/on`, `generic/ready/lamp_on`.
@@ -83,6 +83,25 @@ Every piece has `type` and `at`. A piece tied to a device has a `key`, and may n
 - **`color`** is one of `orange`, `red`, `green`, `blue`, `yellow`, `white`.
 - A slider takes its range from the device. `min`, `max` and `step` are for when the device does not say. A
   level in decibels gets the travel a fader has: most of it is the part people mix in.
+- A slider can also be tied to **an action that takes a number**, which is how many devices take a volume or a
+  level. Give the action as `key`, and in **`sends`** the id of the action's option the number goes in. The
+  action is done once, with the number, when the slider is let go, not while it is moving. Give `min` and
+  `max`, since an action has no range of its own. **`shows`** is the value that says where the slider rests,
+  usually the device's own reading of what the action sets. A reading that is a number written as words still
+  works.
+
+  ```json
+  {
+    "type": "slider",
+    "at": [1, 5, 4, 1],
+    "key": "generic/action/volume",
+    "sends": "volume",
+    "min": 0,
+    "max": 100,
+    "shows": { "key": "generic/reading/volume_level" },
+    "title": "Volume"
+  }
+  ```
 
 ## Groups
 

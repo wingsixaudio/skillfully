@@ -142,6 +142,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["type", "at", "key"],
+          "dependentRequired": { "sends": ["min", "max"], "shows": ["sends"] },
           "properties": {
             "type": { "const": "slider" },
             "at": { "$ref": "#/$defs/at" },
@@ -150,7 +151,20 @@
             "title": { "$ref": "#/$defs/text" },
             "min": { "description": "Left out, the device's own range is used.", "type": "number" },
             "max": { "type": "number" },
-            "step": { "type": "number", "exclusiveMinimum": 0 }
+            "step": { "type": "number", "exclusiveMinimum": 0 },
+            "sends": {
+              "description": "For a slider whose key is an action that takes a number, and not a value: the id of the action's option the number goes in. The action is done once, with that number, when the slider is let go. Give min and max, since an action has no range of its own.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "shows": {
+              "description": "With sends: the value that says where the slider rests, such as the device's reading of what the action sets. Left out, the slider stays where it was let go.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key"],
+              "properties": { "key": { "$ref": "#/$defs/key" }, "device": { "$ref": "#/$defs/device" } }
+            }
           }
         },
         {

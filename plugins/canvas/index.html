@@ -1033,6 +1033,21 @@
         return e;
       }
 
+      // A canvas is laid out for a phone, where it fills the screen. On a wider screen, a tablet on a
+      // stand or a computer, it is made larger to use the room there is, everything on it together, so a
+      // remote drawn for a thumb is not a narrow strip in the middle of a monitor. It is never made
+      // smaller than it was drawn, and not so large that a button is the size of a hand.
+      let drawnColumns = 4;
+      function roomFor(columns) {
+        drawnColumns = columns;
+        const natural = columns * 132;
+        board.style.maxWidth = natural + "px";
+        const room = $("scroll").clientWidth - 8;
+        const larger = Math.min(1.75, room / natural);
+        board.style.zoom = larger > 1.05 ? String(Number(larger.toFixed(3))) : "";
+      }
+      addEventListener("resize", () => roomFor(drawnColumns));
+
       function slider(p) {
         const t = tie(p.key, p.device, p.missing);
         const up = p.tall > p.wide;
@@ -1058,6 +1073,9 @@
 
         let value = null, held = null, dragging = false, quietUntil = 0;
         let lastSent = 0, queued = null, waiting = null, mine = 0, heard = 0;
+        // A slider tied to an action does the action once, with the number, when it is let go. Doing it
+        // at every step of the way would be the device told to do something thirty times a second.
+        const asked = typeof p.sends === "string" && p.sends ? p.sends : null;
         function paint() {
           const known = typeof value === "number";
           const at = known ? C.toPlace(value, r) * 100 + "%" : "0%";
@@ -1083,7 +1101,12 @@
         });
         e.setAttribute("aria-label", name.textContent);
 
-        t.watch((v) => {
+        // Where it rests comes from the value itself, or for an action from the reading it was given.
+        const shown = asked ? (p.shows ? tie(p.shows.key, p.shows.device ?? p.device, p.missing) : null) : t;
+        if (asked && !shown) (value = r.min), (held = r.min);
+        (shown && shown.plugin ? shown : { watch() {} }).watch((v) => {
+          // A device may report a number as words.
+          if (asked && typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) v = Number(v);
           if (typeof v !== "number") return;
           held = v;
           // While a thumb is on the slider, the thumb is in charge. Otherwise the device is.
@@ -1122,11 +1145,30 @@
             },
           }) || mine;
         };
+        // Let go of, a slider tied to an action does it: the number, in the option it was told to use.
+        const ask = () => {
+          if (!asked || typeof value !== "number") return;
+          const n = Number((Math.round(value / r.step) * r.step).toFixed(6));
+          value = n;
+          paint();
+          // The device's own report of it takes a moment to follow. Until then the slider stays put.
+          quietUntil = performance.now() + 2500;
+          send(t, JSON.stringify({ [asked]: n }), {
+            ok: () => {},
+            fail: (m) => {
+              say(m.error.message, true);
+              quietUntil = 0;
+              value = held;
+              paint();
+            },
+          });
+        };
         // At most one message every 33 ms, and only ever the newest. The hub keeps only the newest too.
         const move = (v) => {
           value = v;
           paint();
           quietUntil = performance.now() + 400;
+          if (asked) return;
           const now = performance.now();
           if (now - lastSent < 33) {
             queued = v;
@@ -1157,6 +1199,11 @@
         });
         e.addEventListener("pointermove", (ev) => dragging && move(fromPointer(ev)));
         const release = () => {
+          if (asked) {
+            if (dragging) ask();
+            dragging = false;
+            return;
+          }
           dragging = false;
           // If the device has already answered the last thing sent, show what it holds now.
           if (queued === null && heard === mine && typeof held === "number") {
@@ -1183,6 +1230,8 @@
           else return;
           ev.preventDefault();
         });
+        // Moved with the keys, it is let go of when the key is.
+        if (asked) e.addEventListener("keyup", (ev) => /^(Arrow|Page|Home|End)/.test(ev.key) && ask());
         return e;
       }
 
@@ -1366,7 +1415,7 @@
           blank.hidden = true;
           const plan = C.layout(arr.doc, arr.page, me.slots || {});
           board.style.setProperty("--cols", plan.columns);
-          board.style.maxWidth = plan.columns * 132 + "px";
+          roomFor(plan.columns);
           drawArranging(board, plan);
           clocks.forEach((tick) => tick());
           return;
@@ -1396,7 +1445,7 @@
         }
         const plan = C.layout(c.doc, page, me.slots || {});
         board.style.setProperty("--cols", plan.columns);
-        board.style.maxWidth = plan.columns * 132 + "px";
+        roomFor(plan.columns);
         for (const p of plan.pieces) {
           const made = MAKE[p.type](p);
           if (made) board.append(placed(made, p));

@@ -519,6 +519,60 @@ async def main():
         await owner.wait_for_timeout(300)
         heard = await canvas_frame.evaluate("() => window.heard")
         check("a canvas tells the hub which values it is showing, and is sent those and no others", 8 <= len(set(heard)) <= 16 and all(k.startswith(("switch/outlet/", "generic/")) for k in heard), f"{len(set(heard))} values: {sorted(set(heard))[:6]}")
+
+        # --- A slider tied to an action that takes a number: done once, when it is let go ---
+        with open(os.path.join(canvas_dir, "lamp-level.json"), "w") as f:
+            json.dump({"kind": "canvas", "name": "Lamp level", "pages": [{"name": "One", "pieces": [
+                {"type": "readout", "at": [1, 1, 4, 1], "key": "generic/reading/level", "device": lamp_id, "title": "Level now"},
+                {"type": "slider", "at": [1, 2, 4, 1], "key": "generic/action/level", "device": lamp_id, "sends": "level", "min": 0, "max": 100, "shows": {"key": "generic/reading/level"}, "title": "Level"}]}]}, f)
+        await owner.goto(base + "/s/canvas")
+        cv = owner.frame_locator("#screen")
+        await cv.locator("#pick option", has_text="Lamp level").wait_for(state="attached", timeout=8000)
+        await cv.locator("#pick").select_option("lamp-level")
+        knob = cv.locator("#board .slider")
+        await knob.wait_for()
+        now = cv.locator("#board .readout .num")
+        await owner.wait_for_timeout(800)
+        was = (await now.inner_text()).strip()
+        check("a slider tied to an action rests where the device says the thing is", was not in ("", "—") and await knob.get_attribute("aria-valuenow") == was, f"{await knob.get_attribute('aria-valuenow')} {await now.inner_text()}")
+        box = await knob.locator(".track").bounding_box()
+        await owner.mouse.move(box["x"] + box["width"] * 0.1, box["y"] + box["height"] / 2)
+        await owner.mouse.down()
+        for part in (0.25, 0.5, 0.7, 0.8):
+            await owner.mouse.move(box["x"] + box["width"] * part, box["y"] + box["height"] / 2)
+            await owner.wait_for_timeout(120)
+        await owner.wait_for_timeout(500)
+        check("while it is being moved, nothing is sent: the device is where it was", (await now.inner_text()).strip() == was and (await knob.get_attribute("aria-valuenow")) not in ("30", None), f"{await now.inner_text()} {await knob.get_attribute('aria-valuenow')}")
+        await owner.mouse.up()
+        for _ in range(60):
+            if (await now.inner_text()).strip() == "80": break
+            await owner.wait_for_timeout(100)
+        check("let go, the action is done once with the number it was let go at", (await now.inner_text()).strip() == "80" and await knob.get_attribute("aria-valuenow") == "80", f"{await now.inner_text()} {await knob.get_attribute('aria-valuenow')}")
+        if shots: await owner.screenshot(path=f"{shots}/12-canvas-action-slider.png")
+
+        # --- On a wide screen a canvas uses the room there is ---
+        narrow = (await cv.locator("#board").bounding_box())["width"]
+        await owner.set_viewport_size({"width": 1440, "height": 900})
+        await owner.wait_for_timeout(400)
+        wide = (await cv.locator("#board").bounding_box())["width"]
+        check("on a computer's screen a canvas is drawn larger, not as a strip down the middle", wide > 800 and narrow < 420, f"{narrow} then {wide}")
+        if shots: await owner.screenshot(path=f"{shots}/13-canvas-wide.png")
+        box = await knob.locator(".track").bounding_box()
+        await owner.mouse.move(box["x"] + box["width"] * 0.8, box["y"] + box["height"] / 2)
+        await owner.mouse.down()
+        await owner.mouse.move(box["x"] + box["width"] * 0.5, box["y"] + box["height"] / 2)
+        await owner.wait_for_timeout(150)
+        await owner.mouse.up()
+        for _ in range(60):
+            if (await now.inner_text()).strip() == "50": break
+            await owner.wait_for_timeout(100)
+        check("and drawn larger, a slider still lands where the pointer let it go", (await now.inner_text()).strip() == "50", await now.inner_text())
+        await owner.set_viewport_size({"width": 390, "height": 844})
+        await owner.goto(base + "/s/canvas")
+        cv = owner.frame_locator("#screen")
+        await cv.locator("#pick option").nth(4).wait_for(state="attached", timeout=8000)
+        await cv.locator("#pick").select_option("switcher"); await cv.locator("#board button.piece", has_text="Outlet 3").wait_for(timeout=8000)
+        canvas_frame = next(f for f in owner.frames if "/screens/canvas/" in f.url)
         lamp_on = cv.locator("#board button.piece", has_text="Lamp on")
         check("a button is lit by a reading of its device", "lit" in await lamp_on.get_attribute("class") and "lit" not in await cv.locator("#board button.piece", has_text="Lamp off").get_attribute("class"), await lamp_on.get_attribute("class"))
         three = cv.locator("#board button.piece", has_text="Outlet 3")

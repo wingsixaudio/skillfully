@@ -22,7 +22,7 @@
     readout: ["key", "device", "title"],
     button: ["key", "device", "title", "value", "lit", "color"],
     toggle: ["key", "device", "title", "on", "off", "color"],
-    slider: ["key", "device", "title", "min", "max", "step"],
+    slider: ["key", "device", "title", "min", "max", "step", "sends", "shows"],
     clock: ["title", "seconds"],
     group: ["title", "pieces", "repeat"],
   };
@@ -138,6 +138,23 @@
         out.push(`${where}: "min" has to be less than "max"`);
       }
       if (p.step !== undefined && !(p.step > 0)) out.push(`${where}: "step" has to be more than nothing`);
+      // Tied to an action that takes a number: which option the number goes in, and what says where it rests.
+      if (p.sends !== undefined) {
+        if (typeof p.sends !== "string" || !p.sends || p.sends.length > 64) {
+          out.push(`${where}: "sends" is the id of the action's option the slider's number goes in`);
+        }
+        if (!Number.isFinite(p.min) || !Number.isFinite(p.max)) {
+          out.push(
+            `${where}: a slider that "sends" needs "min" and "max": an action has no range of its own`,
+          );
+        }
+      }
+      if (p.shows !== undefined) {
+        if (p.sends === undefined) out.push(`${where}: "shows" goes with "sends"`);
+        if (!isObject(p.shows) || Object.keys(p.shows).some((k) => !["key", "device"].includes(k))) {
+          out.push(`${where}: "shows" is { "key": ... }: the value that says where the slider rests`);
+        } else key(p.shows.key, "its shows");
+      }
     }
     if (p.type === "clock" && p.seconds !== undefined && typeof p.seconds !== "boolean") {
       out.push(`${where}: "seconds" is true or false`);
@@ -290,6 +307,11 @@
             key: fill(p.lit.key, scope, missing),
             ...(p.lit.device === undefined ? {} : { device: fill(p.lit.device, scope, missing) }),
             is: p.lit.is ?? true,
+          };
+        } else if (k === "shows") {
+          made.shows = {
+            key: fill(p.shows.key, scope, missing),
+            ...(p.shows.device === undefined ? {} : { device: fill(p.shows.device, scope, missing) }),
           };
         } else made[k] = p[k];
       }
