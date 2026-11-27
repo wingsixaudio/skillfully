@@ -165,6 +165,33 @@
       font-size: 13px;
       color: var(--dim);
     }
+    .waiting.done::after {
+      content: none;
+    }
+    .yesno {
+      background: var(--panel);
+      border-radius: 16px;
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+    .yesno p {
+      margin: 0;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .yesno div {
+      display: flex;
+      gap: 8px;
+    }
+    .yesno button {
+      flex: 1;
+    }
+    .yesno button.no {
+      background: var(--rail);
+      color: var(--text);
+      font-weight: 500;
+    }
     .trouble {
       color: var(--bad);
       font-size: 14px;
@@ -257,6 +284,8 @@
       const EXAMPLES = ["Is everything working?", "What can you see?"];
 
       let linked = false, agent = null, threadId = null, running = false, any = false;
+      // The card asking for a yes or a no, while one is open.
+      let asking = null;
       // What is being built for the run under way: the lines for what it looks at, and the words it writes.
       let looked = null, saying = new Map(), waiting = null;
 
@@ -290,10 +319,11 @@
           : agent.ready
           ? "Answers from what you can see"
           : agent.why + " Whoever runs this hub can change that.";
-        q.disabled = !can;
-        send.disabled = !can;
+        q.disabled = !can || !!asking;
+        q.placeholder = asking ? "Say yes or no first" : "Ask about your equipment";
+        send.disabled = !can || !!asking;
         send.textContent = running ? "Stop" : "Ask";
-        $("fresh").hidden = !any || running;
+        $("fresh").hidden = !any || running || !!asking;
       }
 
       function drawStart() {
@@ -331,6 +361,37 @@
         });
       }
 
+      // It has stopped to ask. What it asks is in the hub's words, and the hub does only what is shown here.
+      function yesNo(interrupts) {
+        asking?.remove();
+        const card = el("div", "yesno");
+        for (const i of interrupts) card.append(el("p", "", i.message));
+        const row = el("div");
+        const answer = (approved) => {
+          asking = null;
+          card.replaceWith(el("div", "waiting done", approved ? "You said yes." : "You said no."));
+          toHub({
+            type: "agent",
+            do: "run",
+            input: {
+              threadId,
+              runId: "r" + Date.now().toString(36),
+              resume: interrupts.map((i) => ({ interruptId: i.id, status: "resolved", payload: { approved } })),
+            },
+          });
+          drawState();
+        };
+        const yes = el("button", "", interrupts.length > 1 ? "Yes, all of it" : "Yes, do it");
+        const no = el("button", "no", "No");
+        yes.type = no.type = "button";
+        yes.onclick = () => answer(true);
+        no.onclick = () => answer(false);
+        row.append(yes, no);
+        card.append(row);
+        asking = add(card);
+        talk.scrollTop = talk.scrollHeight;
+      }
+
       // One AG-UI event from the hub.
       function heard(e) {
         switch (e.type) {
@@ -341,6 +402,7 @@
             for (const m of e.messages) talk.append(el("div", m.role === "user" ? "mine" : "theirs", m.content));
             running = false;
             looked = null;
+            asking = null;
             saying.clear();
             drawStart();
             talk.scrollTop = talk.scrollHeight;
@@ -386,9 +448,15 @@
             break;
           case "RUN_FINISHED":
             running = false;
+            if (e.outcome?.type === "interrupt") yesNo(e.outcome.interrupts);
             break;
           case "RUN_ERROR":
             running = false;
+            // Whatever it was asking, it is not asking any more.
+            if (asking && e.code !== "not_answered" && e.code !== "busy") {
+              asking.remove();
+              asking = null;
+            }
             add(el("div", "trouble", e.message || "It could not answer."));
             break;
         }

@@ -1031,7 +1031,7 @@ function drawAgent(a) {
       className: "help",
       textContent: !a.on && a.needs
         ? a.needs
-        : "People whose role includes Ask the agent talk to it on the Ask screen. For now it can only look and answer. It cannot change anything.",
+        : "People whose role includes Ask the agent talk to it on the Ask screen. With Have the agent do things as well, it can set a value or press a button for them: only what both it and they may change, and only after their yes each time.",
     }),
   );
 }

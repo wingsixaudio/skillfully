@@ -483,6 +483,23 @@ Nobody else is shown it, the superuser included. What is kept is what was asked 
 the agent looked at is not: asked again, it looks again, as far as it may look then, so a role taken away is
 not outlived by an old answer's working. Whatever history a screen sends is ignored.
 
+**The agent changes something only after a yes, and the yes is the hub's to check.** The model never changes
+anything. It may ask for one value to be set or one button to be pressed. The hub checks that against what the
+agent may change and what the person asking may change, and if it could be done, stops the run and asks that
+person, as an AG-UI interrupt. The question is in the hub's own words, made from the device's name, the
+value's title and what it holds now, and never from anything the model wrote. Only that person's yes, from
+their own screen, goes on to do it, and what is done is what was shown. It is checked again at the yes,
+because what someone may do can change while a question waits. A no, an answer that is not exactly yes, a
+stop, an answer after five minutes, or an answer to only some of what was asked: nothing is done. Nothing the
+model read can say yes, and neither can the model: a yes can only arrive on the connection of the person who
+was asked.
+
+**Having the agent do things is a second ability, and is no new reach.** A screen says it goes that far with
+`"agent": "write"`, and a role switches it on. Even then the agent can change, for a person, only what that
+person could already change themselves on their other screens, and only what its own roles let it change. A
+device the hub is only watching is not changed by anyone, the agent included. The change is on the record as
+the agent's, made through the screen that lets the agent make it, with the person's yes beside it as theirs.
+
 **Looking through a large board takes turns.** Going through thirty thousand values to list what a device
 holds would keep everything else on the hub waiting. Whatever goes through a lot stops every few thousandths
 of a second and lets a fader move. `docs/performance.md` has the numbers.
@@ -586,8 +603,9 @@ was the simplest thing and grew with the number of documents times the number of
   They are out of the log and off the page, and they are not encrypted at rest.
 - **Parts of a module's settings form.** A setting that picks several things at once is not shown, and a
   module's rule for when to show a setting is ignored: every setting is always shown.
-- **The agent only looks.** It cannot change a value, press anything or write a canvas yet. Doing things, with
-  a yes asked for each time and the hub holding it to that, is next.
+- **The agent sets values and presses buttons, and that is all it does.** It cannot write a canvas, propose a
+  change to a device's settings, or do several things as one step. Each needs its own careful way of asking.
+- **Every yes is asked for, every time.** There is no "yes to this kind of thing from now on".
 - **Nothing limits what the agent spends.** Every use of its model is in the log with its tokens, and one
   question is at most eight turns. There is no cap by the day or the month.
 - **Skills are not yet given to the agent.** A skill is text that teaches an agent one procedure, and the hub

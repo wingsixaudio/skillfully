@@ -16,6 +16,7 @@
 
 import type { Accounts, Person } from "./accounts.ts";
 import type { Agent } from "./agent.ts";
+import { carryOut, type Proposal, propose, SET } from "./agent_acts.ts";
 import { look, type Looking, toolsFor } from "./agent_tools.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { type Log, newId } from "./log.ts";
@@ -27,6 +28,8 @@ export interface EngineTuning extends ModelTuning {
   maxSteps?: number;
   /** How long one answer may take from start to finish. */
   runMs?: number;
+  /** How long a yes or a no is waited for before nothing is done. */
+  answerMs?: number;
 }
 
 export type Answered =
@@ -44,7 +47,33 @@ export type Answered =
     cut: boolean;
     traceid: string;
   }
-  | { ok: false; code: string; message: string; traceid?: string };
+  | {
+    ok: false;
+    code: string;
+    message: string;
+    traceid?: string;
+    /** With the code "waiting": it has stopped to ask the person a yes or a no, and these are the questions. */
+    waiting?: Interrupt[];
+  };
+
+/** One thing a run has stopped to ask the person, as AG-UI describes an interrupt. */
+export interface Interrupt {
+  id: string;
+  reason: "tool_call";
+  /** The question, in the hub's own words. */
+  message: string;
+  toolCallId: string;
+  responseSchema: Record<string, unknown>;
+  expiresAt: string;
+  metadata: Record<string, unknown>;
+}
+
+interface Paused {
+  interrupts: Interrupt[];
+  expires: number;
+  resume(answers: Map<string, boolean>, talk: Talk): Promise<Answered>;
+  gaveUp(why: string): void;
+}
 
 /**
  * A question that is part of a conversation. What happens is told as AG-UI events: the run starting and
@@ -58,6 +87,8 @@ export interface Talk {
   runId?: string;
   /** Whoever asked can stop it. */
   stop?: AbortSignal;
+  /** May the agent be asked to do things for this person, each with their yes? Only from a screen that allows it. */
+  act?: boolean;
 }
 
 /**
@@ -86,6 +117,8 @@ const QUESTION_MAX = 2000;
  * allowance, so this has room for both.
  */
 const MAX_TOKENS = 4096;
+/** How long a person has to say yes or no. After that the moment has passed, and what was true then may not be. */
+const ANSWER_MS = 5 * 60 * 1000;
 const ANSWER_MAX = 8000;
 /** How many questions are worked on at once. A hub is one small computer with a show to run. */
 const AT_ONCE = 2;
@@ -93,6 +126,8 @@ const PERSON_ID = /\bp_[a-z0-9]{8}\b/g;
 
 export class Engine {
   #running = new Map<string, Promise<unknown>>();
+  /** Runs that have stopped to ask their person a yes or a no, by person. */
+  #paused = new Map<string, Paused>();
   #stop = new AbortController();
 
   constructor(
@@ -107,11 +142,14 @@ export class Engine {
   ) {}
 
   /** What the hub itself says to the model. Nothing a device or a plugin wrote is in it. */
-  #system(agent: Person, asker: Person, readsLog: boolean): string {
+  #system(agent: Person, asker: Person, readsLog: boolean, acts = false): string {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     return [
       `You are ${agent.name}, the agent of a Skillfully hub. The hub connects a team's equipment, such as soundboards, video switchers and lights, to the people who use it, and keeps a log of what happens.`,
-      "Someone signed in to the hub is asking you a question. Answer it from what the hub holds, using your tools. For now you can only look: you cannot change anything, press anything or save anything. If you are asked to, say plainly that you cannot yet.",
+      "Someone signed in to the hub is asking you something. Answer it from what the hub holds, using your tools.",
+      acts
+        ? "You can look, and you can ask for one value to be set or one button to be pressed with set_value. You never change anything yourself: the hub shows the person exactly what would change and asks them yes or no. Ask for a change only when the person asking has asked you for it, in this conversation, and only that change. If they say no, leave it. You cannot do anything else: not save, not add, not remove."
+        : "You can only look: you cannot change anything, press anything or save anything. If you are asked to, say plainly that you cannot here.",
       "What you can see is what you have been given, and never more than the person asking may see for themselves. When a tool does not show you something, you cannot see it. Say so, and do not guess at what it holds.",
       readsLog
         ? "You may read the hub's log, as far as it is about things you can see."
@@ -147,6 +185,9 @@ export class Engine {
         return mine.hosts().filter((h) => !both || both.has(h.id));
       },
       sees: (host, capability) => mine.sees(host, capability) && (!theirs || theirs.sees(host, capability)),
+      // To change something, the agent must be allowed to, and so must the person it is doing it for.
+      writesThrough: (host, key) =>
+        !theirs || theirs.writesThrough(host, key) ? mine.writesThrough(host, key)?.id : undefined,
       seer: (host) => {
         const a = mine.reader(host), b = theirs?.reader(host);
         return b ? (key) => a(key) && b(key) : a;
@@ -174,6 +215,7 @@ export class Engine {
       return no("too_long", `That is too long to ask at once. Keep it under ${QUESTION_MAX} characters.`);
     }
     if (this.#running.has(asker.id)) return no("busy", "It is still answering what you asked before.");
+    if (this.waiting(asker.id).length) return no("waiting", "It is waiting for your yes or no first.");
     if (this.#running.size >= AT_ONCE) {
       return no("busy", "It is busy with someone else. Try again in a moment.");
     }
@@ -198,20 +240,78 @@ export class Engine {
     return run;
   }
 
-  async #run(agent: Person, asker: Person, question: string, via: string, talk: Talk): Promise<Answered> {
+  /**
+   * Answer what a run is waiting on: the person's yes or no to each thing it asked to do. `answers` is the
+   * AG-UI `resume` list, one entry for every open question. Anything less, or late, and nothing is done.
+   */
+  resume(asker: Person, answers: unknown, talk: Talk = {}): Promise<Answered> {
+    const no = (code: string, message: string): Promise<Answered> => {
+      talk.hear?.({ type: "RUN_ERROR", code, message });
+      return Promise.resolve({ ok: false, code, message });
+    };
+    const paused = this.#paused.get(asker.id);
+    if (!paused) return no("nothing_waiting", "Nothing is waiting for an answer.");
+    if (Date.now() > paused.expires) {
+      this.drop(asker.id, "expired");
+      return no(
+        "expired",
+        "That was not answered in time, so nothing was done. Ask again if you still want it.",
+      );
+    }
+    const given = new Map<string, boolean>();
+    for (const a of Array.isArray(answers) ? answers : []) {
+      if (!a || typeof a.interruptId !== "string") continue;
+      // Yes is one thing only: this person resolving it with approved set to true. Anything else is no.
+      given.set(a.interruptId, a.status === "resolved" && a.payload?.approved === true);
+    }
+    if (given.size !== paused.interrupts.length || paused.interrupts.some((i) => !given.has(i.id))) {
+      return no("not_answered", "Every question it asked needs a yes or a no.");
+    }
+    if (this.#running.size >= AT_ONCE) {
+      return no("busy", "It is busy with someone else. Try again in a moment.");
+    }
+    this.#paused.delete(asker.id);
+    const run = paused.resume(given, talk).finally(() => this.#running.delete(asker.id));
+    this.#running.set(asker.id, run);
+    return run;
+  }
+
+  /** What this person's run is waiting on them for, if anything. */
+  waiting(person: string): Interrupt[] {
+    const paused = this.#paused.get(person);
+    if (!paused) return [];
+    if (Date.now() <= paused.expires) return paused.interrupts;
+    // Nobody answered in time. It is written down as not done, and forgotten.
+    this.drop(person, "expired");
+    return [];
+  }
+
+  /** Give up on a run that is waiting for a yes or a no. Nothing it asked to do is done. */
+  drop(person: string, why = "left"): void {
+    const paused = this.#paused.get(person);
+    this.#paused.delete(person);
+    paused?.gaveUp(why);
+  }
+
+  #run(agent: Person, asker: Person, question: string, via: string, first: Talk): Promise<Answered> {
     const { log } = this.deps;
     const traceid = newId();
     const began = Date.now();
     const about = this.deps.agent.about();
-    const looking = this.looking(agent, asker);
-    const tools = toolsFor(looking);
-    const system = this.#system(agent, asker, looking.readsLog);
+    const acts = !!first.act;
+    let looking = this.looking(agent, asker);
+    const tools = [...toolsFor(looking), ...(acts ? [SET] : [])];
+    const system = this.#system(agent, asker, looking.readsLog, acts);
     const maxSteps = this.tuning.maxSteps ?? 8;
-    const ended = AbortSignal.timeout(this.tuning.runMs ?? 90_000);
-    const stop = AbortSignal.any([this.#stop.signal, ended, ...(talk.stop ? [talk.stop] : [])]);
     const tokens = { in: 0, out: 0 };
     const looked: string[] = [];
-    const threadId = talk.threadId ?? traceid, runId = talk.runId ?? traceid;
+    // A run that stops to ask a yes or a no goes on later as another run of the same conversation, heard by
+    // whoever is listening then. So who is listening, and what stops it, belong to each stretch of it.
+    let talk = first;
+    let runId = talk.runId ?? traceid;
+    let ended = AbortSignal.timeout(this.tuning.runMs ?? 90_000);
+    let stop = AbortSignal.any([this.#stop.signal, ended, ...(talk.stop ? [talk.stop] : [])]);
+    const threadId = talk.threadId ?? traceid;
     const hear = (event: Record<string, unknown>) => {
       try {
         talk.hear?.(event);
@@ -224,15 +324,15 @@ export class Engine {
       actor: asker.id,
       via,
       traceid,
-      data: { model: about.model, chars: question.length, log: looking.readsLog },
+      data: { model: about.model, chars: question.length, log: looking.readsLog, ...(acts ? { acts } : {}) },
     });
-    const note = (type: string, data: Record<string, unknown>, subject = agent.id) =>
+    const note = (type: string, data: Record<string, unknown>, subject = agent.id, actor = agent.id) =>
       log.append({
         type,
         source: "core",
         subject,
-        actor: agent.id,
-        via: "agent",
+        actor,
+        via: actor === agent.id ? "agent" : via,
         traceid,
         parentid: started.id,
         data,
@@ -256,137 +356,255 @@ export class Engine {
       ...(talk.before ?? []).map((m) => ({ role: m.role, content: [{ type: "text", text: m.text }] })),
       { role: "user" as const, content: [{ type: "text", text: question }] },
     ];
-    for (let step = 1; step <= maxSteps; step++) {
-      // Asked for again before every call: turned off, or its key taken away, it stops where it is.
-      const key = this.deps.agent.keyForModel();
-      if (!key) return failed("stopped", "The agent was turned off before it finished.", step);
-      let turn;
-      const asked = Date.now();
-      // Its words are passed on as they are written, with names put where the IDs are.
-      const messageId = newId();
-      const names = new Namer((text) => this.named(text, asker));
-      let speaking = false;
-      const say = (words: string) => {
-        if (!words) return;
-        if (!speaking) hear({ type: "TEXT_MESSAGE_START", messageId, role: "assistant" });
-        speaking = true;
-        hear({ type: "TEXT_MESSAGE_CONTENT", messageId, delta: words });
-      };
-      const said = () => {
-        say(names.end());
-        if (speaking) hear({ type: "TEXT_MESSAGE_END", messageId });
-      };
-      try {
-        turn = await askModel(
-          { address: about.address, key, model: about.model },
-          { system, tools, messages, maxTokens: MAX_TOKENS },
-          stop,
-          this.tuning,
-          talk.hear ? (words) => say(names.take(words)) : undefined,
-        );
-      } catch (err) {
-        said();
-        if (err instanceof ModelError) {
-          if (err.code !== "stopped") return failed(err.code, err.message, step);
-          return ended.aborted
-            ? failed("too_slow", "It took too long to answer.", step)
-            : failed("stopped", "It was stopped.", step);
-        }
-        return failed("broken", "Something went wrong inside the hub while it was answering.", step);
-      }
-      said();
-      tokens.in += turn.tokensIn;
-      tokens.out += turn.tokensOut;
-      note("skillfully.agent.thought", {
-        step,
-        ms: Date.now() - asked,
-        in: turn.tokensIn,
-        out: turn.tokensOut,
-        stop: turn.stop,
-        asks: turn.uses.length,
-      });
 
-      if (!turn.uses.length) {
-        const raw = turn.text.trim().slice(0, ANSWER_MAX);
-        if (!raw) return failed("no_answer", "It gave no answer.", step);
-        const cut = turn.stop === "max_tokens";
-        const ms = Date.now() - began;
-        note("skillfully.agent.answered", {
-          steps: step,
-          ms,
-          in: tokens.in,
-          out: tokens.out,
-          chars: raw.length,
-          cut,
+    const go = async (from: number): Promise<Answered> => {
+      for (let step = from; step <= maxSteps; step++) {
+        // Asked for again before every call: turned off, or its key taken away, it stops where it is.
+        const key = this.deps.agent.keyForModel();
+        if (!key) return failed("stopped", "The agent was turned off before it finished.", step);
+        let turn;
+        const asked = Date.now();
+        // Its words are passed on as they are written, with names put where the IDs are.
+        const messageId = newId();
+        const names = new Namer((text) => this.named(text, asker));
+        let speaking = false;
+        const say = (words: string) => {
+          if (!words) return;
+          if (!speaking) hear({ type: "TEXT_MESSAGE_START", messageId, role: "assistant" });
+          speaking = true;
+          hear({ type: "TEXT_MESSAGE_CONTENT", messageId, delta: words });
+        };
+        const said = () => {
+          say(names.end());
+          if (speaking) hear({ type: "TEXT_MESSAGE_END", messageId });
+        };
+        try {
+          turn = await askModel(
+            { address: about.address, key, model: about.model },
+            { system, tools, messages, maxTokens: MAX_TOKENS },
+            stop,
+            this.tuning,
+            talk.hear ? (words) => say(names.take(words)) : undefined,
+          );
+        } catch (err) {
+          said();
+          if (err instanceof ModelError) {
+            if (err.code !== "stopped") return failed(err.code, err.message, step);
+            return ended.aborted
+              ? failed("too_slow", "It took too long to answer.", step)
+              : failed("stopped", "It was stopped.", step);
+          }
+          return failed("broken", "Something went wrong inside the hub while it was answering.", step);
+        }
+        said();
+        tokens.in += turn.tokensIn;
+        tokens.out += turn.tokensOut;
+        note("skillfully.agent.thought", {
+          step,
+          ms: Date.now() - asked,
+          in: turn.tokensIn,
+          out: turn.tokensOut,
+          stop: turn.stop,
+          asks: turn.uses.length,
         });
-        hear({ type: "RUN_FINISHED", threadId, runId, outcome: { type: "success" } });
+
+        if (!turn.uses.length) {
+          const raw = turn.text.trim().slice(0, ANSWER_MAX);
+          if (!raw) return failed("no_answer", "It gave no answer.", step);
+          const cut = turn.stop === "max_tokens";
+          const ms = Date.now() - began;
+          note("skillfully.agent.answered", {
+            steps: step,
+            ms,
+            in: tokens.in,
+            out: tokens.out,
+            chars: raw.length,
+            cut,
+          });
+          hear({ type: "RUN_FINISHED", threadId, runId, outcome: { type: "success" } });
+          return {
+            ok: true,
+            answer: this.named(raw, asker),
+            raw,
+            looked,
+            steps: step,
+            tokens,
+            ms,
+            cut,
+            traceid,
+          };
+        }
+
+        // It asked for things. Looking is done at once, as far as this run may look, and written down.
+        // A change is never made here: one that could be made is put to the person, and waits.
+        messages.push({ role: "assistant", content: turn.raw });
+        const results: unknown[] = [];
+        const result = (id: string, content: string, bad?: boolean) =>
+          results.push({ type: "tool_result", tool_use_id: id, content, ...(bad ? { is_error: true } : {}) });
+        const open: { use: (typeof turn.uses)[number]; id: string; proposal: Proposal }[] = [];
+        for (const use of turn.uses.slice(0, 8)) {
+          hear({
+            type: "TOOL_CALL_START",
+            toolCallId: use.id,
+            toolCallName: use.name,
+            parentMessageId: messageId,
+          });
+          hear({
+            type: "TOOL_CALL_ARGS",
+            toolCallId: use.id,
+            delta: JSON.stringify(use.input).slice(0, 2000),
+          });
+          hear({ type: "TOOL_CALL_END", toolCallId: use.id });
+          const subject = (device: unknown) =>
+            typeof device === "string" && looking.hosts().some((h) => h.id === device) ? device : agent.id;
+          if (acts && use.name === SET.name) {
+            const p = propose(looking, use.input);
+            if (p.ok) {
+              open.push({ use, id: newId(), proposal: p.proposal });
+              note("skillfully.agent.proposed", {
+                step,
+                tool: use.name,
+                to: p.proposal.to,
+                through: p.proposal.through,
+              }, `${p.proposal.host.id}:${p.proposal.key}`);
+              continue;
+            }
+            looked.push(p.words);
+            note("skillfully.agent.looked", { step, ...p.note }, subject(p.note.device));
+            hear({
+              type: "TOOL_CALL_RESULT",
+              messageId: newId(),
+              toolCallId: use.id,
+              content: p.words,
+              role: "tool",
+            });
+            result(use.id, p.content, true);
+            continue;
+          }
+          const found = await look(looking, use.name, use.input);
+          looked.push(found.words);
+          note("skillfully.agent.looked", { step, ...found.note }, subject(found.note.device));
+          // The person is told what was looked at, in a few words. What was found is theirs to ask about.
+          hear({
+            type: "TOOL_CALL_RESULT",
+            messageId: newId(),
+            toolCallId: use.id,
+            content: found.words,
+            role: "tool",
+          });
+          result(use.id, found.content, found.failed);
+        }
+        // Every request must be answered, or the model's service will not take the conversation back.
+        for (const use of turn.uses.slice(8)) result(use.id, "Too many at once. Ask for fewer.", true);
+        const onward = () => {
+          if (step >= maxSteps - 1) {
+            results.push({
+              type: "text",
+              text:
+                "You have looked enough. Answer now from what you have, without asking for anything more.",
+            });
+          }
+          messages.push({ role: "user", content: results });
+        };
+        if (!open.length) {
+          onward();
+          continue;
+        }
+
+        // It waits here for the person. What it waits on is kept by the hub, with this run, until they
+        // answer or the time runs out. The run that goes on afterwards is another AG-UI run of the same
+        // conversation.
+        const expires = Date.now() + (this.tuning.answerMs ?? ANSWER_MS);
+        const interrupts: Interrupt[] = open.map(({ use, id, proposal: p }) => ({
+          id,
+          reason: "tool_call",
+          message: p.message,
+          toolCallId: use.id,
+          responseSchema: {
+            type: "object",
+            properties: { approved: { type: "boolean" } },
+            required: ["approved"],
+          },
+          expiresAt: new Date(expires).toISOString(),
+          // The hub does it, and only the hub. A screen sends a yes or a no and nothing else.
+          metadata: { "ag-ui:tool-execution": "server", device: p.host.manifest.name },
+        }));
+        this.#paused.set(asker.id, {
+          interrupts,
+          expires,
+          gaveUp: (why) => {
+            for (const o of open) {
+              note("skillfully.agent.declined", { why }, `${o.proposal.host.id}:${o.proposal.key}`, asker.id);
+            }
+            note("skillfully.agent.failed", {
+              code: why,
+              message: "It was waiting for a yes or a no, and none came.",
+              step,
+              ms: Date.now() - began,
+              in: tokens.in,
+              out: tokens.out,
+            });
+          },
+          resume: async (answers, next) => {
+            talk = next;
+            runId = next.runId ?? newId();
+            ended = AbortSignal.timeout(this.tuning.runMs ?? 90_000);
+            stop = AbortSignal.any([this.#stop.signal, ended, ...(next.stop ? [next.stop] : [])]);
+            hear({ type: "RUN_STARTED", threadId, runId });
+            // What they may each do is worked out again now. It may have changed while this waited.
+            const now = this.deps.agent.about();
+            const still = now.ready && this.deps.accounts.person(asker.id);
+            if (still && !still.disabled) looking = this.looking(now.person!, still);
+            for (const o of open) {
+              const subject = `${o.proposal.host.id}:${o.proposal.key}`;
+              let told: { content: string; words: string };
+              if (!answers.get(o.id)) {
+                note("skillfully.agent.declined", {}, subject, asker.id);
+                told = { content: "The person said no. It was not done.", words: "Not done: you said no" };
+              } else {
+                const again = still && !still.disabled ? propose(looking, o.use.input) : null;
+                if (
+                  !again?.ok || again.proposal.host !== o.proposal.host ||
+                  again.proposal.key !== o.proposal.key ||
+                  again.proposal.to !== o.proposal.to
+                ) {
+                  note("skillfully.agent.declined", { why: "no_longer_allowed" }, subject, asker.id);
+                  told = {
+                    content: "The person said yes, but it may no longer be done, so it was not.",
+                    words: "Not done: it is no longer allowed",
+                  };
+                } else {
+                  // The yes is the person's, and on the record as theirs. The change is the agent's.
+                  note("skillfully.agent.approved", { to: o.proposal.to }, subject, asker.id);
+                  told = await carryOut(again.proposal, { agent: agent.id, traceid });
+                }
+              }
+              looked.push(told.words);
+              hear({
+                type: "TOOL_CALL_RESULT",
+                messageId: newId(),
+                toolCallId: o.use.id,
+                content: told.words,
+                role: "tool",
+              });
+              result(o.use.id, told.content);
+            }
+            onward();
+            return go(Math.min(step + 1, maxSteps));
+          },
+        });
+        hear({ type: "RUN_FINISHED", threadId, runId, outcome: { type: "interrupt", interrupts } });
         return {
-          ok: true,
-          answer: this.named(raw, asker),
-          raw,
-          looked,
-          steps: step,
-          tokens,
-          ms,
-          cut,
+          ok: false,
+          code: "waiting",
+          message: "It is waiting for a yes or a no.",
+          waiting: interrupts,
           traceid,
         };
       }
-
-      // It asked to look at things. Each is looked at as far as this run may, and written down.
-      messages.push({ role: "assistant", content: turn.raw });
-      const results: unknown[] = [];
-      for (const use of turn.uses.slice(0, 8)) {
-        hear({
-          type: "TOOL_CALL_START",
-          toolCallId: use.id,
-          toolCallName: use.name,
-          parentMessageId: messageId,
-        });
-        hear({ type: "TOOL_CALL_ARGS", toolCallId: use.id, delta: JSON.stringify(use.input).slice(0, 2000) });
-        hear({ type: "TOOL_CALL_END", toolCallId: use.id });
-        const found = await look(looking, use.name, use.input);
-        looked.push(found.words);
-        note(
-          "skillfully.agent.looked",
-          { step, ...found.note },
-          typeof found.note.device === "string" && looking.hosts().some((h) => h.id === found.note.device)
-            ? found.note.device
-            : agent.id,
-        );
-        // The person is told what was looked at, in a few words. What was found is theirs to ask about.
-        hear({
-          type: "TOOL_CALL_RESULT",
-          messageId: newId(),
-          toolCallId: use.id,
-          content: found.words,
-          role: "tool",
-        });
-        results.push({
-          type: "tool_result",
-          tool_use_id: use.id,
-          content: found.content,
-          ...(found.failed ? { is_error: true } : {}),
-        });
-      }
-      // Every request must be answered, or the model's service will not take the conversation back.
-      for (const use of turn.uses.slice(8)) {
-        results.push({
-          type: "tool_result",
-          tool_use_id: use.id,
-          content: "Too many at once. Ask for fewer.",
-          is_error: true,
-        });
-      }
-      if (step === maxSteps - 1) {
-        results.push({
-          type: "text",
-          text: "You have looked enough. Answer now from what you have, without asking for anything more.",
-        });
-      }
-      messages.push({ role: "user", content: results });
-    }
-    return failed("too_much", "It kept looking and did not come to an answer.", maxSteps);
+      return failed("too_much", "It kept looking and did not come to an answer.", maxSteps);
+    };
+    return go(1);
   }
 
   /** Stop whatever is being answered, and wait for it to end. */

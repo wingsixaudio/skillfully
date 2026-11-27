@@ -20,7 +20,18 @@ Deno.serve(
     const body = JSON.parse(text);
     // deno-lint-ignore no-explicit-any
     const result = (body.messages.at(-1).content as any[]).find((b) => b.type === "tool_result");
-    const content: { type: string; text?: string; id?: string; name?: string; input?: unknown }[] = result
+    // Asked to set something, it asks the hub for exactly that, and afterwards says how the hub said it went.
+    // deno-lint-ignore no-explicit-any
+    const wants = (body.messages as any[]).findLast((m) => m.role === "user" && m.content[0]?.type === "text")
+      ?.content[0].text.startsWith("Set ");
+    const content: { type: string; text?: string; id?: string; name?: string; input?: unknown }[] = wants
+      ? (result ? [{ type: "text", text: result.content }] : [{
+        type: "tool_use",
+        id: `toolu_${heard.length}`,
+        name: "set_value",
+        input: { device: "sim-console", value: "console/input/1/bus/1/level", to: -7.5 },
+      }])
+      : result
       ? [{
         type: "text",
         text: (() => {

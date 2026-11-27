@@ -22,6 +22,8 @@ export interface Looking {
   hosts(): PluginHost[];
   /** Is this kind of thing, on this device, in reach at all? */
   sees(host: string, capability: string): boolean;
+  /** The screen through which this value may be changed in this run, if it may be at all. */
+  writesThrough(host: string, key: string): string | undefined;
   /** For one device: is this value of it in reach? */
   seer(host: string): (key: string) => boolean;
   /** May the log be read at all in this run? */
