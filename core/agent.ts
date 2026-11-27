@@ -15,6 +15,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Accounts, Person } from "./accounts.ts";
 import type { Kept } from "./kept.ts";
 import type { Log } from "./log.ts";
+import { MODEL_NAME } from "./model.ts";
 
 /** The model asked for when nobody has chosen one, and where it is asked. */
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
@@ -141,7 +142,7 @@ export class Agent {
     const changed: Record<string, unknown> = {};
     if (wanted.model !== undefined) {
       if (
-        typeof wanted.model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/.test(wanted.model.trim())
+        typeof wanted.model !== "string" || !MODEL_NAME.test(wanted.model.trim())
       ) {
         return no("bad_model", "A model's name is letters, digits, dots and dashes.");
       }
@@ -184,6 +185,14 @@ export class Agent {
     this.kept.set("agent.on", on ? "1" : "");
     this.#note(on ? "skillfully.agent.on" : "skillfully.agent.off", by);
     return { ok: true };
+  }
+
+  /**
+   * The key, for asking the model's service which models it has, when a superuser is choosing one. That
+   * comes before turning the agent on, so it is given whenever there is a key. It is for that question only.
+   */
+  keyForChoosing(): string | null {
+    return this.#keyRow()?.key ?? null;
   }
 
   /** The key, for the part of the hub that talks to the model and for nothing else. Only when the agent is ready. */

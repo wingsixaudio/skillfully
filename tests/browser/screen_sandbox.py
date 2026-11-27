@@ -734,6 +734,26 @@ async def main():
         check("its model heard the key in the one place it belongs, and no person's name at all", h["asked"] == 4 and set(h["keys"]) == {secret_key} and secret_key not in h["text"] and "Sam" not in h["text"] and "Evan" not in h["text"], str(h["keys"]))
         if shots: await owner.screenshot(path=f"{shots}/13-agent-asked.png", full_page=True)
 
+        # --- Choosing its model from what its key can use ---
+        await place("Hub"); await owner.wait_for_selector("#agentModelSet")
+        await owner.click("#agentModelSet")
+        await owner.locator("#agentModel option", has_text="Pretend Large 2 (pretend-large-2)").wait_for(state="attached", timeout=8000)
+        options = await owner.locator("#agentModel option").all_inner_texts()
+        check("the model is chosen from a list the hub asked the model's service for, with the one in use kept in it", options == ["claude-sonnet-5-5 (in use now)", "Pretend Large 2 (pretend-large-2)", "Pretend Small 2 (pretend-small-2)", "Another model"] and await owner.locator("#agentModelOther").is_hidden(), str(options))
+        check("choosing a model asks for no PIN, and changing where the key is sent does", await owner.locator("#confirm").count() == 0)
+        if shots: await owner.screenshot(path=f"{shots}/13b-agent-model.png")
+        await owner.select_option("#agentModel", "pretend-small-2")
+        await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.wait_for_function("() => document.querySelector('#secAgent').innerText.includes('pretend-small-2, at')")
+        check("the chosen model is the agent's model", True)
+        await owner.click("#agentModelSet")
+        await owner.locator("#agentModel option", has_text="Pretend Large 2").wait_for(state="attached", timeout=8000)
+        await owner.select_option("#agentModel", label="Another model")
+        await owner.fill("#agentModelOther", "claude-sonnet-5-5")
+        await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.wait_for_function("() => document.querySelector('#secAgent').innerText.includes('claude-sonnet-5-5, at')")
+        check("a model that is not in the list can still be typed", True)
+
         # --- Talking to it, on a screen of its own ---
         await owner.goto(base + "/s/ask")
         ask = owner.frame_locator("#screen")

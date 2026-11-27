@@ -6,6 +6,7 @@ import { DEFAULT_ADDRESS, DEFAULT_MODEL } from "../core/agent.ts";
 import { startHub } from "../core/hub.ts";
 import { SHAPE } from "../core/shape.ts";
 import { hubWith, OWNER_PIN, Phone, SIM } from "./helpers.ts";
+import { pretendModel, says } from "./pretend_model.ts";
 
 const KEY = "sk-test-0123456789-THIS-MUST-NEVER-BE-SEEN";
 
@@ -207,4 +208,101 @@ Deno.test("a hub from before there was an agent is brought forward, and its peop
   assertEquals(hub.agent.about().person!.kind, "agent");
   await hub.stop();
   await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("the models a key can use are asked of the model's service, by the hub, for a superuser choosing one", async () => {
+  let how: unknown = {
+    data: [
+      {
+        type: "model",
+        id: "claude-opus-5-5",
+        display_name: "Claude Opus 5.5",
+        created_at: "2026-09-21T00:00:00Z",
+      },
+      { type: "model", id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5" },
+      { type: "model", id: "claude-sonnet-5-5", display_name: "Listed twice" },
+      { type: "model", id: "not a name <script>", display_name: "Not one that could be asked for" },
+      { type: "model", id: "nameless-1" },
+      { id: 7 },
+    ],
+    has_more: false,
+  };
+  const elsewhere = pretendModel(() => [says("no")], () => ({ data: [{ id: "stolen" }] }));
+  const model = pretendModel(() => [says("no")], () => how);
+  const hub = await hubWith([{ dir: SIM }]);
+  const by = hub.owner.id;
+  const sam = await hub.member("Sam");
+  assertEquals((await hub.post("/admin/api/agent/models", {}, sam)).status, 403);
+  assert(hub.agent.make(by, "Robin").ok && hub.agent.set(by, { address: model.address }).ok);
+
+  // With no key there is nothing to ask with, and the service is not asked.
+  const none = await hub.post("/admin/api/agent/models", {});
+  assertEquals([none.body.ok, none.body.code, model.listed.length], [false, "no_key", 0]);
+
+  // With a key, before the agent has ever been turned on: choosing a model comes first.
+  assert(hub.agent.setKey(by, KEY).ok);
+  assertEquals(hub.agent.about().on, false);
+  const listed = await hub.post("/admin/api/agent/models", {});
+  assertEquals(listed.body, {
+    ok: true,
+    models: [
+      { id: "claude-opus-5-5", name: "Claude Opus 5.5" },
+      { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+      { id: "nameless-1", name: "nameless-1" },
+    ],
+  });
+  assertEquals([
+    model.listed[0].path,
+    model.listed[0].headers.get("x-api-key"),
+    model.listed[0].headers.get("anthropic-version"),
+  ], [
+    "/v1/models?limit=1000",
+    KEY,
+    "2023-06-01",
+  ]);
+  // Listing hands the key to nothing else, and a key that may list is still not one the agent may use while off.
+  assert(!JSON.stringify(listed.body).includes(KEY));
+  assertEquals(hub.agent.keyForModel(), null);
+
+  // A service that has no such list, refuses the key, answers nonsense, or sends the hub elsewhere: said
+  // in words, and the name can still be typed. The key follows nobody.
+  const fails = async (now: unknown) => {
+    how = now;
+    const r = await hub.post("/admin/api/agent/models", {});
+    return [r.status, r.body.code, r.body.message];
+  };
+  assertEquals(await fails(null), [
+    400,
+    "turned_away",
+    "The model's service did not say which models it has.",
+  ]);
+  assertEquals(await fails(new Response("{}", { status: 401 })), [
+    400,
+    "key_refused",
+    "The model's service refused the key.",
+  ]);
+  assertEquals(await fails({ models: [] }), [
+    400,
+    "not_understood",
+    "The model's service did not say which models it has.",
+  ]);
+  assertEquals((await fails(Response.redirect(elsewhere.address + "/v1/models", 307))).slice(0, 2), [
+    400,
+    "unreachable",
+  ]);
+  assertEquals(elsewhere.listed.length, 0);
+
+  // Each asking is on the record under the superuser who asked. The key is not.
+  const told = hub.log.read({ type: "skillfully.agent.models", limit: 20 });
+  assertEquals(told.map((e) => [e.actor, e.via, e.data]), [
+    [by, "admin", { found: 3 }],
+    [by, "admin", { code: "turned_away" }],
+    [by, "admin", { code: "key_refused" }],
+    [by, "admin", { code: "not_understood" }],
+    [by, "admin", { code: "unreachable" }],
+  ]);
+  assert(!JSON.stringify(hub.log.read({ limit: 5000 })).includes(KEY));
+  await hub.stop();
+  await model.stop();
+  await elsewhere.stop();
 });

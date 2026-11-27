@@ -417,6 +417,9 @@ export function adminApi(deps: AdminDeps) {
         return (await sure()) ?? outcome(agent.turn(me.id, true));
       case "agent/off":
         return outcome(agent.turn(me.id, false));
+      // Which models its key may use, asked of the model's service. The key goes where it already goes.
+      case "agent/models":
+        return outcome(await engine.models(me));
       // Asking it something hands out nothing: it can only look, and a superuser already sees everything.
       case "agent/ask":
         // `raw` is the answer with IDs where the names are, kept to carry a conversation on. A page has no use for it.

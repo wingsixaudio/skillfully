@@ -421,9 +421,12 @@ superuser pastes in. The key is kept in the database, in a table nothing else re
 not written to a config file, it is not in the log (which records who set it and when), and it is never sent
 back to a page, not even to the superuser who typed it: the hub says only whether one is set. It is handed to
 the part of the hub that talks to the model only while the agent is on, has a key and has not been turned off.
-Where the model is can be changed, and since the key is sent there, only to an address that starts with https,
-or one on the hub's own computer. Making the agent, giving it a key, switching it on, letting it read the log
-and pointing it somewhere else each need the superuser's own PIN. Taking any of those away never does.
+There is one other use: when a superuser opens the list of models to choose from, the hub asks the model's
+service which models that key can use, at the same address, and that asking is logged. A model's name can
+still be typed, for a service that has no such list. Where the model is can be changed, and since the key is
+sent there, only to an address that starts with https, or one on the hub's own computer. Making the agent,
+giving it a key, switching it on, letting it read the log and pointing it somewhere else each need the
+superuser's own PIN. Taking any of those away never does.
 
 **The agent's engine runs inside the hub, and the model is trusted with nothing.** A question goes to the
 agent's model with the tools it may ask for. The model asks to look at something, the hub looks on its behalf

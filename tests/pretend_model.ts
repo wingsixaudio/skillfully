@@ -16,6 +16,8 @@ export type Reply = unknown[] | Response | { content: unknown[]; stop_reason?: s
 export interface PretendModel {
   address: string;
   sent: Sent[];
+  /** Each time it was asked which models it has: the address asked and what came with it. */
+  listed: { path: string; headers: Headers }[];
   stop(): Promise<void>;
 }
 
@@ -44,9 +46,20 @@ export const results = (sent: Sent): any[] =>
     })(),
   }));
 
-export function pretendModel(reply: (sent: Sent, nth: number) => Reply | Promise<Reply>): PretendModel {
+export function pretendModel(
+  reply: (sent: Sent, nth: number) => Reply | Promise<Reply>,
+  /** What it answers when asked which models it has. Left out, it has no such list. */
+  models?: () => unknown,
+): PretendModel {
   const sent: Sent[] = [];
+  const listed: PretendModel["listed"] = [];
   const server = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen: () => {} }, async (req) => {
+    if (req.method === "GET") {
+      const url = new URL(req.url);
+      listed.push({ path: url.pathname + url.search, headers: req.headers });
+      const m = models?.();
+      return m instanceof Response ? m : m ? Response.json(m) : new Response("not found", { status: 404 });
+    }
     const text = await req.text();
     const one: Sent = { path: new URL(req.url).pathname, headers: req.headers, body: JSON.parse(text), text };
     sent.push(one);
@@ -64,7 +77,7 @@ export function pretendModel(reply: (sent: Sent, nth: number) => Reply | Promise
       ...turn,
     });
   });
-  return { address: `http://127.0.0.1:${server.addr.port}`, sent, stop: () => server.shutdown() };
+  return { address: `http://127.0.0.1:${server.addr.port}`, sent, listed, stop: () => server.shutdown() };
 }
 
 /**

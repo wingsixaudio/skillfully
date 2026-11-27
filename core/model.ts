@@ -304,3 +304,73 @@ export async function askModel(
     };
   }
 }
+
+/** A model a service says can be asked for, by the name to ask for it with and the name people know it by. */
+export interface Offered {
+  id: string;
+  name: string;
+}
+
+/** What a model may be called. The same rule holds for one a person types. */
+export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$/;
+
+/**
+ * Ask the model's service which models this key may use, newest first. Not every service that can be
+ * asked a question can be asked this one, so a refusal here says nothing about whether the agent works.
+ */
+export async function listModels(
+  where: Omit<Where, "model">,
+  stop: AbortSignal,
+  tuning: ModelTuning = {},
+): Promise<Offered[]> {
+  const clean = (text: unknown) => String(text ?? "").split(where.key).join("[key]").slice(0, 300);
+  const url = where.address.replace(/\/+$/, "") + (/\/v1$/.test(where.address) ? "" : "/v1") +
+    "/models?limit=1000";
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(url, {
+      headers: { "x-api-key": where.key, "anthropic-version": "2023-06-01" },
+      signal: AbortSignal.any([stop, AbortSignal.timeout(tuning.timeoutMs ?? 15_000)]),
+      // The key goes to the address a superuser chose, and to nowhere that address points on to.
+      redirect: "error",
+    });
+    text = await readSome(res);
+  } catch (err) {
+    if (err instanceof ModelError) throw err;
+    if ((err as Error).name === "TimeoutError") {
+      throw new ModelError("too_slow", "The model's service took too long to say which models it has.");
+    }
+    throw new ModelError("unreachable", `The model's service could not be reached at ${new URL(url).host}.`);
+  }
+  // deno-lint-ignore no-explicit-any
+  let said: any = null;
+  try {
+    said = JSON.parse(text);
+  } catch { /* said below */ }
+  if (!res.ok) {
+    const why = clean(said?.error?.message ?? "");
+    if (res.status === 401 || res.status === 403) {
+      throw new ModelError(
+        "key_refused",
+        "The model's service refused the key." + (why ? ` It said: ${why}` : ""),
+        res.status,
+      );
+    }
+    throw new ModelError("turned_away", "The model's service did not say which models it has.", res.status);
+  }
+  if (!said || !Array.isArray(said.data)) {
+    throw new ModelError("not_understood", "The model's service did not say which models it has.");
+  }
+  const offered: Offered[] = [];
+  for (const m of said.data) {
+    // Only a name that could be asked for is offered. What the service calls it is shown as words.
+    if (typeof m?.id !== "string" || !MODEL_NAME.test(m.id) || offered.some((o) => o.id === m.id)) continue;
+    const name = typeof m.display_name === "string" && m.display_name.trim()
+      ? m.display_name.trim().slice(0, 80)
+      : m.id;
+    offered.push({ id: m.id, name });
+    if (offered.length >= 200) break;
+  }
+  return offered;
+}
