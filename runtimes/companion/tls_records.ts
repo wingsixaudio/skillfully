@@ -89,9 +89,16 @@ export function oneRecordAtATime(tls: Any, net: Any): void {
       const last = () => records.length || handing ? setTimeout(last, 5) : gate.push(null);
       last();
     });
-    // Why the connection failed is the module's to know, in the words it would have had.
-    raw.on("error", (e: Error) => gate.destroy(e));
-    raw.on("close", () => gate.destroyed || gate.destroy());
+    // Why the connection failed is the module's to know, in the words it would have had, followed by
+    // the news that it is closed: a library waits for both.
+    let failed: Error | undefined;
+    raw.on("error", (e: Error) => {
+      failed = e;
+      socket.destroy(e);
+    });
+    raw.on("close", () => {
+      if (!failed && !socket.destroyed) setTimeout(() => socket.destroyed || socket.destroy(), 50);
+    });
 
     const isAddress = net.isIP(host) !== 0;
     const socket = connect({
@@ -101,7 +108,10 @@ export function oneRecordAtATime(tls: Any, net: Any): void {
     });
     socket.on("secureConnect", () => (secure = true));
     socket.on("data", () => passedOn?.());
-    socket.on("close", () => raw.destroy());
+    socket.on("close", () => {
+      raw.destroy();
+      gate.destroyed || gate.destroy();
+    });
     if (onSecure) socket.once("secureConnect", onSecure);
     return socket;
   };

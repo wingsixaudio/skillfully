@@ -107,11 +107,14 @@ server.listen(0, "127.0.0.1", () => console.log(server.address().port));
         const at = (closed.address() as { port: number }).port;
         closed.close(() => {
           const c = mine.connect({ host: "127.0.0.1", port: at, rejectUnauthorized: false });
-          c.on("error", (e: { code?: string }) => done(String(e.code)));
+          let code = "";
+          c.on("error", (e: { code?: string }) => (code = String(e.code)));
+          // And then that it is closed, and that it closed badly: a library waits for both.
+          c.on("close", (badly: boolean) => done(`${code} ${badly}`));
         });
       });
     });
-    assertEquals(gone, "ECONNREFUSED");
+    assertEquals(gone, "ECONNREFUSED true");
 
     device.kill();
     await device.status;
