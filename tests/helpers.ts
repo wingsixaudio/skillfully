@@ -291,7 +291,7 @@ export class Phone {
       if (m.type === "hello") this.hello = m;
       if (m.type === "hello" || m.type === "plugins") this.plugins = m.plugins;
       if (m.type === "state") Object.assign(this.values[m.plugin] ??= {}, m.values);
-      if (m.type === "ack" || m.type === "log") this.#acks.get(m.ref)?.(m);
+      if (["ack", "log", "docs", "doc-ack"].includes(m.type)) this.#acks.get(m.ref)?.(m);
     };
     ws.onclose = (e) => (this.closed = e.code);
   }
@@ -329,6 +329,19 @@ export class Phone {
 
   log(limit = 50): Promise<Msg> {
     return this.#ask({ type: "log", limit });
+  }
+
+  /** The documents the hub keeps for this screen, as this person is given them. */
+  docs(): Promise<Msg> {
+    return this.#ask({ type: "docs" });
+  }
+
+  putDoc(id: unknown, doc: unknown): Promise<Msg> {
+    return this.#ask({ type: "doc-put", id, doc });
+  }
+
+  removeDoc(id: unknown): Promise<Msg> {
+    return this.#ask({ type: "doc-remove", id });
   }
 
   close(): Promise<void> {

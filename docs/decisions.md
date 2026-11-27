@@ -358,6 +358,15 @@ and the Controls screen show them first, under the author's headings, with every
 with hundreds of actions this is what makes the first look usable: the person who knows the device best
 already chose what matters.
 
+**A screen can keep documents, and the hub does not read them.** A screen runs in a sandbox with nowhere to
+keep anything. A screen made of something a person or an agent puts together needs somewhere, so the hub keeps
+small JSON documents for it, as files under `config/screens/<screen>/`. The hub checks that a document is a
+JSON object of a sensible size and nothing more: what is in it is the screen's business. Who may read and who
+may change them is decided the way everything about a screen is, by `documents` in what the screen uses and in
+what its abilities allow, so there is no second set of rules. "any" never covers documents, as it never covers
+the log. Saving one is not handing out power: a document can only ever ask the screen to do what that screen
+and that person may already do.
+
 ## Open, and worth deciding before the next stage
 
 - **Plugin dependencies.** Plugins run with no access to the internet or npm at start. The in-repo plugins
