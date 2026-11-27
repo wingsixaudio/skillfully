@@ -610,7 +610,7 @@ async def main():
         await owner.set_viewport_size({"width": 1440, "height": 900})
         await owner.wait_for_timeout(400)
         wide = (await cv.locator("#board").bounding_box())["width"]
-        check("on a computer's screen a canvas is drawn larger, not as a strip down the middle", wide > 800 and narrow < 420, f"{narrow} then {wide}")
+        check("on a computer's screen a canvas fills the width, not a strip down the middle", wide > 1380 and narrow < 420, f"{narrow} then {wide}")
         if shots: await owner.screenshot(path=f"{shots}/13-canvas-wide.png")
         box = await knob.locator(".track").bounding_box()
         await owner.mouse.move(box["x"] + box["width"] * 0.8, box["y"] + box["height"] / 2)
@@ -627,6 +627,20 @@ async def main():
         fits = await next(f for f in owner.frames if "/screens/canvas/" in f.url).evaluate("() => { const b = document.querySelector('#board').getBoundingClientRect(); return [Math.round(b.width), Math.round(b.bottom), innerHeight]; }")
         check("a taller canvas is drawn as large as fits on the screen, with nothing to scroll", fits[0] > 700 and fits[1] <= fits[2], str(fits))
         if shots: await owner.screenshot(path=f"{shots}/13b-canvas-wide-every-piece.png")
+
+        # --- Full screen, for any screen, from the bar ---
+        if await owner.evaluate("document.fullscreenEnabled || !!document.webkitFullscreenEnabled"):
+            await owner.locator("#full").click()
+            await owner.locator("#bar").wait_for(state="hidden", timeout=5000)
+            await owner.wait_for_timeout(400)
+            canvas_frame = next(f for f in owner.frames if "/screens/canvas/" in f.url)
+            filled = await canvas_frame.evaluate("() => { const b = document.querySelector('#board').getBoundingClientRect(); return [Math.round(b.width), Math.round(b.bottom), innerWidth, innerHeight]; }")
+            check("full screen hides the bar, offers the way out, and the canvas still fills the screen", await owner.locator("#bar").is_hidden() and await owner.locator("#unfull").is_visible() and filled[0] > filled[2] - 60 and filled[1] <= filled[3], str(filled))
+            if shots: await owner.screenshot(path=f"{shots}/13c-canvas-full-screen.png")
+            await owner.mouse.move(700, 4)
+            await owner.locator("#unfull").click()
+            await owner.locator("#bar").wait_for(timeout=5000)
+            check("Exit full screen brings the bar back", await owner.locator("#bar").is_visible() and await owner.locator("#unfull").is_hidden())
         await owner.set_viewport_size({"width": 390, "height": 844})
         await owner.goto(base + "/s/canvas")
         cv = owner.frame_locator("#screen")

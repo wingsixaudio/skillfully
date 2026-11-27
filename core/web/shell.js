@@ -116,6 +116,43 @@
     if (e.key === "Escape" && beside) closeBeside();
   });
 
+  // Full screen, for any screen: a canvas on a monitor, Controls on a tablet at the desk. The whole page
+  // goes full screen, not the screen's frame, so this page keeps the way out: a screen cannot take the
+  // display for itself, and cannot hide how to leave. A phone that cannot do it never shows the button.
+  const root = document.documentElement;
+  const fullNow = () => document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
+  if (document.fullscreenEnabled || document.webkitFullscreenEnabled) {
+    $("full").hidden = false;
+    $("full").onclick = () => {
+      const go = root.requestFullscreen ?? root.webkitRequestFullscreen;
+      Promise.resolve(go?.call(root)).catch(() => {/* refused: the page stays as it was */});
+    };
+    $("unfull").onclick = () => {
+      const leave = document.exitFullscreen ?? document.webkitExitFullscreen;
+      Promise.resolve(leave?.call(document)).catch(() => {});
+    };
+    // The way out shows for a few seconds, then slides away until the top edge is reached again.
+    let away = 0;
+    const offer = () => {
+      $("unfull").classList.add("shown");
+      clearTimeout(away);
+      away = setTimeout(() => $("unfull").classList.remove("shown"), 3000);
+    };
+    $("edge").addEventListener("pointerenter", offer);
+    $("edge").addEventListener("pointerdown", offer);
+    $("unfull").addEventListener("pointerenter", () => clearTimeout(away));
+    $("unfull").addEventListener("pointerleave", offer);
+    const changed = () => {
+      const on = !!fullNow();
+      root.classList.toggle("full", on);
+      $("unfull").hidden = $("edge").hidden = !on;
+      if (on) offer();
+      else $("unfull").classList.remove("shown");
+    };
+    document.addEventListener("fullscreenchange", changed);
+    document.addEventListener("webkitfullscreenchange", changed);
+  }
+
   fetch("/auth/me").then((r) => r.json()).then((me) => {
     if (!me.person) return;
     $("who").textContent = me.person.name;

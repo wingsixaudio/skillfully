@@ -153,3 +153,85 @@ iframe {
     border-left: 1px solid #26262b;
   }
 }
+/* Full screen: the screen and whatever is beside it, with nothing of the browser or this bar around them.
+   The way out waits at the top edge, the way a full screen app's menu bar does: it shows for a moment on
+   the way in, and again when the pointer or a finger reaches the edge. Esc leaves too. */
+#full {
+  font: inherit;
+  color: #a1a1aa;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#full[hidden],
+#unfull[hidden],
+#edge[hidden] {
+  display: none;
+}
+#full svg,
+#unfull svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#full:hover {
+  color: #f4f4f5;
+}
+#full:focus-visible,
+#unfull:focus-visible {
+  outline: 2px solid #f7941d;
+  outline-offset: 2px;
+}
+.full #bar {
+  display: none;
+}
+#edge {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 14px;
+  z-index: 3;
+}
+#unfull {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #f4f4f5;
+  background: #121214;
+  border: 1px solid #26262b;
+  border-radius: 999px;
+  padding: 8px 16px 8px 12px;
+  min-height: 40px;
+  cursor: pointer;
+  box-shadow: 0 6px 24px #000c;
+  transform: translate(-50%, -64px);
+  transition: transform .2s ease;
+}
+#unfull.shown,
+#unfull:focus-visible {
+  transform: translate(-50%, 0);
+}
+@media (prefers-reduced-motion: reduce) {
+  #unfull {
+    transition: none;
+  }
+}

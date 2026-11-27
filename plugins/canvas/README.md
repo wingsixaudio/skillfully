@@ -55,6 +55,9 @@ filled in from the person looking, so one canvas is everybody's own mix.
 - `at` says where a piece is: `[column, row]`, or `[column, row, wide, tall]`. Counting starts at 1.
 - On a narrow screen the columns get narrower. A canvas with many columns scrolls sideways before its pieces
   get too small to touch.
+- On a wider screen, a computer or a tablet, the grid fills the screen: everything is drawn larger, the
+  columns widen to the edges, and the rows grow to fill the height. Draw for a phone first; the same canvas
+  fills a monitor in full screen.
 
 ## The pieces
 

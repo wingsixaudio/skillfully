@@ -1260,23 +1260,34 @@
       }
 
       // A canvas is laid out for a phone, where it fills the screen. On a wider screen, a tablet on a
-      // stand or a computer, it is made larger to use the room there is, everything on it together, so a
-      // remote drawn for a thumb is not a narrow strip in the middle of a monitor. It is never made
-      // smaller than it was drawn, and not so large that a button is the size of a hand.
+      // stand, a computer, a monitor in full screen, it fills the room there is too: everything on it is
+      // made larger together, though never so large that a button is the size of a hand, and then the
+      // columns widen and the rows grow until the grid reaches the edges. Arranging keeps the rows as drawn,
+      // so the empty rows below stay the size a piece will be.
       let drawnPlan = null;
+      const LARGEST = 1.75, TALLEST = 3;
       function roomFor(plan) {
         drawnPlan = plan;
         const natural = plan.columns * 132;
-        board.style.maxWidth = natural + "px";
         board.style.zoom = "";
+        board.style.width = "";
+        board.style.maxWidth = natural + "px";
+        board.style.removeProperty("--row");
         const style = getComputedStyle(board);
+        const row = parseFloat(style.gridAutoRows), gap = parseFloat(style.rowGap);
         const rows = Math.max(1, ...plan.pieces.map((p) => p.row + p.tall - 1));
-        const tall = rows * parseFloat(style.gridAutoRows) + (rows - 1) * parseFloat(style.rowGap);
-        const wide = Math.min(natural, board.clientWidth || natural);
-        const across = ($("scroll").clientWidth - 8) / wide;
-        const down = (innerHeight - board.getBoundingClientRect().top - 16) / tall;
-        const larger = Math.min(1.75, across, down);
-        board.style.zoom = larger > 1.05 ? String(Number(larger.toFixed(3))) : "";
+        const tall = rows * row + (rows - 1) * gap;
+        const roomWide = $("scroll").clientWidth - 8;
+        const roomTall = innerHeight - board.getBoundingClientRect().top - 16;
+        const larger = Math.max(1, Math.min(LARGEST, roomWide / natural, roomTall / tall));
+        // A phone, or a window no wider than the canvas was drawn for: as drawn.
+        if (roomWide <= natural * 1.05) return;
+        if (larger > 1.01) board.style.zoom = String(Number(larger.toFixed(3)));
+        board.style.maxWidth = "none";
+        board.style.width = Math.floor(roomWide / larger) + "px";
+        if (arr) return;
+        const each = (roomTall / larger - (rows - 1) * gap) / rows;
+        if (each > row) board.style.setProperty("--row", Math.min(each, row * TALLEST).toFixed(1) + "px");
       }
       addEventListener("resize", () => drawnPlan && roomFor(drawnPlan));
 
