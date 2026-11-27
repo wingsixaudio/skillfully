@@ -68,6 +68,8 @@ export interface ScreenManifest extends ManifestBase {
   uses: Record<string, Access>;
   /** "asked": sent no values until it says which it is showing. Left out, it is sent all it may see. */
   values?: "all" | "asked";
+  /** "beside": opened as a panel beside whichever screen the person is on. Left out, it is a page of its own. */
+  opens?: "page" | "beside";
   /** What the screen offers that a role can switch on. */
   abilities: Ability[];
   /** Starter roles the screen suggests. */

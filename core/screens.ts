@@ -123,7 +123,9 @@ export class Screens {
   /** Where a person lands when they open the hub. */
   homeFor(person: Person): string | undefined {
     const { accounts, approvals } = this.deps;
-    const mine = this.of(person).map((m) => m.id);
+    // A screen that opens beside others is somewhere to go only when there is nowhere else.
+    const mine = this.of(person).sort((a, b) => Number(a.opens === "beside") - Number(b.opens === "beside"))
+      .map((m) => m.id);
     const wanted = accounts.roles().filter((r) => person.roles.includes(r.id) && r.home).map((r) => r.home!);
     // A role's home screen first. Failing that, a screen that has been given something to show.
     return wanted.find((id) => mine.includes(id)) ?? mine.find((id) => approvals.of(id).length > 0) ??

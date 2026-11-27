@@ -311,7 +311,12 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
                   superuser: accounts.isSuperuser(me),
                   mustChange: me.mustChange,
                 },
-                screens: screens.of(me).map((m) => ({ id: m.id, name: m.name })),
+                screens: screens.of(me).map((m) => ({
+                  id: m.id,
+                  name: m.name,
+                  // One that opens beside other screens: the page a screen is shown in needs to know where it lives.
+                  ...(m.opens === "beside" ? { beside: `/screens/${m.id}/${m.entry}` } : {}),
+                })),
                 home: screens.homeFor(me) ?? null,
               }
               : {}),

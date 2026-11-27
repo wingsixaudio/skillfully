@@ -472,6 +472,15 @@ where everything else is decided: a role switches the ability on. The screen tha
 is Ask (`plugins/ask`), and it is a plugin like any other: sandboxed, with no network, told only what the hub
 passes it. Another screen could offer the agent too, by listing it. `any` never covers it.
 
+**Ask opens beside the screen you are on.** Talking to the agent is mostly about what is on another screen,
+and soon about changing it, so the two have to be in view together. A screen can say `"opens": "beside"`. The
+hub then puts its name in the bar above every screen, as a word and not a floating button, and opens it in a
+panel next to the screen: below on a phone, to the right with room. Nothing covers anything. Each is a
+sandboxed frame with a connection of its own, held to its own abilities, so being beside a screen gives
+neither any of the other's reach. Left open, it is open on the next screen too, and because the hub keeps the
+conversation, it is the same conversation. This is the hub's doing for any screen that asks for it, not
+something special about Ask.
+
 **The conversation is AG-UI.** A screen sends a run's input and is told what happens as AG-UI events: the run
 starting and ending, the agent's words as they are written, each thing it looks at. It is carried over the
 connection a screen already has, not a second one, because a screen has no network of its own. The words are
