@@ -569,7 +569,7 @@ async def main():
         cv = owner.frame_locator("#screen")
         await cv.locator("#pick option", has_text="Every piece").wait_for(state="attached", timeout=8000)
         await cv.locator("#pick").select_option("every-piece")
-        await cv.locator("#board .stepper").wait_for()
+        await cv.locator("#board .updown").wait_for()
         await owner.wait_for_timeout(600)
         check("every new kind of piece is drawn, and none says it cannot be used", await cv.locator("#board .piece").count() == 7 and await cv.locator("#board .piece.off").count() == 0, f"{await cv.locator('#board .piece').count()} drawn, {await cv.locator('#board .piece.off').count()} off")
         lamp_power = (await state(lamp_id)).get("generic/reading/power")
@@ -581,11 +581,11 @@ async def main():
             if (await meter_num.inner_text()).strip() == "90": break
             await owner.wait_for_timeout(100)
         check("a choice tied to an action does it with the option pressed, and a meter shows what the device then reports", (await meter_num.inner_text()).strip() == "90" and await preset.get_by_role("radio", name="High").get_attribute("aria-checked") == "true" and await preset.get_by_role("radio", name="Half").get_attribute("aria-checked") == "false", f"{await meter_num.inner_text()}")
-        await cv.locator("#board .stepper").get_by_role("button", name="Less Level").click()
+        await cv.locator("#board .updown").get_by_role("button", name="Less Level").click()
         for _ in range(50):
             if (await meter_num.inner_text()).strip() == "80": break
             await owner.wait_for_timeout(100)
-        check("a stepper takes it down by a step, from what the device holds", (await meter_num.inner_text()).strip() == "80" and (await cv.locator("#board .stepper .num").inner_text()).strip() == "80", await meter_num.inner_text())
+        check("a stepper takes it down by a step, from what the device holds", (await meter_num.inner_text()).strip() == "80" and (await cv.locator("#board .updown .num").inner_text()).strip() == "80", await meter_num.inner_text())
         outlet = cv.locator("#board .choice", has_text="Outlet 4")
         was_on = (await state("sim-switch"))["switch/outlet/4/on"]
         await outlet.get_by_role("radio", name="Off" if was_on else "On").click()
@@ -599,7 +599,7 @@ async def main():
         await cv.locator("#board button.goto", has_text="Lights").click()
         await cv.locator("#board button.goto", has_text="Back").wait_for(timeout=5000)
         await cv.locator("#board button.goto", has_text="Back").click()
-        await cv.locator("#board .stepper").wait_for(timeout=5000)
+        await cv.locator("#board .updown").wait_for(timeout=5000)
         check("a page button goes to its page, and one there comes back", True)
         await cv.locator("#pick").select_option("lamp-level")
         knob = cv.locator("#board .slider"); now = cv.locator("#board .readout .num")
@@ -622,6 +622,11 @@ async def main():
             if (await now.inner_text()).strip() == "50": break
             await owner.wait_for_timeout(100)
         check("and drawn larger, a slider still lands where the pointer let it go", (await now.inner_text()).strip() == "50", await now.inner_text())
+        await cv.locator("#pick").select_option("every-piece"); await cv.locator("#board .updown").wait_for()
+        await owner.wait_for_timeout(300)
+        fits = await next(f for f in owner.frames if "/screens/canvas/" in f.url).evaluate("() => { const b = document.querySelector('#board').getBoundingClientRect(); return [Math.round(b.width), Math.round(b.bottom), innerHeight]; }")
+        check("a taller canvas is drawn as large as fits on the screen, with nothing to scroll", fits[0] > 700 and fits[1] <= fits[2], str(fits))
+        if shots: await owner.screenshot(path=f"{shots}/13b-canvas-wide-every-piece.png")
         await owner.set_viewport_size({"width": 390, "height": 844})
         await owner.goto(base + "/s/canvas")
         cv = owner.frame_locator("#screen")

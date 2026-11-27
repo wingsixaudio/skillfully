@@ -66,6 +66,13 @@
       font-size: 17px;
       font-weight: 600;
     }
+    /* On a wide screen the list of canvases is as wide as a name needs, not the whole screen. */
+    @media (min-width: 900px) {
+      #pick {
+        flex: 0 1 360px;
+        margin-right: auto;
+      }
+    }
     .link {
       display: flex;
       align-items: center;
@@ -412,7 +419,7 @@
     .meter,
     .light,
     .choice,
-    .stepper {
+    .updown {
       --on: var(--accent);
       background: var(--well);
     }
@@ -462,7 +469,8 @@
       width: 14px;
       height: 14px;
       border-radius: 50%;
-      background: var(--rail);
+      background: #222226;
+      box-shadow: inset 0 0 0 2px #3f3f46;
       transition: background 150ms, box-shadow 150ms;
     }
     .light.tall .dot {
@@ -484,9 +492,9 @@
     /* One of a few */
     .choice {
       display: grid;
-      grid-template-rows: auto 1fr;
-      gap: 6px;
-      padding: 6px;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 4px;
+      padding: 4px 6px 6px;
     }
     .choice .name {
       padding: 0 6px;
@@ -504,49 +512,55 @@
     }
     .choice button {
       min-height: 0;
-      padding: 4px;
+      overflow: hidden;
+      padding: 2px 4px;
       font-size: 13px;
-      line-height: 1.15;
-      overflow-wrap: anywhere;
+      line-height: 1.1;
       touch-action: manipulation;
-      border: 2px solid transparent;
+      border: 0;
+    }
+    .choice button span {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      overflow-wrap: break-word;
+    }
+    .choice.many button {
+      font-size: 12px;
     }
     .choice button.lit {
       background: var(--on);
       color: #000;
     }
+    /* The flash after a press is drawn inside, so it takes none of the room two lines of words need. */
     .choice button.went {
-      border-color: var(--text);
+      box-shadow: inset 0 0 0 2px var(--text);
     }
     .choice button.failed {
-      border-color: var(--bad);
+      box-shadow: inset 0 0 0 2px var(--bad);
     }
 
-    /* A number with a button each side */
-    .stepper {
-      display: grid;
-      grid-template-columns: minmax(40px, 1fr) minmax(0, 1.4fr) minmax(40px, 1fr);
-      gap: 4px;
+    /* A number with a button each side. Its own name: .stepper is Arrange's Wide and Tall. */
+    .updown {
+      container-type: size;
       padding: 6px;
     }
-    .stepper button {
-      min-height: 0;
-      padding: 0;
-      font-size: 22px;
-      font-weight: 500;
-      touch-action: manipulation;
-      border: 2px solid transparent;
+    .updown .in {
+      height: 100%;
+      display: grid;
+      grid-template-columns: minmax(40px, 64px) minmax(0, 1fr) minmax(40px, 64px);
+      grid-template-areas: "less mid more";
+      gap: 6px;
     }
-    .stepper button:active {
-      transform: scale(.96);
+    .updown .less {
+      grid-area: less;
     }
-    .stepper button.went {
-      border-color: var(--text);
+    .updown .more {
+      grid-area: more;
     }
-    .stepper button.failed {
-      border-color: var(--bad);
-    }
-    .stepper .mid {
+    .updown .mid {
+      grid-area: mid;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -554,8 +568,60 @@
       text-align: center;
       min-width: 0;
     }
-    .stepper .num {
+    .updown button {
+      min-height: 0;
+      padding: 0;
+      font-size: 22px;
+      font-weight: 500;
+      line-height: 1;
+      touch-action: manipulation;
+      border: 2px solid transparent;
+    }
+    .updown button:active {
+      transform: scale(.96);
+    }
+    .updown button.went {
+      border-color: var(--text);
+    }
+    .updown button.failed {
+      border-color: var(--bad);
+    }
+    .updown .num {
       font-size: 18px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    /* Two columns on a phone: narrower buttons, so the number between them still fits. */
+    @container (max-width: 230px) {
+      .updown .in {
+        grid-template-columns: 38px minmax(0, 1fr) 38px;
+        gap: 4px;
+      }
+      .updown .num {
+        font-size: 15px;
+      }
+      .updown button {
+        font-size: 18px;
+      }
+    }
+    /* Too narrow for a button each side: the number on top, the two buttons under it. */
+    @container (max-width: 150px) {
+      .updown .in {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-areas: "mid mid" "less more";
+        gap: 4px;
+      }
+      .updown .name {
+        display: none;
+      }
+      .updown .num {
+        font-size: 15px;
+      }
+      .updown button {
+        font-size: 18px;
+      }
     }
 
     /* A countdown */
@@ -1195,16 +1261,22 @@
       // stand or a computer, it is made larger to use the room there is, everything on it together, so a
       // remote drawn for a thumb is not a narrow strip in the middle of a monitor. It is never made
       // smaller than it was drawn, and not so large that a button is the size of a hand.
-      let drawnColumns = 4;
-      function roomFor(columns) {
-        drawnColumns = columns;
-        const natural = columns * 132;
+      let drawnPlan = null;
+      function roomFor(plan) {
+        drawnPlan = plan;
+        const natural = plan.columns * 132;
         board.style.maxWidth = natural + "px";
-        const room = $("scroll").clientWidth - 8;
-        const larger = Math.min(1.75, room / natural);
+        board.style.zoom = "";
+        const style = getComputedStyle(board);
+        const rows = Math.max(1, ...plan.pieces.map((p) => p.row + p.tall - 1));
+        const tall = rows * parseFloat(style.gridAutoRows) + (rows - 1) * parseFloat(style.rowGap);
+        const wide = Math.min(natural, board.clientWidth || natural);
+        const across = ($("scroll").clientWidth - 8) / wide;
+        const down = (innerHeight - board.getBoundingClientRect().top - 16) / tall;
+        const larger = Math.min(1.75, across, down);
         board.style.zoom = larger > 1.05 ? String(Number(larger.toFixed(3))) : "";
       }
-      addEventListener("resize", () => roomFor(drawnColumns));
+      addEventListener("resize", () => drawnPlan && roomFor(drawnPlan));
 
       function slider(p) {
         const t = tie(p.key, p.device, p.missing);
@@ -1472,7 +1544,11 @@
         const row = el("div", { className: "options" });
         const e = el(
           "div",
-          { className: "choice " + (up ? "up" : "across") + (p.color ? " " + p.color : "") },
+          {
+            className: "choice " + (up ? "up" : "across") +
+              (!up && p.options.length > p.wide + 1 ? " many" : "") +
+              (p.color ? " " + p.color : ""),
+          },
           name,
           row,
         );
@@ -1481,7 +1557,7 @@
         e.setAttribute("role", "radiogroup");
         calledBy(e, name);
         const segments = p.options.map((o) => {
-          const b = el("button", { type: "button", textContent: o.title ?? String(o.value) });
+          const b = el("button", { type: "button" }, el("span", { textContent: o.title ?? String(o.value) }));
           b.setAttribute("role", "radio");
           b.setAttribute("aria-checked", "false");
           row.append(b);
@@ -1512,9 +1588,13 @@
       function stepper(p) {
         const t = tie(p.key, p.device, p.missing);
         const name = el("span", { className: "name" }), num = el("span", { className: "num", textContent: "—" });
-        const less = el("button", { type: "button", textContent: "−" });
-        const more = el("button", { type: "button", textContent: "+" });
-        const e = el("div", { className: "stepper" }, less, el("div", { className: "mid" }, name, num), more);
+        const less = el("button", { type: "button", className: "less", textContent: "−" });
+        const more = el("button", { type: "button", className: "more", textContent: "+" });
+        const e = el(
+          "div",
+          { className: "updown" },
+          el("div", { className: "in" }, less, el("div", { className: "mid" }, name, num), more),
+        );
         title(name, p, t);
         if (!t.plugin) return off(e, t);
         const info = t.info || {};
@@ -1808,7 +1888,7 @@
           blank.hidden = true;
           const plan = C.layout(arr.doc, arr.page, me.slots || {});
           board.style.setProperty("--cols", plan.columns);
-          roomFor(plan.columns);
+          roomFor(plan);
           drawArranging(board, plan);
           clocks.forEach((tick) => tick());
           return;
@@ -1838,7 +1918,7 @@
         }
         const plan = C.layout(c.doc, page, me.slots || {});
         board.style.setProperty("--cols", plan.columns);
-        roomFor(plan.columns);
+        roomFor(plan);
         for (const p of plan.pieces) {
           const made = MAKE[p.type](p);
           if (made) board.append(placed(made, p));

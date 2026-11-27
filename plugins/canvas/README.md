@@ -110,8 +110,9 @@ Every piece has `type` and `at`. A piece tied to a device has a `key`, and may n
   ```
 
 - A **stepper** takes a number down or up by `step` (1 if left out) with each press, and stops at `min` and
-  `max`. It is for what is set in small exact steps: a transpose, a channel number, a gain to the decibel. It
-  can be tied to an action that takes a number with `sends` and `shows`, as a slider can.
+  `max`. Two columns wide or more it has a button each side; one column wide it shows only its number, with
+  the buttons under it. It is for what is set in small exact steps: a transpose, a channel number, a gain to
+  the decibel. It can be tied to an action that takes a number with `sends` and `shows`, as a slider can.
 - A **choice** is a row of `options`, each `{ "value": ..., "title": "..." }`: what pressing it sends, and its
   words. 2 to 12 of them. The one the value holds now is lit. Taller than wide, the options stand in a column.
   Tied to an action, `sends` is the option the value goes in and `shows` is what says which is in use. Without
