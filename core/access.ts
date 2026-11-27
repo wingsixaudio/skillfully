@@ -73,6 +73,19 @@ export class Access {
     return [...this.#read.keys()].some((name) => covers(name, capability));
   }
 
+  /**
+   * What this person may read and may change, in the words a screen can check a key against: capability
+   * name to key patterns, with `*` for any one part and `**` for everything. It is this person's own
+   * reach and nobody else's, so a screen can be told it, and can show plainly what is not theirs to touch.
+   */
+  reach(): { read: Record<string, string[]>; write: Record<string, string[]> } {
+    const words = (map: Map<string, Pattern[]>) =>
+      Object.fromEntries(
+        [...map].map(([name, patterns]) => [name, [...new Set(patterns.map((p) => p.join("/")))]]),
+      );
+    return { read: words(this.#read), write: words(this.#write) };
+  }
+
   canRead(key: string): boolean {
     return matches(this.#read, key);
   }

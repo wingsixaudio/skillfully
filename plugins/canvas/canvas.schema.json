@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:skillfully:canvas:1",
+  "title": "A canvas",
+  "description": "One canvas of the Canvas screen: pages of pieces on a grid, each tied to a value or an action of a device. Kept by the hub as config/screens/canvas/<id>.json. A name in braces, such as {ears} or the name a group repeats as, is filled in when the canvas is shown: first from the group a piece is inside, then from the slots of the person looking.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "name", "pages"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "kind": { "const": "canvas" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 60, "pattern": "\\S" },
+    "columns": {
+      "description": "How many columns the grid has. Every row is the same height.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 24,
+      "default": 4
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "pieces"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1, "maxLength": 40, "pattern": "\\S" },
+          "pieces": { "type": "array", "items": { "$ref": "#/$defs/piece" } }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "at": {
+      "description": "Where the piece is: [column, row], or [column, row, wide, tall]. Counted from 1. Inside a group, counted from the group's own corner.",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": { "type": "integer", "minimum": 1 }
+    },
+    "key": {
+      "description": "A value or an action of a device: the kind of device, a slash, then the value. For example console/input/1/bus/{ears}/level.",
+      "type": "string",
+      "maxLength": 300,
+      "pattern": "^[a-z][a-z0-9-]*/\\S+$"
+    },
+    "device": {
+      "description": "The id of the device this is about. Left out, it is the first device the screen has been given that has this kind of value.",
+      "type": "string",
+      "minLength": 1
+    },
+    "scalar": { "type": ["string", "number", "boolean"] },
+    "color": { "enum": ["orange", "red", "green", "blue", "yellow", "white"] },
+    "text": {
+      "description": "Words, or a value of a device to show as words.",
+      "oneOf": [
+        { "type": "string", "maxLength": 200 },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key"],
+          "properties": { "key": { "$ref": "#/$defs/key" }, "device": { "type": "string" } }
+        }
+      ]
+    },
+    "piece": {
+      "oneOf": [
+        {
+          "title": "Words on the canvas",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "text"],
+          "properties": {
+            "type": { "const": "label" },
+            "at": { "$ref": "#/$defs/at" },
+            "text": { "$ref": "#/$defs/text" },
+            "size": { "enum": ["small", "normal", "large"] }
+          }
+        },
+        {
+          "title": "A value, shown",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "key"],
+          "properties": {
+            "type": { "const": "readout" },
+            "at": { "$ref": "#/$defs/at" },
+            "key": { "$ref": "#/$defs/key" },
+            "device": { "$ref": "#/$defs/device" },
+            "title": { "$ref": "#/$defs/text" }
+          }
+        },
+        {
+          "title": "A button: triggers an action, or sets a value to one thing",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "key"],
+          "properties": {
+            "type": { "const": "button" },
+            "at": { "$ref": "#/$defs/at" },
+            "key": { "$ref": "#/$defs/key" },
+            "device": { "$ref": "#/$defs/device" },
+            "title": { "$ref": "#/$defs/text" },
+            "value": {
+              "description": "What pressing it sends. Left out, it triggers. An object is the options of an action.",
+              "type": ["string", "number", "boolean", "object"]
+            },
+            "lit": {
+              "description": "The button is lit while this value is what `is` says. Left out, `is` is true.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key"],
+              "properties": {
+                "key": { "$ref": "#/$defs/key" },
+                "device": { "$ref": "#/$defs/device" },
+                "is": { "$ref": "#/$defs/scalar" }
+              }
+            },
+            "color": { "$ref": "#/$defs/color" }
+          }
+        },
+        {
+          "title": "A switch between two values",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "key"],
+          "properties": {
+            "type": { "const": "toggle" },
+            "at": { "$ref": "#/$defs/at" },
+            "key": { "$ref": "#/$defs/key" },
+            "device": { "$ref": "#/$defs/device" },
+            "title": { "$ref": "#/$defs/text" },
+            "on": { "$ref": "#/$defs/scalar", "default": true },
+            "off": { "$ref": "#/$defs/scalar", "default": false },
+            "color": { "$ref": "#/$defs/color" }
+          }
+        },
+        {
+          "title": "A slider. Taller than wide, it stands up; otherwise it lies down",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "key"],
+          "properties": {
+            "type": { "const": "slider" },
+            "at": { "$ref": "#/$defs/at" },
+            "key": { "$ref": "#/$defs/key" },
+            "device": { "$ref": "#/$defs/device" },
+            "title": { "$ref": "#/$defs/text" },
+            "min": { "description": "Left out, the device's own range is used.", "type": "number" },
+            "max": { "type": "number" },
+            "step": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        {
+          "title": "The time",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at"],
+          "properties": {
+            "type": { "const": "clock" },
+            "at": { "$ref": "#/$defs/at" },
+            "title": { "$ref": "#/$defs/text" },
+            "seconds": { "type": "boolean" }
+          }
+        },
+        {
+          "title": "A group of pieces, which can repeat",
+          "description": "The pieces inside are placed from the group's corner. With `repeat`, they are laid out once for each item, left to right, starting a new row when the group's width runs out. Left without a height, a group is as tall as what is in it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "at", "pieces"],
+          "properties": {
+            "type": { "const": "group" },
+            "at": { "$ref": "#/$defs/at" },
+            "title": { "$ref": "#/$defs/text" },
+            "pieces": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/piece" } },
+            "repeat": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["as", "from", "to"],
+                  "properties": {
+                    "as": { "type": "string", "pattern": "^[a-z][A-Za-z0-9_-]*$" },
+                    "from": { "type": "integer" },
+                    "to": { "type": "integer" }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["as", "each"],
+                  "properties": {
+                    "as": { "type": "string", "pattern": "^[a-z][A-Za-z0-9_-]*$" },
+                    "each": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 64,
+                      "items": { "type": ["string", "number"] }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "kind": "screen",
+  "id": "canvas",
+  "name": "Canvas",
+  "description": "Screens you put together yourself: buttons, switches, sliders, readouts, labels and a clock on a grid, each tied to a value or an action of any device. A canvas is a small JSON document, so a person or an agent can make one.",
+  "version": "0.1.0",
+  "contract": "1",
+  "entry": "index.html",
+  "uses": {
+    "any": "write",
+    "documents": "write"
+  },
+  "abilities": [
+    {
+      "id": "see",
+      "title": "See canvases",
+      "description": "Open the canvases and see every value on the connections this screen has been given.",
+      "allows": {
+        "any": "read",
+        "documents": "read"
+      }
+    },
+    {
+      "id": "use",
+      "title": "Use everything on a canvas",
+      "description": "Press the buttons and move the sliders of any canvas.",
+      "caution": "A canvas shows only what someone put on it, but this reaches everything on the connections this screen has been given.",
+      "allows": {
+        "any": "write",
+        "documents": "read"
+      }
+    },
+    {
+      "id": "see-my-ears",
+      "title": "See my own ear mix on a canvas",
+      "description": "Open the canvases, and see the names of the inputs and the sends into the person's own bus. Nothing else on them.",
+      "allows": {
+        "console": {
+          "access": "read",
+          "keys": [
+            "input/*/name",
+            "input/*/bus/{ears}/level",
+            "input/*/bus/{ears}/pan"
+          ]
+        },
+        "documents": "read"
+      }
+    },
+    {
+      "id": "adjust-my-ears",
+      "title": "Adjust my own ear mix on a canvas",
+      "description": "Change the sends into the person's own bus. Nobody else's, whatever a canvas has on it.",
+      "allows": {
+        "console": {
+          "access": "write",
+          "keys": [
+            "input/*/bus/{ears}/level",
+            "input/*/bus/{ears}/pan"
+          ]
+        },
+        "documents": "read"
+      }
+    },
+    {
+      "id": "arrange",
+      "title": "Add and remove canvases",
+      "description": "Start a canvas, and remove one.",
+      "caution": "Whoever makes a canvas decides what the people using it have in front of them.",
+      "allows": {
+        "documents": "write"
+      }
+    }
+  ],
+  "roles": [
+    {
+      "name": "Canvas builder",
+      "abilities": ["see", "use", "arrange"]
+    }
+  ]
+}

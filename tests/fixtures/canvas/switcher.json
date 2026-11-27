@@ -1,0 +1,44 @@
+{
+  "kind": "canvas",
+  "name": "Switcher",
+  "columns": 4,
+  "pages": [
+    {
+      "name": "Program",
+      "pieces": [
+        { "type": "label", "at": [1, 1, 4, 1], "text": "Program" },
+        {
+          "type": "group",
+          "at": [1, 2, 4],
+          "repeat": { "as": "source", "from": 1, "to": 4 },
+          "pieces": [
+            {
+              "type": "button",
+              "at": [1, 1, 1, 2],
+              "key": "switch/outlet/{source}/on",
+              "value": true,
+              "lit": { "key": "switch/outlet/{source}/on", "is": true },
+              "color": "red",
+              "title": { "key": "switch/outlet/{source}/name" }
+            }
+          ]
+        },
+        { "type": "label", "at": [1, 4, 4, 1], "text": "Lamp" },
+        {
+          "type": "button",
+          "at": [1, 5, 2, 2],
+          "key": "generic/ready/lamp_on",
+          "lit": { "key": "generic/reading/power", "is": "on" },
+          "color": "green"
+        },
+        {
+          "type": "button",
+          "at": [3, 5, 2, 2],
+          "key": "generic/ready/lamp_off",
+          "lit": { "key": "generic/reading/power", "is": "off" },
+          "color": "red"
+        }
+      ]
+    }
+  ]
+}

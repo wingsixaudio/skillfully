@@ -1,0 +1,1217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Skillfully: canvas</title>
+    <style>
+    :root {
+      --chassis: #000;
+      --panel: #121214;
+      --well: #19191c;
+      --rail: #26262b;
+      --text: #f4f4f5;
+      --dim: #a1a1aa;
+      --accent: #f7941d;
+      --ok: #4ade80;
+      --bad: #f87171;
+      --font: "Montserrat", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --row: 60px;
+      --gap: 8px;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html,
+    body {
+      margin: 0;
+      background: var(--chassis);
+      color: var(--text);
+      font-family: var(--font);
+    }
+    body {
+      min-height: 100dvh;
+      padding: 14px max(12px, env(safe-area-inset-right)) 72px max(12px, env(safe-area-inset-left));
+    }
+    main {
+      margin: 0 auto;
+      display: grid;
+      gap: 12px;
+    }
+    main > * {
+      min-width: 0;
+    }
+    [hidden] {
+      display: none !important;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+    }
+    h1 {
+      font-size: 19px;
+      font-weight: 600;
+      margin: 0;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #pick {
+      flex: 1;
+      min-width: 0;
+      font-size: 17px;
+      font-weight: 600;
+    }
+    .link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--dim);
+      flex: none;
+    }
+    .led {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--bad);
+    }
+    .led.on {
+      background: var(--ok);
+    }
+    select,
+    button {
+      font: inherit;
+      color: var(--text);
+      background: var(--rail);
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 9px 12px;
+      min-height: 40px;
+    }
+    button {
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:disabled {
+      cursor: default;
+    }
+    select:focus-visible,
+    button:focus-visible,
+    .slider:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .quiet {
+      background: none;
+      border-color: var(--rail);
+      font-weight: 500;
+      flex: none;
+    }
+    .quiet[aria-expanded="true"] {
+      background: var(--rail);
+    }
+
+    /* The pages of one canvas */
+    #pages {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    #pages button {
+      flex: none;
+      background: none;
+      color: var(--dim);
+      border-radius: 999px;
+      padding: 6px 14px;
+      min-height: 36px;
+    }
+    #pages button[aria-selected="true"] {
+      background: var(--rail);
+      color: var(--text);
+    }
+    #notes {
+      margin: 0;
+      font-size: 13px;
+      color: var(--dim);
+      display: grid;
+      gap: 2px;
+    }
+    #notes:empty {
+      display: none;
+    }
+    #notes .bad {
+      color: var(--bad);
+    }
+
+    /* The grid every piece sits on */
+    #scroll {
+      overflow-x: auto;
+      margin: 0 -4px;
+      padding: 4px;
+    }
+    #board {
+      display: grid;
+      grid-template-columns: repeat(var(--cols, 4), minmax(38px, 1fr));
+      grid-auto-rows: var(--row);
+      gap: var(--gap);
+      margin: 0 auto;
+    }
+    .piece {
+      min-width: 0;
+      min-height: 0;
+      border-radius: 14px;
+      position: relative;
+      overflow: hidden;
+    }
+    .back {
+      background: var(--panel);
+      border-radius: 16px;
+      margin: -4px;
+      padding: 0 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--dim);
+      line-height: calc(var(--row) + 8px);
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .label {
+      display: flex;
+      align-items: center;
+      padding: 0 4px;
+      font-weight: 600;
+      font-size: 16px;
+      line-height: 1.2;
+      border-radius: 0;
+    }
+    .label.small {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--dim);
+    }
+    .label.large {
+      font-size: 24px;
+    }
+    .name {
+      font-size: 12px;
+      line-height: 1.2;
+      color: var(--dim);
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow-wrap: anywhere;
+    }
+    .num {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .readout,
+    .clock {
+      background: var(--well);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 14px;
+    }
+    .readout.tall,
+    .clock {
+      flex-direction: column;
+      justify-content: center;
+      text-align: center;
+    }
+    .readout .num {
+      font-size: 18px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .readout.tall .num {
+      font-size: 26px;
+    }
+    .clock {
+      container-type: size;
+    }
+    .clock .num {
+      line-height: 1;
+      font-size: 28px;
+    }
+    @supports (font-size: 1cqh) {
+      .clock .num {
+        font-size: min(62cqh, calc(150cqw / var(--letters, 8)));
+      }
+      .clock .name + .num {
+        font-size: min(46cqh, calc(150cqw / var(--letters, 8)));
+      }
+    }
+
+    /* Buttons and switches */
+    button.piece {
+      --on: var(--accent);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      padding: 6px;
+      min-height: 0;
+      background: var(--rail);
+      border: 2px solid transparent;
+      font-size: 14px;
+      line-height: 1.15;
+      text-align: center;
+      overflow-wrap: anywhere;
+      touch-action: manipulation;
+      transition: transform 80ms, background 120ms;
+    }
+    button.piece.tinted {
+      border-color: color-mix(in srgb, var(--on) 55%, transparent);
+    }
+    button.piece.lit {
+      background: var(--on);
+      border-color: var(--on);
+      color: #000;
+    }
+    button.piece:active:not(.off) {
+      transform: scale(.97);
+    }
+    button.piece.went {
+      border-color: var(--text);
+    }
+    button.piece.failed {
+      border-color: var(--bad);
+    }
+    button.piece .state {
+      font-size: 12px;
+      font-weight: 500;
+      opacity: .75;
+    }
+    .piece.red {
+      --on: #f87171;
+    }
+    .piece.green {
+      --on: #4ade80;
+    }
+    .piece.blue {
+      --on: #60a5fa;
+    }
+    .piece.yellow {
+      --on: #fde047;
+    }
+    .piece.white {
+      --on: #f4f4f5;
+    }
+
+    /* Sliders: taller than wide, they stand up */
+    .slider {
+      background: var(--well);
+      display: grid;
+      padding: 8px 6px;
+      gap: 6px;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      cursor: pointer;
+    }
+    .slider.up {
+      grid-template-rows: auto 1fr auto;
+      justify-items: center;
+      text-align: center;
+      padding: 8px 2px;
+    }
+    .slider.up .name {
+      font-size: 11px;
+      overflow-wrap: break-word;
+    }
+    .slider.across {
+      grid-template-columns: 1fr auto;
+      grid-template-rows: auto 1fr;
+      align-items: center;
+      padding: 6px 12px;
+      column-gap: 10px;
+    }
+    .slider .num {
+      font-size: 13px;
+    }
+    .track {
+      position: relative;
+      background: var(--rail);
+      border-radius: 999px;
+    }
+    /* The track stops short of each end by half a thumb, so the thumb never leaves the piece. */
+    .up .track {
+      width: 8px;
+      height: calc(100% - 14px);
+      min-height: 20px;
+      align-self: center;
+    }
+    .across .track {
+      grid-column: 1 / -1;
+      height: 8px;
+      width: calc(100% - 14px);
+      justify-self: center;
+    }
+    .fill {
+      position: absolute;
+      background: var(--accent);
+      border-radius: 999px;
+    }
+    .up .fill {
+      left: 0;
+      right: 0;
+      bottom: 0;
+    }
+    .across .fill {
+      top: 0;
+      bottom: 0;
+      left: 0;
+    }
+    .thumb {
+      position: absolute;
+      background: var(--text);
+      border-radius: 6px;
+      box-shadow: 0 1px 4px #000a;
+    }
+    .up .thumb {
+      width: 30px;
+      height: 14px;
+      left: 50%;
+      transform: translate(-50%, 50%);
+    }
+    .across .thumb {
+      width: 14px;
+      height: 26px;
+      top: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    /* A piece that cannot be used says so by how it looks, and in words when touched */
+    .piece.off {
+      opacity: .45;
+      cursor: default;
+    }
+    .piece.off .fill {
+      background: var(--dim);
+    }
+    .why {
+      font-size: 11px;
+      color: var(--dim);
+      font-weight: 500;
+    }
+
+    /* Nothing to show, or something wrong with a canvas */
+    .card {
+      background: var(--panel);
+      border-radius: 16px;
+      padding: 18px;
+      max-width: 620px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .card h2 {
+      font-size: 17px;
+      font-weight: 600;
+      margin: 0 0 4px;
+    }
+    .card p,
+    .card li {
+      font-size: 14px;
+      color: var(--dim);
+      margin: 0 0 10px;
+      line-height: 1.45;
+    }
+    .card ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 0;
+      border-top: 1px solid var(--rail);
+    }
+    .item div {
+      flex: 1;
+      min-width: 0;
+    }
+    .item b {
+      display: block;
+      font-weight: 500;
+      font-size: 15px;
+    }
+    .item span {
+      display: block;
+      font-size: 13px;
+      color: var(--dim);
+      line-height: 1.4;
+    }
+    .item button.on {
+      background: var(--accent);
+      color: #000;
+    }
+    #said {
+      position: fixed;
+      left: 50%;
+      bottom: max(14px, env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      margin: 0;
+      max-width: min(560px, calc(100vw - 24px));
+      background: var(--rail);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 14px;
+      line-height: 1.35;
+    }
+    #said:empty {
+      display: none;
+    }
+    #said.bad {
+      color: var(--bad);
+    }
+    @media (max-width: 520px) {
+      :root {
+        --gap: 6px;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      button.piece {
+        transition: none;
+      }
+    }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1 id="name"></h1>
+        <select id="pick" aria-label="Canvas" hidden></select>
+        <button id="more" class="quiet" type="button" aria-expanded="false" hidden>Canvases</button>
+        <div class="link"
+          aria-live="polite"><i class="led" id="led"></i><span id="linkText">Connecting</span></div>
+      </header>
+      <div id="pages" role="tablist" aria-label="Pages" hidden></div>
+      <p id="notes"></p>
+      <div id="scroll">
+        <div id="board"></div>
+      </div>
+      <section id="shelf" class="card" aria-label="Canvases" hidden></section>
+      <section id="blank" class="card" hidden></section>
+    </main>
+    <p id="said" role="status"></p>
+
+    <script src="canvas.js"></script>
+    <script src="starters.js"></script>
+    <script>
+    // This page runs in the hub's sandbox. It has no network and no access to the hub's own pages. What it
+    // knows arrives as a message from the page around it, and what it wants goes out the same way.
+    //
+    // A canvas is data. Every word in one is put on the page as text, never as markup, and nothing in one
+    // is run. What a person may see and change is decided by the hub, whatever a canvas has on it.
+    (() => {
+      const C = globalThis.SkillfullyCanvas;
+      const STARTERS = globalThis.SkillfullyCanvasStarters || [];
+      const $ = (id) => document.getElementById(id);
+      const toHub = (m) => parent.postMessage(m, "*");
+      const el = (tag, props = {}, ...kids) => {
+        const e = Object.assign(document.createElement(tag), props);
+        e.append(...kids);
+        return e;
+      };
+
+      let me = { slots: {} }, reach = { read: {}, write: {} }, defs = {}, plugins = [];
+      let linked = false, greeted = false, answered = false, allowed = true;
+      let canvases = []; // { id, doc, write, problems }
+      let mayCreate = false, chosen = null, page = 0, shelf = false, ref = 0, shape = "";
+      const values = new Map(); // device id -> Map(key -> value)
+      const subs = new Map(); // "device|key" -> Set of functions to call with the new value
+      const asked = new Map(); // ref -> { ok(message), fail(message) }
+      let clocks = [], wanted = null;
+
+      // --- Saying things ---
+
+      let saidTimer;
+      function say(text, bad) {
+        $("said").textContent = text || "";
+        $("said").classList.toggle("bad", !!bad);
+        clearTimeout(saidTimer);
+        if (text) saidTimer = setTimeout(() => ($("said").textContent = ""), 5000);
+      }
+
+      // --- What a piece is tied to ---
+
+      const valueOf = (plugin, key) => (values.get(plugin) || new Map()).get(key);
+      function watch(plugin, key, fn) {
+        const id = plugin + "|" + key;
+        if (!subs.has(id)) subs.set(id, new Set());
+        subs.get(id).add(fn);
+        fn(valueOf(plugin, key));
+      }
+
+      /**
+       * One value or action of one device, as this person stands to it: whether there is a device for it,
+       * whether they may see it, whether they may change it, and the words for why not.
+       */
+      function tie(key, named, missing) {
+        if (missing && missing.length) {
+          const what = missing.join(" and ");
+          return {
+            short: "Not set for you",
+            words: `Nobody has set your ${what} yet. Whoever runs this hub can.`,
+          };
+        }
+        const plugin = C.deviceFor(plugins, key, named);
+        if (!plugin) {
+          return {
+            short: "No device",
+            words: named
+              ? `This screen has not been given a device called ${named}.`
+              : `This screen has not been given a device that has ${key.slice(0, key.indexOf("/"))} values.`,
+          };
+        }
+        if (!C.may(reach.read, key)) return { short: "Not yours", words: "That one is not yours to see." };
+        const info = C.describe(key, defs, plugin);
+        const cant = plugin.status !== "running"
+          ? `${plugin.name} is not running.`
+          : plugin.mode !== "act"
+          ? `${plugin.name} is watched only: nothing is sent to it.`
+          : !C.may(reach.write, key) || (info && !info.writable)
+          ? "You can look at that, not change it."
+          : "";
+        return {
+          plugin,
+          key,
+          info,
+          cant,
+          get: () => valueOf(plugin.id, key),
+          watch: (fn) => watch(plugin.id, key, fn),
+        };
+      }
+
+      function send(t, value, on) {
+        if (!linked) return say("Not connected to the hub, so that was not sent.", true);
+        asked.set(++ref, on || {});
+        toHub({ type: "set", plugin: t.plugin.id, key: t.key, value, ref });
+        return ref;
+      }
+
+      /** Put words into an element: the words themselves, or a value of a device shown as words. */
+      function words(into, text) {
+        if (text === undefined) return;
+        if (typeof text === "string") return void (into.textContent = text);
+        const t = tie(text.key, text.device);
+        if (t.plugin) t.watch((v) => (into.textContent = v == null ? "" : String(v)));
+      }
+      /** The name on a piece: what its canvas says, or failing that what the device calls it. */
+      function title(into, p, t) {
+        if (p.title !== undefined) return words(into, p.title);
+        if (!t.plugin) return void (into.textContent = p.key.slice(p.key.lastIndexOf("/") + 1));
+        if (t.info && t.info.titleKey) {
+          return watch(t.plugin.id, t.info.titleKey, (v) => (into.textContent = v == null ? "" : String(v)));
+        }
+        into.textContent = (t.info && t.info.title) || p.key.slice(p.key.lastIndexOf("/") + 1);
+      }
+      const shown = (v, info) =>
+        v == null || v === ""
+          ? "—"
+          : typeof v === "boolean"
+          ? (v ? "On" : "Off")
+          : String(v) + (info && info.unit ? (info.unit === "%" ? "%" : " " + info.unit) : "");
+      const same = (a, b) => a === b || (a != null && b != null && String(a) === String(b));
+
+      // --- The pieces ---
+
+      const placed = (e, p) => {
+        e.classList.add("piece");
+        e.style.gridColumn = p.col + " / span " + p.wide;
+        e.style.gridRow = p.row + " / span " + p.tall;
+        return e;
+      };
+      /** A piece that cannot be used looks it, and says why when it is touched. */
+      function off(e, t) {
+        e.classList.add("off");
+        e.append(el("span", { className: "why", textContent: t.short }));
+        e.addEventListener("click", () => say(t.words));
+        return e;
+      }
+
+      function label(p) {
+        const e = el("div", { className: "label " + (p.size || "normal") });
+        words(e, p.text);
+        return e;
+      }
+
+      function readout(p) {
+        const t = tie(p.key, p.device, p.missing);
+        const name = el("span", { className: "name" }), num = el("span", { className: "num", textContent: "—" });
+        const e = el("div", { className: "readout" + (p.tall > 1 ? " tall" : "") }, name, num);
+        title(name, p, t);
+        if (!t.plugin) return off(e, t);
+        t.watch((v) => (num.textContent = shown(v, t.info)));
+        return e;
+      }
+
+      /** What a button or a switch does when the hub answers. */
+      const answer = (e) => ({
+        ok: (m) => {
+          if (m.superseded) return;
+          e.classList.add("went");
+          setTimeout(() => e.classList.remove("went"), 350);
+        },
+        fail: (m) => {
+          e.classList.add("failed");
+          setTimeout(() => e.classList.remove("failed"), 1500);
+          say(m.error.message, true);
+        },
+      });
+
+      function button(p) {
+        const t = tie(p.key, p.device, p.missing);
+        const name = el("span");
+        const e = el("button", { type: "button", className: p.color || "" }, name);
+        if (p.color) e.classList.add("tinted");
+        title(name, p, t);
+        if (!t.plugin) return off(e, t);
+        if (p.lit) {
+          const l = tie(p.lit.key, p.lit.device ?? p.device, p.missing);
+          if (l.plugin) l.watch((v) => e.classList.toggle("lit", same(v, p.lit.is)));
+        }
+        const value = p.value === undefined
+          ? true
+          : typeof p.value === "object"
+          ? JSON.stringify(p.value)
+          : p.value;
+        e.onclick = () => t.cant ? say(t.cant) : send(t, value, answer(e));
+        if (t.cant) e.classList.add("off");
+        return e;
+      }
+
+      function toggle(p) {
+        const t = tie(p.key, p.device, p.missing);
+        const on = p.on === undefined ? true : p.on, offValue = p.off === undefined ? false : p.off;
+        const name = el("span"), state = el("span", { className: "state" });
+        const e = el("button", { type: "button", className: p.color || "" }, name, state);
+        title(name, p, t);
+        if (!t.plugin) return off(e, t);
+        let now;
+        t.watch((v) => {
+          now = v;
+          const is = same(v, on);
+          e.classList.toggle("lit", is);
+          e.setAttribute("aria-pressed", String(is));
+          state.textContent = v == null ? "—" : is ? "On" : "Off";
+        });
+        e.onclick = () => t.cant ? say(t.cant) : send(t, same(now, on) ? offValue : on, answer(e));
+        if (t.cant) e.classList.add("off");
+        return e;
+      }
+
+      function slider(p) {
+        const t = tie(p.key, p.device, p.missing);
+        const up = p.tall > p.wide;
+        const name = el("span", { className: "name" }), num = el("span", { className: "num", textContent: "—" });
+        const fill = el("i", { className: "fill" }), thumb = el("i", { className: "thumb" });
+        const track = el("div", { className: "track" }, fill, thumb);
+        const e = el(
+          "div",
+          { className: "slider " + (up ? "up" : "across") },
+          name,
+          ...(up ? [track, num] : [num, track]),
+        );
+        title(name, p, t);
+        if (!t.plugin) return off(e, t);
+
+        const info = t.info || {};
+        const r = { min: p.min ?? info.min ?? 0, max: p.max ?? info.max ?? 100, unit: info.unit };
+        r.step = p.step ?? C.stepFor(r);
+        const text = (v) =>
+          r.unit === "dB"
+            ? (v <= r.min ? "Off" : (v > 0 ? "+" : "") + v.toFixed(1))
+            : (r.step < 1 ? String(Number(v.toFixed(2))) : String(Math.round(v))) + (r.unit === "%" ? "%" : "");
+
+        let value = null, held = null, dragging = false, quietUntil = 0;
+        let lastSent = 0, queued = null, waiting = null, mine = 0, heard = 0;
+        function paint() {
+          const known = typeof value === "number";
+          const at = known ? C.toPlace(value, r) * 100 + "%" : "0%";
+          if (up) (fill.style.height = at), (thumb.style.bottom = at);
+          else (fill.style.width = at), (thumb.style.left = at);
+          num.textContent = known ? text(value) : "—";
+          thumb.hidden = !known;
+          if (known) {
+            e.setAttribute("aria-valuenow", value);
+            e.setAttribute("aria-valuetext", text(value) + (r.unit && r.unit !== "%" ? " " + r.unit : ""));
+          }
+        }
+        e.setAttribute("role", "slider");
+        e.setAttribute("aria-valuemin", r.min);
+        e.setAttribute("aria-valuemax", r.max);
+        e.setAttribute("aria-orientation", up ? "vertical" : "horizontal");
+        e.tabIndex = 0;
+        // A name that arrives later is still the name a screen reader says.
+        new MutationObserver(() => e.setAttribute("aria-label", name.textContent)).observe(name, {
+          childList: true,
+          characterData: true,
+          subtree: true,
+        });
+        e.setAttribute("aria-label", name.textContent);
+
+        t.watch((v) => {
+          if (typeof v !== "number") return;
+          held = v;
+          // While a thumb is on the slider, the thumb is in charge. Otherwise the device is.
+          if (!dragging && performance.now() > quietUntil) {
+            value = v;
+            paint();
+          }
+        });
+        paint();
+        if (t.cant) {
+          e.classList.add("off");
+          e.addEventListener("click", () => say(t.cant));
+          return e;
+        }
+
+        const push = (v) => {
+          lastSent = performance.now();
+          mine = send(t, v, {
+            ok: (m, at) => {
+              heard = Math.max(heard, at);
+              if (m.superseded) return;
+              held = m.value;
+              if (at === mine && !dragging) {
+                value = m.value;
+                paint();
+              }
+            },
+            fail: (m, at) => {
+              heard = Math.max(heard, at);
+              say(m.error.message, true);
+              quietUntil = 0;
+              if (!dragging) {
+                value = held;
+                paint();
+              }
+            },
+          }) || mine;
+        };
+        // At most one message every 33 ms, and only ever the newest. The hub keeps only the newest too.
+        const move = (v) => {
+          value = v;
+          paint();
+          quietUntil = performance.now() + 400;
+          const now = performance.now();
+          if (now - lastSent < 33) {
+            queued = v;
+            if (!waiting) {
+              waiting = setTimeout(() => {
+                waiting = null;
+                const q = queued;
+                queued = null;
+                if (q !== null) push(q);
+              }, 33 - (now - lastSent));
+            }
+            return;
+          }
+          queued = null;
+          push(v);
+        };
+        const fromPointer = (ev) => {
+          const box = track.getBoundingClientRect();
+          return C.fromPlace(
+            up ? 1 - (ev.clientY - box.top) / box.height : (ev.clientX - box.left) / box.width,
+            r,
+          );
+        };
+        e.addEventListener("pointerdown", (ev) => {
+          dragging = true;
+          e.setPointerCapture(ev.pointerId);
+          move(fromPointer(ev));
+        });
+        e.addEventListener("pointermove", (ev) => dragging && move(fromPointer(ev)));
+        const release = () => {
+          dragging = false;
+          // If the device has already answered the last thing sent, show what it holds now.
+          if (queued === null && heard === mine && typeof held === "number") {
+            value = held;
+            paint();
+          }
+        };
+        e.addEventListener("pointerup", release);
+        e.addEventListener("pointercancel", release);
+        e.addEventListener("keydown", (ev) => {
+          const big = (r.max - r.min) / 10;
+          const by = {
+            ArrowRight: r.step,
+            ArrowUp: r.step,
+            ArrowLeft: -r.step,
+            ArrowDown: -r.step,
+            PageUp: big,
+            PageDown: -big,
+          }[ev.key];
+          const from = typeof value === "number" ? value : r.min;
+          if (ev.key === "Home") move(r.min);
+          else if (ev.key === "End") move(r.max);
+          else if (by) move(Math.min(r.max, Math.max(r.min, Number((from + by).toFixed(6)))));
+          else return;
+          ev.preventDefault();
+        });
+        return e;
+      }
+
+      function clock(p) {
+        const num = el("span", { className: "num" });
+        const e = el("div", { className: "clock" }, num);
+        if (p.title !== undefined) {
+          const name = el("span", { className: "name" });
+          words(name, p.title);
+          e.prepend(name);
+        }
+        e.style.setProperty("--letters", p.seconds ? 11 : 8);
+        clocks.push(() => (num.textContent = new Date().toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+          ...(p.seconds ? { second: "2-digit" } : {}),
+        })));
+        return e;
+      }
+
+      /** A group with a title is drawn as a card behind its pieces. One without is only a way to lay them out. */
+      function backdrop(p) {
+        if (p.title === undefined) return null;
+        const e = el("div", { className: "back" });
+        words(e, p.title);
+        return e;
+      }
+      const MAKE = { label, readout, button, toggle, slider, clock, group: backdrop };
+      setInterval(() => clocks.forEach((tick) => tick()), 1000);
+
+      // --- Drawing ---
+
+      const current = () => canvases.find((c) => c.id === chosen) || null;
+
+      /** The canvases this person has any use for. Someone who may change them sees them all. */
+      function forMe(c) {
+        if (c.write) return true;
+        if (c.problems.length) return false;
+        let tied = 0;
+        for (let i = 0; i < c.doc.pages.length; i++) {
+          for (const p of C.layout(c.doc, i, me.slots || {}).pieces) {
+            if (!p.key) continue;
+            tied++;
+            if (p.missing.length || C.may(reach.read, p.key)) return true;
+          }
+        }
+        return tied === 0;
+      }
+
+      function drawHead() {
+        const c = current();
+        const many = canvases.length > 1;
+        $("name").hidden = many;
+        $("pick").hidden = !many;
+        $("name").textContent = c ? c.doc.name || c.id : "Canvas";
+        const pick = $("pick");
+        pick.innerHTML = "";
+        for (const x of canvases) {
+          pick.append(
+            el("option", { value: x.id, textContent: String(x.doc.name || x.id), selected: x.id === chosen }),
+          );
+        }
+        const more = $("more");
+        more.hidden = !(mayCreate || canvases.some((x) => x.write)) || !canvases.length;
+        more.setAttribute("aria-expanded", String(shelf));
+
+        const pages = $("pages");
+        pages.innerHTML = "";
+        const list = c && !c.problems.length ? c.doc.pages : [];
+        pages.hidden = list.length < 2 || shelf;
+        list.forEach((pg, i) => {
+          const b = el("button", { type: "button", textContent: pg.name });
+          b.setAttribute("role", "tab");
+          b.setAttribute("aria-selected", String(i === page));
+          b.onclick = () => {
+            page = i;
+            draw();
+          };
+          pages.append(b);
+        });
+      }
+
+      function drawBoard() {
+        const board = $("board"), blank = $("blank"), notes = $("notes");
+        subs.clear();
+        clocks = [];
+        board.innerHTML = "";
+        blank.innerHTML = "";
+        notes.innerHTML = "";
+        const c = current();
+        $("scroll").hidden = !c || !!c.problems.length || shelf;
+        blank.hidden = shelf || !!(c && !c.problems.length);
+        if (shelf) return;
+        if (!c) {
+          if (!greeted || !answered) return void (blank.hidden = true);
+          blank.append(
+            el("h2", { textContent: allowed ? "No canvases yet" : "No canvases for you yet" }),
+            el("p", {
+              textContent: allowed
+                ? "Nobody has made a canvas you can use. Someone who may add canvases can start one here."
+                : "Whoever runs this hub has not given you any.",
+            }),
+          );
+          return;
+        }
+        if (c.problems.length) {
+          blank.append(
+            el("h2", { textContent: "This canvas cannot be drawn" }),
+            el("p", { textContent: `Its file is ${c.id}.json, and this is what is wrong with it:` }),
+            el("ul", {}, ...c.problems.map((problem) => el("li", { textContent: problem }))),
+          );
+          return;
+        }
+        const plan = C.layout(c.doc, page, me.slots || {});
+        board.style.setProperty("--cols", plan.columns);
+        board.style.maxWidth = plan.columns * 132 + "px";
+        for (const p of plan.pieces) {
+          const made = MAKE[p.type](p);
+          if (made) board.append(placed(made, p));
+        }
+        clocks.forEach((tick) => tick());
+
+        // What is up with the devices this page is about, said once, above it.
+        const used = new Set();
+        for (const p of plan.pieces) {
+          const plugin = p.key && !p.missing.length && C.deviceFor(plugins, p.key, p.device);
+          if (plugin) used.add(plugin);
+        }
+        for (const plugin of used) {
+          const trouble = plugin.status !== "running"
+            ? "is not running"
+            : plugin.health.status !== "ok"
+            ? (plugin.health.reason || plugin.health.status)
+            : "";
+          if (trouble) notes.append(el("span", { className: "bad", textContent: `${plugin.name}: ${trouble}` }));
+          else if (plugin.mode !== "act") {
+            notes.append(el("span", { textContent: `${plugin.name} is watched only: nothing is sent to it.` }));
+          }
+        }
+        if (plan.cut) notes.append(el("span", { textContent: "This page has more on it than can be drawn." }));
+      }
+
+      // --- Adding and removing canvases ---
+
+      function unused(id) {
+        let name = id, n = 1;
+        while (canvases.some((c) => c.id === name)) name = id + "-" + ++n;
+        return name;
+      }
+      function keep(id, doc) {
+        asked.set(++ref, {
+          doc: (m) => {
+            if (!m.ok) return say(m.message, true);
+            // The hub tells everyone on the screen about the new canvas next. It is opened when that arrives.
+            wanted = id;
+            shelf = false;
+            draw();
+          },
+        });
+        toHub({ type: "doc-put", id, doc, ref });
+      }
+
+      function drawShelf() {
+        const box = $("shelf");
+        box.innerHTML = "";
+        const open = shelf || (greeted && answered && !canvases.length && mayCreate);
+        box.hidden = !open;
+        if (!open) return;
+        if (!canvases.length) $("blank").hidden = true;
+
+        const starts = [];
+        for (const s of STARTERS) {
+          if (!plugins.some((p) => p.capabilities && s.needs in p.capabilities)) continue;
+          starts.push({ name: s.doc.name, about: s.about, id: s.id, doc: s.doc });
+        }
+        for (const plugin of plugins) {
+          const doc = C.fromReady(plugin, Object.fromEntries(values.get(plugin.id) || []));
+          if (!doc) continue;
+          const count = doc.pages.reduce((n, pg) => n + pg.pieces.length, 0);
+          starts.push({
+            name: plugin.name,
+            about: `Its ${count} ready-made ${
+              count === 1 ? "button" : "buttons"
+            }, a page for each group they come in.`,
+            id: plugin.id.slice(0, 50),
+            doc,
+          });
+        }
+        if (mayCreate) {
+          box.append(el("h2", { textContent: canvases.length ? "Start another" : "Start a canvas" }));
+          if (!starts.length) {
+            box.append(el("p", {
+              textContent:
+                "This screen has not been given a device yet. A superuser chooses its connections under Screens, and what there is to start from shows up here.",
+            }));
+          }
+          for (const s of starts) {
+            const add = el("button", { type: "button", className: "on", textContent: "Add" });
+            add.onclick = () => keep(unused(s.id), s.doc);
+            box.append(
+              el(
+                "div",
+                { className: "item" },
+                el("div", {}, el("b", { textContent: s.name }), el("span", { textContent: s.about })),
+                add,
+              ),
+            );
+          }
+        }
+        const theirs = canvases.filter((c) => c.write);
+        if (theirs.length) {
+          box.append(el("h2", { textContent: "Canvases here", style: mayCreate ? "margin-top:18px" : "" }));
+          for (const c of theirs) {
+            const remove = el("button", { type: "button", textContent: "Remove" });
+            remove.onclick = () => {
+              if (remove.textContent === "Remove") {
+                remove.textContent = "Really remove?";
+                return setTimeout(() => (remove.textContent = "Remove"), 4000);
+              }
+              asked.set(++ref, {
+                doc: (m) => m.ok ? say(`Removed ${c.doc.name || c.id}.`) : say(m.message, true),
+              });
+              toHub({ type: "doc-remove", id: c.id, ref });
+            };
+            box.append(
+              el(
+                "div",
+                { className: "item" },
+                el(
+                  "div",
+                  {},
+                  el("b", { textContent: String(c.doc.name || c.id) }),
+                  el("span", { textContent: c.id + ".json" }),
+                ),
+                remove,
+              ),
+            );
+          }
+        }
+        box.append(el("p", {
+          style: "margin:14px 0 0",
+          textContent:
+            "A canvas is a JSON file the hub keeps under config/screens/canvas. Anyone, or any agent, who can write there can make one.",
+        }));
+      }
+
+      function draw() {
+        if (chosen === null || !current()) {
+          chosen = canvases.length ? canvases[0].id : null;
+          page = 0;
+        }
+        const c = current();
+        if (c && !c.problems.length && page >= c.doc.pages.length) page = 0;
+        if (!canvases.length) shelf = false;
+        drawHead();
+        drawBoard();
+        drawShelf();
+      }
+
+      $("pick").onchange = () => {
+        chosen = $("pick").value;
+        page = 0;
+        shelf = false;
+        draw();
+      };
+      $("more").onclick = () => {
+        shelf = !shelf;
+        if (shelf) toHub({ type: "docs", ref: ++ref }); // a file someone wrote a moment ago is picked up here
+        draw();
+      };
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden && linked) toHub({ type: "docs", ref: ++ref });
+      });
+
+      // --- From the hub ---
+
+      // What is drawn only changes when the devices do. A value changing just updates the pieces tied to it.
+      const shapeNow = () =>
+        plugins.map((p) => [p.id, p.name, p.mode, p.status, p.health.status, p.health.reason].join(":")).join(
+          "|",
+        );
+
+      addEventListener("message", (ev) => {
+        if (ev.source !== parent) return;
+        const m = ev.data;
+        if (m.type === "link") {
+          linked = m.up;
+          $("led").classList.toggle("on", m.up);
+          $("linkText").textContent = m.up ? "Connected" : "Reconnecting";
+        }
+        if (m.type === "hello") {
+          me = m.me || { slots: {} };
+          reach = m.reach || { read: {}, write: {} };
+          defs = m.capabilities || {};
+          values.clear();
+          greeted = true;
+          toHub({ type: "docs", ref: ++ref });
+        }
+        if (m.type === "hello" || m.type === "plugins") {
+          plugins = m.plugins || [];
+          const now = shapeNow();
+          if (m.type === "hello" || now !== shape) {
+            shape = now;
+            draw();
+          }
+        }
+        if (m.type === "state") {
+          const held = m.full ? new Map() : values.get(m.plugin) || new Map();
+          values.set(m.plugin, held);
+          for (const [k, v] of Object.entries(m.values)) {
+            held.set(k, v);
+            for (const fn of subs.get(m.plugin + "|" + k) || []) fn(v);
+          }
+          // A starter made from a device's ready-made buttons can only be offered once they have arrived.
+          if (m.full && !$("shelf").hidden) drawShelf();
+        }
+        if (m.type === "ack") {
+          const on = asked.get(m.ref);
+          asked.delete(m.ref);
+          if (!on) return;
+          if (m.ok) on.ok && on.ok(m, m.ref);
+          else on.fail && on.fail(m, m.ref);
+        }
+        if (m.type === "docs") {
+          answered = true;
+          allowed = m.ok !== false;
+          mayCreate = !!m.create;
+          canvases = (m.docs || []).filter((d) => d.doc && d.doc.kind === "canvas").map((d) => ({
+            ...d,
+            problems: C.check(d.doc),
+          })).filter(forMe).sort((a, b) => String(a.doc.name || a.id).localeCompare(String(b.doc.name || b.id)));
+          if (wanted && canvases.some((c) => c.id === wanted)) {
+            chosen = wanted;
+            page = 0;
+            wanted = null;
+          }
+          draw();
+        }
+        if (m.type === "doc-ack") {
+          const on = asked.get(m.ref);
+          asked.delete(m.ref);
+          if (on && on.doc) on.doc(m);
+        }
+      });
+
+      draw();
+      toHub({ type: "ready" });
+    })();
+    </script>
+  </body>
+</html>

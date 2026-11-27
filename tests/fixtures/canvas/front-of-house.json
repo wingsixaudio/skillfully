@@ -1,0 +1,47 @@
+{
+  "kind": "canvas",
+  "name": "Front of house",
+  "columns": 8,
+  "pages": [
+    {
+      "name": "1 to 8",
+      "pieces": [
+        {
+          "type": "group",
+          "at": [1, 1, 8],
+          "title": "Into bus 1",
+          "repeat": { "as": "n", "from": 1, "to": 8 },
+          "pieces": [
+            {
+              "type": "slider",
+              "at": [1, 1, 1, 5],
+              "key": "console/input/{n}/bus/1/level",
+              "title": { "key": "console/input/{n}/name" }
+            },
+            { "type": "slider", "at": [1, 6], "key": "console/input/{n}/bus/1/pan", "title": "Pan" }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "9 to 16",
+      "pieces": [
+        {
+          "type": "group",
+          "at": [1, 1, 8],
+          "title": "Into bus 1",
+          "repeat": { "as": "n", "from": 9, "to": 16 },
+          "pieces": [
+            {
+              "type": "slider",
+              "at": [1, 1, 1, 5],
+              "key": "console/input/{n}/bus/1/level",
+              "title": { "key": "console/input/{n}/name" }
+            },
+            { "type": "slider", "at": [1, 6], "key": "console/input/{n}/bus/1/pan", "title": "Pan" }
+          ]
+        }
+      ]
+    }
+  ]
+}
