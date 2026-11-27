@@ -78,6 +78,14 @@ Deno.test("what is wrong with a canvas is said in words, and the schema refuses 
     ['needs "at"', canvas([{ type: "clock", at: [0, 1] }])],
     ['needs "text"', canvas([{ type: "label", at: [1, 1] }])],
     ['"lit" is {', canvas([{ type: "button", at: [1, 1], key: "a/b", lit: "a/c" }])],
+    [
+      'a slider that "sends" needs "min" and "max"',
+      canvas([{ type: "slider", at: [1, 1], key: "generic/action/volume", sends: "volume" }]),
+    ],
+    [
+      '"shows" goes with "sends"',
+      canvas([{ type: "slider", at: [1, 1], key: "a/b", shows: { key: "a/c" } }]),
+    ],
     ['has "script", which a canvas does not have', { ...canvas([]), script: "alert(1)" }],
   ];
   for (const [words, doc] of wrong) {
@@ -88,6 +96,18 @@ Deno.test("what is wrong with a canvas is said in words, and the schema refuses 
       assert(!valid(doc), `the schema took: ${words}`);
     }
   }
+  // A slider tied to an action that takes a number, written as the guide says, is a canvas.
+  const volume = canvas([{
+    type: "slider",
+    at: [1, 1, 4, 1],
+    key: "generic/action/volume",
+    sends: "volume",
+    min: 0,
+    max: 100,
+    shows: { key: "generic/reading/volume_level" },
+  }]);
+  assertEquals(C.check(volume), []);
+  assert(valid(volume), "the schema refuses the slider the guide shows");
   // Groups can only go so deep, and a page only holds so much.
   // deno-lint-ignore no-explicit-any
   let deep: any = { type: "clock", at: [1, 1] };
