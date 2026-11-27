@@ -401,6 +401,14 @@ held up. `docs/performance.md` has what it showed and what is still true. The ru
 is asked for every value, for every phone, on every change has to cost almost nothing, and anything worked out
 for one person that holds for everyone like them is worked out once.
 
+**What the hub keeps has a numbered shape.** Each part of the hub made its own tables if they were missing,
+which is enough for a new hub and does nothing for one already running: the first added column would have left
+every existing hub behind. The database now carries the number of the shape it is in. A change to the shape is
+a step from one number to the next, a hub brings older data forward before any part reads a row, each step
+happens whole or not at all, and data in a shape newer than the hub knows is refused untouched with a plain
+message. It is shape 1 and there are no steps yet. This is here before the first hub is in anyone's hands,
+because afterwards is too late to add it cleanly. `core/shape.ts` says how to add a step.
+
 **A device is paced from its first command, not by a clock.** A device is still sent commands no faster than
 it said it can take them. But the first change after a quiet moment goes at once and the pacing starts from
 it, so a press is not held for the rest of a tick it had no part in.

@@ -29,6 +29,7 @@ import { inspectPlugin } from "./plugins.ts";
 import { PluginGateway } from "./process.ts";
 import { Registry } from "./registry.ts";
 import { type Screen, Screens } from "./screens.ts";
+import { bringToShape } from "./shape.ts";
 import { Store } from "./store.ts";
 
 /** One plugin folder to start the hub with. What is chosen here for a driver is used the first time the hub sees it. */
@@ -77,6 +78,14 @@ export interface Hub {
 
 export async function startHub(opts: HubOptions): Promise<Hub> {
   const db = new DatabaseSync(opts.dbPath);
+  // Before any part reads a row: older data is brought up to date, and newer data is refused.
+  let shaped;
+  try {
+    shaped = bringToShape(db);
+  } catch (err) {
+    db.close();
+    throw err;
+  }
   const log = new Log(db);
   const accounts = new Accounts(db, log);
   const approvals = new Approvals(db, log);
@@ -84,10 +93,14 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   const gateway = new PluginGateway();
   const skills = new Map<string, { manifest: SkillManifest; dir: string }>();
 
+  if (shaped.from !== shaped.to) {
+    log.append({ type: "skillfully.hub.data", source: "core", data: { from: shaped.from, to: shaped.to } });
+  }
   log.append({
     type: "skillfully.hub.started",
     source: "core",
     data: {
+      shape: shaped.to,
       plugins: opts.plugins.map((p) => p.dir),
       capabilities: capabilities.list().map((c) => c.capability),
     },
