@@ -129,6 +129,11 @@ export class Devices {
     const host = new PluginHost(manifest, dir, record, log, gateway, capabilities, {
       ...this.#tuning.get(manifest.id),
       ...(runDir ? { auditPath: `${runDir}/${manifest.id}.jsonl` } : {}),
+      kept: () => this.deps.registry.kept(manifest.id),
+      keep: (data) => this.deps.registry.keep(manifest.id, data),
+      // Kept in the record like a person's settings, which is also what writes them to the device's file.
+      filled: (settings) =>
+        void (this.deps.registry.get(manifest.id) && this.deps.registry.change(manifest.id, { settings })),
     });
     host.onChange((values) => {
       for (const l of this.#onChange) l(host, values);

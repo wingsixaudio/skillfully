@@ -161,7 +161,17 @@ export interface SettingsForm {
   type: "settings";
   fields: SettingsField[];
 }
-export type FromPlugin = Hello | State | PluginEvent | Result | Health | SettingsForm;
+/** Something the driver needs again next time it starts. The hub keeps it and does nothing else with it. */
+export interface Keep {
+  type: "keep";
+  data: Record<string, unknown>;
+}
+/** Settings the driver filled in for itself: never a secret, never one that decides what it may reach. */
+export interface Filled {
+  type: "filled";
+  values: Record<string, Value>;
+}
+export type FromPlugin = Hello | State | PluginEvent | Result | Health | SettingsForm | Keep | Filled;
 
 // --- Messages: hub to driver ---
 
@@ -170,6 +180,8 @@ export interface Welcome {
   contract: "1";
   mode: Mode;
   settings: Record<string, unknown>;
+  /** What the driver last asked the hub to keep, if anything. */
+  kept?: Record<string, unknown>;
 }
 export interface Command {
   type: "command";
@@ -188,5 +200,14 @@ export interface Shutdown {
 }
 export type ToPlugin = Welcome | Command | Resync | ModeNotice | Shutdown;
 
-export const FROM_PLUGIN = ["hello", "state", "event", "result", "health", "settings"] as const;
+export const FROM_PLUGIN = [
+  "hello",
+  "state",
+  "event",
+  "result",
+  "health",
+  "settings",
+  "keep",
+  "filled",
+] as const;
 export const TO_PLUGIN = ["welcome", "command", "resync", "mode", "shutdown"] as const;

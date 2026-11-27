@@ -59,6 +59,29 @@ export class Registry {
   constructor(db: DatabaseSync) {
     this.#db = db;
     db.exec("CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, record TEXT NOT NULL)");
+    // What a driver asked to have kept for its next start. Apart from the record on purpose: the record
+    // is shown, written to files and told to listeners, and this is none of those things.
+    db.exec("CREATE TABLE IF NOT EXISTS driver_kept (id TEXT PRIMARY KEY, data TEXT NOT NULL)");
+  }
+
+  /** What this device's driver last asked to have kept. For the driver, and nobody else. */
+  kept(id: string): Record<string, unknown> | undefined {
+    const row = this.#db.prepare("SELECT data FROM driver_kept WHERE id = ?").get(id) as
+      | { data: string }
+      | undefined;
+    if (!row) return undefined;
+    try {
+      const data = JSON.parse(row.data);
+      return data && typeof data === "object" && !Array.isArray(data) ? data : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  keep(id: string, data: Record<string, unknown>): void {
+    this.#db.prepare(
+      "INSERT INTO driver_kept (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+    ).run(id, JSON.stringify(data));
   }
 
   get(id: string): DeviceRecord | undefined {
@@ -99,6 +122,8 @@ export class Registry {
   delete(id: string): void {
     const before = this.#listeners.size ? this.get(id) : undefined;
     this.#db.prepare("DELETE FROM devices WHERE id = ?").run(id);
+    // A device that is removed leaves nothing behind, least of all what it was paired with.
+    this.#db.prepare("DELETE FROM driver_kept WHERE id = ?").run(id);
     for (const l of this.#listeners) l(id, before, undefined);
   }
 }

@@ -142,8 +142,34 @@
         }
       }
     },
+    "keep": {
+      "description": "Plugin to hub. Something the driver needs again the next time it starts and can only learn while running: what a device handed it when they were paired, for example. The hub keeps the newest one for this device, hands it back in welcome, and does nothing else with it: it is not shown, not logged and not written to any file a person edits. At most 64,000 characters as JSON.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "data"],
+      "properties": {
+        "type": { "const": "keep" },
+        "data": { "type": "object" }
+      }
+    },
+    "filled": {
+      "description": "Plugin to hub. The driver has filled in some of its own settings: an address it found, or that it is now paired. Only settings in its form that a person could fill in, never a secret, and never one that decides what the driver may reach on the network. The hub keeps them as if a person had typed them, shows them in the form, and does not start the driver again.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "values"],
+      "properties": {
+        "type": { "const": "filled" },
+        "values": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 100,
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "additionalProperties": { "type": ["number", "string", "boolean"] }
+        }
+      }
+    },
     "welcome": {
-      "description": "Hub to plugin. The answer to hello. Carries the plugin's settings, because a plugin stores nothing.",
+      "description": "Hub to plugin. The answer to hello. Carries the plugin's settings and whatever it last asked the hub to keep, because a plugin stores nothing itself.",
       "type": "object",
       "additionalProperties": false,
       "required": ["type", "contract", "mode", "settings"],
@@ -151,7 +177,8 @@
         "type": { "const": "welcome" },
         "contract": { "const": "1" },
         "mode": { "enum": ["listen", "act"] },
-        "settings": { "type": "object" }
+        "settings": { "type": "object" },
+        "kept": { "type": "object" }
       }
     },
     "command": {

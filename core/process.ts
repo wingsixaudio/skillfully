@@ -365,6 +365,8 @@ export class PluginProcess {
     dir: string;
     manifest: DriverManifest;
     settings: Record<string, unknown>;
+    /** What the driver last asked the hub to keep, handed back to it and to nobody else. */
+    kept?: Record<string, unknown>;
     mode: Mode;
     /** What it may reach on the network. */
     granted: string[];
@@ -429,7 +431,13 @@ export class PluginProcess {
       done: pump,
       text: () => stderr,
     });
-    proc.send({ type: "welcome", contract: "1", mode: opts.mode, settings: opts.settings });
+    proc.send({
+      type: "welcome",
+      contract: "1",
+      mode: opts.mode,
+      settings: opts.settings,
+      ...(opts.kept ? { kept: opts.kept } : {}),
+    });
     return proc;
   }
 
