@@ -66,3 +66,64 @@ export function pretendModel(reply: (sent: Sent, nth: number) => Reply | Promise
   });
   return { address: `http://127.0.0.1:${server.addr.port}`, sent, stop: () => server.shutdown() };
 }
+
+/**
+ * The same turn sent the way a model's service sends it when asked to stream: as server-sent events,
+ * with the words in pieces of `size` characters and a tool's input in two halves.
+ */
+export function pieces(content: unknown[], size = 4): Response {
+  const events: unknown[] = [{
+    type: "message_start",
+    message: { usage: { input_tokens: 100, output_tokens: 1 } },
+  }];
+  // deno-lint-ignore no-explicit-any
+  (content as any[]).forEach((b, index) => {
+    if (b.type === "text") {
+      events.push({ type: "content_block_start", index, content_block: { type: "text", text: "" } });
+      for (let at = 0; at < b.text.length; at += size) {
+        events.push({
+          type: "content_block_delta",
+          index,
+          delta: { type: "text_delta", text: b.text.slice(at, at + size) },
+        });
+        if (at === 0) events.push({ type: "ping" });
+      }
+    } else {
+      const json = JSON.stringify(b.input);
+      const half = Math.ceil(json.length / 2);
+      events.push({ type: "content_block_start", index, content_block: { ...b, input: {} } });
+      for (const part of [json.slice(0, half), json.slice(half)]) {
+        events.push({
+          type: "content_block_delta",
+          index,
+          delta: { type: "input_json_delta", partial_json: part },
+        });
+      }
+    }
+    events.push({ type: "content_block_stop", index });
+  });
+  // deno-lint-ignore no-explicit-any
+  const asks = (content as any[]).some((b) => b.type === "tool_use");
+  events.push({
+    type: "message_delta",
+    delta: { stop_reason: asks ? "tool_use" : "end_turn" },
+    usage: { output_tokens: 20 },
+  });
+  events.push({ type: "message_stop" });
+  const text = events.map((e) => `event: ${(e as { type: string }).type}\ndata: ${JSON.stringify(e)}\n\n`);
+  const enc = new TextEncoder();
+  // Sent a few events at a time, cut wherever the cut falls, the way a network does.
+  const all = enc.encode(text.join(""));
+  return new Response(
+    new ReadableStream({
+      async start(c) {
+        for (let at = 0; at < all.length; at += 97) {
+          c.enqueue(all.slice(at, at + 97));
+          if (at % 5 === 0) await new Promise((r) => setTimeout(r, 1));
+        }
+        c.close();
+      },
+    }),
+    { headers: { "content-type": "text/event-stream" } },
+  );
+}

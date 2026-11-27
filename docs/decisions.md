@@ -463,6 +463,26 @@ the model was asked with how long it took and how many tokens it used, each thin
 back, and how it ended, with the reason in words when it failed. Each of those is the agent's own entry, under
 its own ID. The question and the answer are not written there, and neither is anything that was read.
 
+**Asking the agent is an ability, on a screen, like anything else.** `agent` is a name a screen may list under
+`uses`, beside `log` and `documents`, and an ability may allow it. So who may talk to the agent is decided
+where everything else is decided: a role switches the ability on. The screen that ships with the hub for this
+is Ask (`plugins/ask`), and it is a plugin like any other: sandboxed, with no network, told only what the hub
+passes it. Another screen could offer the agent too, by listing it. `any` never covers it.
+
+**The conversation is AG-UI.** A screen sends a run's input and is told what happens as AG-UI events: the run
+starting and ending, the agent's words as they are written, each thing it looks at. It is carried over the
+connection a screen already has, not a second one, because a screen has no network of its own. The words are
+passed on as the model writes them, with names put where the IDs are as they go by. What a person is told
+about a look is what was looked at, in a few words, not what was found: that is the agent's to say.
+
+**A conversation is one person's, kept in memory, and the hub's record is the one that counts.** A person has
+one conversation with the agent, on every phone they are signed in on, until they start over. A second phone
+opened part way through an answer is told what has happened so far and hears the rest. It is held in the hub's
+memory: not in the database, the log or a file, gone when the hub restarts or after half a day untouched.
+Nobody else is shown it, the superuser included. What is kept is what was asked and what was answered. What
+the agent looked at is not: asked again, it looks again, as far as it may look then, so a role taken away is
+not outlived by an old answer's working. Whatever history a screen sends is ignored.
+
 **Looking through a large board takes turns.** Going through thirty thousand values to list what a device
 holds would keep everything else on the hub waiting. Whatever goes through a lot stops every few thousandths
 of a second and lets a fader move. `docs/performance.md` has the numbers.
@@ -566,10 +586,8 @@ was the simplest thing and grew with the number of documents times the number of
   They are out of the log and off the page, and they are not encrypted at rest.
 - **Parts of a module's settings form.** A setting that picks several things at once is not shown, and a
   module's rule for when to show a setting is ignored: every setting is always shown.
-- **The agent only looks.** It cannot change a value, press anything or write a canvas yet. Asking it is a box
-  on the Hub place, for superusers, with no conversation: each question starts from nothing. A place of its
-  own where anyone it is allowed to answer can talk to it, with a yes asked for whenever it wants to do
-  something, is next.
+- **The agent only looks.** It cannot change a value, press anything or write a canvas yet. Doing things, with
+  a yes asked for each time and the hub holding it to that, is next.
 - **Nothing limits what the agent spends.** Every use of its model is in the log with its tokens, and one
   question is at most eight turns. There is no cap by the day or the month.
 - **Skills are not yet given to the agent.** A skill is text that teaches an agent one procedure, and the hub

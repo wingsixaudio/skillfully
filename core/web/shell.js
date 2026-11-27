@@ -39,7 +39,7 @@
       return;
     }
     // A screen may ask for a few things, by name. Whether it gets them is the hub's decision.
-    const asks = ["set", "log", "watch", "docs", "doc-put", "doc-remove"];
+    const asks = ["set", "log", "watch", "docs", "doc-put", "doc-remove", "agent"];
     if (asks.includes(e.data.type) && ws && ws.readyState === 1) {
       ws.send(JSON.stringify(e.data));
     }

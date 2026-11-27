@@ -404,7 +404,11 @@ function drawScreens() {
     } else {chips.append(
         el("span", {
           className: "chip",
-          textContent: o.eligible.length ? "No connections yet" : "Nothing installed that it works with",
+          textContent: !o.works.length
+            ? "Needs no device"
+            : o.eligible.length
+            ? "No connections yet"
+            : "Nothing installed that it works with",
         }),
       );}
     if (o.works.includes("any")) {
@@ -1027,7 +1031,7 @@ function drawAgent(a) {
       className: "help",
       textContent: !a.on && a.needs
         ? a.needs
-        : "For now it can only look and answer. It cannot change anything.",
+        : "People whose role includes Ask the agent talk to it on the Ask screen. For now it can only look and answer. It cannot change anything.",
     }),
   );
 }

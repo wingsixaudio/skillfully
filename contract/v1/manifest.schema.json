@@ -42,7 +42,7 @@
       "maxLength": 64
     },
     "uses": {
-      "description": "What this plugin needs from the hub, and how much. Keys are capability names, 'log' for the hub's log, or 'any' for every kind of device on the connections the plugin is given. The hub gives it these and nothing else, and only on connections a superuser chose for it.",
+      "description": "What this plugin needs from the hub, and how much. Keys are capability names, 'log' for the hub's log, 'documents' for what the hub keeps for a screen, 'agent' for the hub's agent, or 'any' for every kind of device on the connections the plugin is given. 'any' never covers the log, documents or the agent. The hub gives it these and nothing else, and only on connections a superuser chose for it.",
       "type": "object",
       "propertyNames": {
         "pattern": "^[a-z][a-z0-9-]{1,30}$"

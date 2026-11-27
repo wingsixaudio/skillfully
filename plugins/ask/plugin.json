@@ -1,0 +1,23 @@
+{
+  "kind": "screen",
+  "id": "ask",
+  "name": "Ask",
+  "description": "Talk to the hub's agent. It answers from what the hub holds, and shows a person only what that person may see for themselves on their other screens.",
+  "version": "0.1.0",
+  "contract": "1",
+  "entry": "index.html",
+  "uses": {
+    "agent": "read"
+  },
+  "values": "asked",
+  "abilities": [
+    {
+      "id": "ask",
+      "title": "Ask the agent",
+      "description": "Ask the hub's agent questions and read its answers. It never shows this person more than their other screens do.",
+      "allows": {
+        "agent": "read"
+      }
+    }
+  ]
+}

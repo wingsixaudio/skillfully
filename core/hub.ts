@@ -32,6 +32,7 @@ import { type Screen, Screens } from "./screens.ts";
 import { bringToShape } from "./shape.ts";
 import { Agent } from "./agent.ts";
 import { Engine, type EngineTuning } from "./engine.ts";
+import { Talks } from "./talk.ts";
 import { Store } from "./store.ts";
 
 /** One plugin folder to start the hub with. What is chosen here for a driver is used the first time the hub sees it. */
@@ -194,6 +195,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     set: (made) => kept.set(newest, made),
   }, opts.storeEverySeconds);
   const engine = new Engine({ accounts, agent, capabilities, log, screens }, opts.engine);
+  screens.talks = new Talks({ agent, engine });
   const admin = adminApi({ accounts, agent, approvals, config, devices, engine, screens, store, taken });
 
   const publicRule = (superuser: boolean) => {
