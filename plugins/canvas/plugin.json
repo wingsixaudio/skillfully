@@ -63,8 +63,8 @@
     },
     {
       "id": "arrange",
-      "title": "Add and remove canvases",
-      "description": "Start a canvas, and remove one.",
+      "title": "Arrange canvases",
+      "description": "Start a canvas, arrange what is on one, and remove one.",
       "caution": "Whoever makes a canvas decides what the people using it have in front of them.",
       "allows": {
         "documents": "write"

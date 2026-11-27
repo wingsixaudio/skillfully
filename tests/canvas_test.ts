@@ -208,7 +208,15 @@ Deno.test("a key is described from the definitions a screen is handed, and a sli
   };
   const board = { id: "b", name: "Board", capabilities: { console: { level: { min: -90, max: 10 } } } };
   const level = C.describe("console/input/1/bus/2/level", defs, board);
-  assertEquals(level, { kind: "number", writable: true, title: "Send level", unit: "dB", min: -90, max: 10 });
+  assertEquals(level, {
+    kind: "number",
+    writable: true,
+    title: "Send level",
+    which: "input 1, bus 2",
+    unit: "dB",
+    min: -90,
+    max: 10,
+  });
   assertEquals(C.describe("console/input/1/name", defs, board).writable, false);
   assertEquals(C.describe("console/input/1/gain", defs, board), null);
   assertEquals(C.describe("generic/ready/lamp_on", defs, board), {
@@ -327,4 +335,102 @@ Deno.test("whatever a canvas has on it, the hub holds each person to their own r
   } finally {
     await hub.stop();
   }
+});
+
+Deno.test("arranging changes a canvas a cell at a time, and what comes out is still a canvas", async () => {
+  await import("../plugins/canvas/changes.js");
+  const E = C.edit;
+  const ears = await fixture("my-ears");
+  const before = JSON.stringify(ears);
+  const ok = (doc: unknown) => assertEquals(C.check(doc), []);
+
+  // A piece moves by whole cells and stops at the edges. The canvas it came from is left as it was.
+  let doc = E.move(ears, 0, "1", 0, 9);
+  assertEquals(doc.pages[0].pieces[0].at, [1, 10, 4, 1]);
+  assertEquals(JSON.stringify(ears), before);
+  assertEquals(E.move(doc, 0, "1", 5, 0), doc, "a piece already at the edge stays, and nothing is recorded");
+  assertEquals(E.move(doc, 0, "1", -3, -99).pages[0].pieces[0].at, [1, 1, 4, 1]);
+  ok(doc);
+
+  // A piece laid out by a group that repeats is written once. Moving any copy of it moves them all.
+  doc = E.resize(ears, 0, "2/1@5", 0, -1);
+  assertEquals(doc.pages[0].pieces[1].pieces[0].at, [1, 1, 1, 3]);
+  assertEquals(
+    C.layout(doc, 0, { ears: 1 }).pieces.filter((p: { type: string }) => p.type === "slider").map((
+      p: { tall: number },
+    ) => p.tall),
+    [3, 3, 3, 3, 3, 3, 3, 3],
+  );
+  assertEquals(E.written("2/1@5"), "2/1");
+  assertEquals(E.names(ears, 0, "2/1@5"), ["n"]);
+  assertEquals(E.names(ears, 0, "2"), []);
+  // It cannot be made wider than the group it is in, and a group is never narrower than what is in it.
+  assertEquals(E.resize(ears, 0, "2/1", 9, 0).pages[0].pieces[1].pieces[0].at, [1, 1, 4, 4]);
+  const house = await fixture("front-of-house");
+  assertEquals(E.resize(house, 0, "1", -7, 0).pages[0].pieces[0].at, [1, 1, 1]);
+  assertEquals(
+    E.resize(house, 0, "1", -7, 3).pages[0].pieces[0].at.length,
+    3,
+    "and stays as tall as what is in it",
+  );
+
+  // A new piece goes in the first place it fits. Inside a group, that is the group's own grid.
+  const sheet = await fixture("run-sheet");
+  let added = E.add(sheet, 0, null, { ...E.fresh("button"), key: "switch/outlet/3/on", value: true });
+  assertEquals([added.path, added.doc.pages[0].pieces[8].at], ["9", [1, 7, 1, 1]]);
+  ok(added.doc);
+  added = E.add(ears, 0, "2", { ...E.fresh("toggle"), key: "switch/outlet/{n}/on" });
+  assertEquals([added.path, added.doc.pages[0].pieces[1].pieces[1].at], ["2/2", [2, 1, 2, 1]]);
+  ok(added.doc);
+  assertEquals(E.fresh("clock", 2).at, [1, 1, 2, 2]);
+  assertEquals(E.fresh("label").text, "Label");
+
+  // A copy lands beside the first, and taking the last piece out of a group takes the group with it.
+  const twin = E.duplicate(sheet, 0, "8");
+  assertEquals([twin.path, twin.doc.pages[0].pieces[8].at, twin.doc.pages[0].pieces[8].title], ["9", [
+    1,
+    7,
+    2,
+    1,
+  ], "Band back"]);
+  ok(twin.doc);
+  doc = E.remove(ears, 0, "2/1@3");
+  assertEquals(doc.pages[0].pieces.map((p: { type: string }) => p.type), ["label"]);
+  ok(doc);
+  assertEquals(E.remove(sheet, 0, "1").pages[0].pieces.length, 7);
+
+  // A piece is put in a group so it can repeat, and a group is taken away leaving its pieces where they were.
+  doc = E.group(sheet, 0, "7");
+  assertEquals(doc.pages[0].pieces[6].at, [1, 6, 4]);
+  assertEquals(doc.pages[0].pieces[6].pieces[0].at, [1, 1, 2, 1]);
+  assertEquals(doc.pages[0].pieces[6].pieces[0].title, "Band out of the stream");
+  ok(doc);
+  assertEquals(E.group(doc, 0, "7"), doc, "a group is not put in a group by this");
+  assertEquals(JSON.stringify(E.ungroup(doc, 0, "7")), JSON.stringify(sheet));
+  const flat = E.ungroup(house, 0, "1");
+  assertEquals(flat.pages[0].pieces.map((p: { at: number[] }) => p.at), [[1, 2, 1, 5], [1, 7]]);
+  ok(flat);
+
+  // The fewest columns a canvas can have is what its widest piece reaches. A new canvas is one empty page.
+  assertEquals([E.widest(ears), E.widest(house), E.widest(E.blank("New"))], [4, 8, 1]);
+  ok(E.blank("New"));
+  assertEquals(E.spot(ears, 0, "9"), null);
+  assertEquals(E.move(ears, 0, "9", 1, 1), ears);
+});
+
+Deno.test("what is typed for a value is taken as what it most plainly is", async () => {
+  await import("../plugins/canvas/changes.js");
+  await import("../plugins/canvas/arrange.js");
+  // deno-lint-ignore no-explicit-any
+  const { parse } = (globalThis as any).SkillfullyCanvasArrange;
+  assertEquals(parse(""), undefined);
+  assertEquals(parse("  true "), true);
+  assertEquals(parse("false"), false);
+  assertEquals(parse("-90"), -90);
+  assertEquals(parse("0.5"), 0.5);
+  assertEquals(parse("on"), "on");
+  assertEquals(parse("1e3"), "1e3");
+  assertEquals(parse('{"direction":"up"}'), { direction: "up" });
+  assertEquals(parse("{not json: at all}"), "{not json: at all}");
+  assertEquals(parse("{ears}"), "{ears}");
 });

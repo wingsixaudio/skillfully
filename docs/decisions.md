@@ -382,6 +382,14 @@ their roles and their own slots, enforced by the hub on every command. So one ea
 its keys is every musician's own mix, and a musician who is shown a canvas of the whole board can move nothing
 on it that is not theirs.
 
+**Arranging a canvas is a set of small changes to its file, and nothing else.** The screen draws a canvas
+being arranged with the same code that draws one in use, so what is arranged is what will be seen. Every
+change (move, size, add, remove, copy, group, ungroup) is a function from one canvas to the next with no page
+in it, which is what makes undo simple and lets the changes be tested without a browser. Nothing reaches the
+hub until Done, the result is checked the same way a hand-written file is, and what comes out has nothing in
+it that says how it was made. An agent editing the file and a person dragging on the screen are doing the same
+thing to the same document.
+
 **A screen is told its person's own reach.** The hello now carries `reach`: what this person may read and may
 change, as key patterns with their slots already filled in. It is theirs and nobody else's, so telling the
 screen gives nothing away, and it lets any screen dim what is not a person's to touch and say why, without

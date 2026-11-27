@@ -61,7 +61,10 @@ async def main():
         if engine == "chromium" and os.environ.get("CHROME_PATH"): opts["executable_path"] = os.environ["CHROME_PATH"]
         b = await getattr(p, engine).launch(**opts)
         print(f"browser: {engine} {b.version}")
-        phone = dict(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, device_scale_factor=2)
+        # One device pixel to a CSS pixel. A sandboxed screen is drawn by a separate process, and Chromium does
+        # not always carry a pretended pixel density into it: after a screenshot, a click meant for a screen
+        # could land at half its coordinates. With nothing to carry, there is nothing to get out of step.
+        phone = dict(viewport={"width": 390, "height": 844}, has_touch=True, is_mobile=True, device_scale_factor=1)
         errors = []
 
         # --- The owner sets up the hub ---
@@ -442,7 +445,7 @@ async def main():
         cv = owner.frame_locator("#screen")
         await cv.locator("#shelf .item", has_text="Stage lamp").wait_for(timeout=10000)
         offered = await cv.locator("#shelf .item b").all_inner_texts()
-        check("with no canvas yet, Canvas offers ones to start from, for the devices it was given", offered == ["My ears", "Channel strips", "Power and lights", "Stage lamp"], str(offered))
+        check("with no canvas yet, Canvas offers ones to start from, for the devices it was given", offered == ["An empty canvas", "My ears", "Channel strips", "Power and lights", "Stage lamp"], str(offered))
         if shots: await owner.screenshot(path=f"{shots}/10-canvas-start.png")
         await cv.locator("#shelf .item", has_text="Stage lamp").get_by_role("button", name="Add").click()
         await cv.locator("#pages button").first.wait_for(timeout=8000)
@@ -521,7 +524,7 @@ async def main():
         await pg.goto(base + "/s/canvas")
         sv = pg.frame_locator("#screen")
         await sv.locator("#board .slider").first.wait_for(timeout=10000)
-        check("Sam is shown the one canvas with anything of Sam's on it, and no way to add or remove one", await sv.locator("#name").inner_text() == "My ears" and not await sv.locator("#pick").is_visible() and not await sv.locator("#more").is_visible(), await sv.locator("header").inner_text())
+        check("Sam is shown the one canvas with anything of Sam's on it, and no way to add, arrange or remove one", await sv.locator("#name").inner_text() == "My ears" and not await sv.locator("#pick").is_visible() and not await sv.locator("#more").is_visible() and not await sv.locator("#arrange").is_visible(), await sv.locator("header").inner_text())
         strips = await sv.locator("#board .slider .name").all_inner_texts()
         check("each strip takes its name from the board", len(strips) == 8 and strips[1] == (await state("sim-console"))["console/input/2/name"], str(strips))
         two = sv.locator("#board .slider").nth(1)
@@ -550,6 +553,83 @@ async def main():
         probes = await sf.evaluate(PROBES)
         check("Canvas is held to the same sandbox as every screen", all(v == "blocked" for k, v in probes.items() if k != "origin") and probes["origin"] == "null", json.dumps(probes))
         await pg.goto(base + "/s/one-fader")
+
+        # --- Arranging a canvas on the screen: choose, drag, size, add, and nothing is kept until Done ---
+        def on_disk(name):
+            with open(os.path.join(canvas_dir, name + ".json")) as f: return json.load(f)
+        async def cells(locator):
+            return await locator.evaluate("(e) => [e.style.gridColumn, e.style.gridRow].join(' | ')")
+        await cv.locator("#pick").select_option("run-sheet"); await cv.locator("#board .clock .num").wait_for()
+        before = on_disk("run-sheet")
+        await cv.locator("#arrange").click(); await cv.locator("#board .cell").first.wait_for()
+        check("arranging shows the grid, and a bar with what can be done", await cv.locator("#bar #done").is_visible() and await cv.locator("#bar #undo").is_disabled() and not await cv.locator("#pick").is_visible())
+        outlet = (await state("sim-switch"))["switch/outlet/1/on"]
+        one = cv.locator("#board .slot", has=cv.locator("button[aria-pressed]")).first
+        await one.click(); await cv.locator("#panel h2", has_text="Toggle").wait_for()
+        await owner.wait_for_timeout(300)
+        check("while arranging, touching a piece chooses it and does not use it", (await state("sim-switch"))["switch/outlet/1/on"] is outlet and await cv.locator("#setKey").input_value() == "switch/outlet/1/on")
+        back = cv.locator("#board .slot", has_text="Band back")
+        await back.click(); await cv.locator("#panel h2", has_text="Button").wait_for(); await owner.wait_for_timeout(700)
+        was = await cells(back)
+        box = await back.bounding_box()
+        await owner.mouse.move(box["x"] + 30, box["y"] + 30); await owner.mouse.down()
+        await owner.mouse.move(box["x"] + 30, box["y"] + 30 + 68 * 2, steps=6); await owner.mouse.up()
+        await owner.wait_for_timeout(300)
+        check("dragging the chosen piece moves it by whole cells", [was, await cells(back)] == ["3 / span 2 | 6 / span 1", "3 / span 2 | 8 / span 1"], f"{was} -> {await cells(back)}")
+        await cv.locator("#undo").click()
+        check("Undo puts it back", await cells(back) == was and await cv.locator("#undo").is_disabled(), await cells(back))
+        await back.click(); await owner.wait_for_timeout(700)
+        grip = await cv.locator("#board .slot.sel .grip").bounding_box(); wide = (await back.bounding_box())["width"]
+        await owner.mouse.move(grip["x"] + 10, grip["y"] + 10); await owner.mouse.down()
+        await owner.mouse.move(grip["x"] + 10 - wide / 2, grip["y"] + 10 + 68, steps=6); await owner.mouse.up()
+        await owner.wait_for_timeout(300)
+        check("dragging its corner sizes it", await cells(back) == "3 / span 1 | 6 / span 2", await cells(back))
+        await back.focus(); await owner.keyboard.press("ArrowLeft"); await owner.wait_for_timeout(200)
+        check("and the arrow keys move it too", await cells(cv.locator("#board .slot", has_text="Band back")) == "2 / span 1 | 6 / span 2", await cells(cv.locator("#board .slot", has_text="Band back")))
+        check("two pieces left on the same cell are marked, so it is seen before it is kept", await cv.locator("#board .slot.clash").count() == 2, str(await cv.locator("#board .slot.clash").count()))
+        # A new piece is tied to something by choosing from what the devices have.
+        await cv.locator("#addPiece").select_option("slider"); await cv.locator("#pickFind").wait_for()
+        await cv.locator("#pickFind").fill("input 3 bus 2 level")
+        found = await cv.locator("#pickList .pick").all_inner_texts()
+        check("adding a piece asks what to tie it to, from what the screen's devices have", len(found) == 1 and "Send level, input 3, bus 2" in found[0] and "console/input/3/bus/2/level" in found[0], str(found[:3]))
+        await cv.locator("#pickList .pick").first.click(); await cv.locator("#panel h2", has_text="Slider").wait_for()
+        check("the new piece is on the canvas, chosen, in the first place it fits", await cv.locator("#setKey").input_value() == "console/input/3/bus/2/level" and await cv.locator("#board .slot.sel .slider").count() == 1)
+        check("nothing has reached the hub yet", on_disk("run-sheet") == before)
+        if shots: await owner.screenshot(path=f"{shots}/11-canvas-arranging.png")
+        await cv.locator("#done").click(); await cv.locator("#arrange").wait_for()
+        after = on_disk("run-sheet")["pages"][0]["pieces"]
+        check("Done keeps the canvas, as the same kind of file anyone could have written", [p["at"] for p in after if p.get("title") == "Band back"] == [[2, 6, 1, 2]] and any(p.get("key") == "console/input/3/bus/2/level" and p["type"] == "slider" for p in after) and len(after) == len(before["pages"][0]["pieces"]) + 1, json.dumps(after)[-400:])
+        await cv.locator("#board .slider", has_text="Send level").wait_for(timeout=8000)
+        check("and the canvas is in use again, with the new piece on it", not await cv.locator("#bar").is_visible() and await cv.locator("#board .cell").count() == 0)
+        # Cancel loses what was done, after asking once.
+        await cv.locator("#arrange").click(); await cv.locator("#board .cell").first.wait_for()
+        await cv.locator("#board .slot", has_text="Band back").click(); await cv.locator("#removePiece").click()
+        await cv.locator("#cancel").click()
+        check("Cancel asks before losing changes", await cv.locator("#cancel").inner_text() == "Lose changes?" and await cv.locator("#bar").is_visible())
+        await cv.locator("#cancel").click(); await cv.locator("#arrange").wait_for()
+        check("and then nothing is kept", on_disk("run-sheet")["pages"][0]["pieces"] == after and await cv.locator("#board button.piece", has_text="Band back").count() == 1)
+        # A canvas from nothing: named, a group that repeats, and a second page.
+        await cv.locator("#more").click(); await cv.locator("#startEmpty").click(); await cv.locator("#setName").wait_for()
+        await cv.locator("#setName").fill("Video desk"); await cv.locator("#setName").blur()
+        await cv.locator("#addPiece").select_option("button"); await cv.locator("#pickFind").fill("outlet 1 on")
+        await cv.locator("#pickList .pick").first.click(); await cv.locator("#groupPiece").click()
+        await cv.locator("#panel .field", has_text="Repeats").locator("select").select_option("range")
+        await cv.locator("#setTo").fill("4"); await cv.locator("#setTo").blur()
+        await cv.locator("#board .slot[data-path^='1/1']").nth(1).click(); await cv.locator("#panel h2", has_text="Button").wait_for()
+        await cv.locator("#panel .parts select").first.select_option("{n}")
+        await cv.locator("#panel .field", has_text="Name").get_by_role("button", name="From a value").click()
+        await cv.locator("#pickFind").fill("outlet name 1"); await cv.locator("#pickList .pick").first.click()
+        await cv.locator("#panel .parts select").nth(1).select_option("{n}") if await cv.locator("#panel .parts select").count() > 1 else None
+        await cv.locator("#addPage").click(); await cv.locator("#setPage").fill("Lamp"); await cv.locator("#setPage").blur()
+        await cv.locator("#addPiece").select_option("clock")
+        if shots: await owner.screenshot(path=f"{shots}/11b-canvas-new.png")
+        await cv.locator("#done").click(); await cv.locator("#arrange").wait_for()
+        made = on_disk("video-desk")
+        row = made["pages"][0]["pieces"][0]
+        check("a new canvas is kept under a file name made from its name", made["name"] == "Video desk" and [p["name"] for p in made["pages"]] == ["Page 1", "Lamp"] and made["pages"][1]["pieces"][0]["type"] == "clock", json.dumps(made)[:300])
+        check("a piece put in a group and repeated is written once, with the item's name in its key", row["type"] == "group" and row["repeat"] == {"as": "n", "from": 1, "to": 4} and row["pieces"][0]["key"] == "switch/outlet/{n}/on", json.dumps(row))
+        await cv.locator("#board button.piece").nth(3).wait_for(timeout=8000)
+        check("and it is drawn four times, opened as soon as it is kept", await cv.locator("#board button.piece").count() == 4 and await cv.locator("#pick").input_value() == "video-desk", str(await cv.locator("#board button.piece").all_inner_texts()))
 
         # --- Someone who can only write files proposes a change. The hub does what is safe, and asks about the rest ---
         await owner.goto(base + "/admin/hub"); await owner.wait_for_selector("#secConfig:not([hidden]) #configTrust")

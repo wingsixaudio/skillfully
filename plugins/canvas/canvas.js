@@ -358,6 +358,9 @@
         kind: def.kind,
         writable: !!def.writable,
         title: def.title,
+        // Which one of its kind this is, in words: "input 3, bus 2".
+        which: want.map((w, i) => w.startsWith("{") ? `${w.slice(1, -1)} ${parts[i]}` : "").filter(Boolean)
+          .join(", "),
         unit: def.unit,
         min: bound(def.min),
         max: bound(def.max),
@@ -435,6 +438,7 @@
     LIMITS,
     check,
     layout,
+    tallOf,
     fill,
     may,
     deviceFor,
