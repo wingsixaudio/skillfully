@@ -489,7 +489,13 @@ async def main():
         await cv.locator("#pick").select_option("broken"); await cv.locator("#blank li").first.wait_for()
         told = await cv.locator("#blank").inner_text()
         check("a canvas that cannot be drawn says which file and what is wrong with it", "This canvas cannot be drawn" in told and "broken.json" in told and "Page 1, piece 1 (slider)" in told and "needs a key such as" in told, told)
+        # From here, note every value the hub sends this screen.
+        canvas_frame = next(f for f in owner.frames if "/screens/canvas/" in f.url)
+        await canvas_frame.evaluate("() => { window.heard = []; addEventListener('message', (e) => { if (e.data && e.data.type === 'state') window.heard.push(...Object.keys(e.data.values)); }); }")
         await cv.locator("#pick").select_option("switcher"); await cv.locator("#board button.piece", has_text="Outlet 3").wait_for(timeout=8000)
+        await owner.wait_for_timeout(300)
+        heard = await canvas_frame.evaluate("() => window.heard")
+        check("a canvas tells the hub which values it is showing, and is sent those and no others", 8 <= len(set(heard)) <= 16 and all(k.startswith(("switch/outlet/", "generic/")) for k in heard), f"{len(set(heard))} values: {sorted(set(heard))[:6]}")
         lamp_on = cv.locator("#board button.piece", has_text="Lamp on")
         check("a button is lit by a reading of its device", "lit" in await lamp_on.get_attribute("class") and "lit" not in await cv.locator("#board button.piece", has_text="Lamp off").get_attribute("class"), await lamp_on.get_attribute("class"))
         three = cv.locator("#board button.piece", has_text="Outlet 3")

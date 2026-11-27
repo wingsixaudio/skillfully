@@ -1575,6 +1575,38 @@
         drawHead();
         drawBoard();
         drawShelf();
+        tellWatch();
+      }
+
+      /**
+       * Tell the hub which values this screen is showing now. It sends those and nothing else: a canvas of
+       * eight faders on a large board has no use for the other thirty thousand values. What is being shown
+       * is exactly what the pieces just drawn asked to be told about.
+       */
+      let told = null;
+      function tellWatch() {
+        if (!greeted) return;
+        const shown = {};
+        for (const id of subs.keys()) {
+          const at = id.indexOf("|");
+          (shown[id.slice(0, at)] ||= new Set()).add(id.slice(at + 1));
+        }
+        // Choosing what to tie a piece to needs everything the devices have. Offering a canvas made of a
+        // device's ready-made buttons needs their names.
+        const more = arr
+          ? ["**"]
+          : !$("shelf").hidden && mayCreate
+          ? ["generic/ready/*/title", "generic/ready/*/group"]
+          : [];
+        const keys = {};
+        for (const plugin of plugins) {
+          const mine = [...(shown[plugin.id] || []), ...more].sort();
+          if (mine.length) keys[plugin.id] = mine.includes("**") ? ["**"] : mine;
+        }
+        const text = JSON.stringify(keys);
+        if (text === told) return;
+        told = text;
+        toHub({ type: "watch", keys });
       }
 
       $("pick").onchange = () => {
@@ -1628,6 +1660,7 @@
           reach = m.reach || { read: {}, write: {} };
           defs = m.capabilities || {};
           values.clear();
+          told = null;
           greeted = true;
           toHub({ type: "docs", ref: ++ref });
         }
@@ -1646,8 +1679,18 @@
             held.set(k, v);
             for (const fn of subs.get(m.plugin + "|" + k) || []) fn(v);
           }
-          // A starter made from a device's ready-made buttons can only be offered once they have arrived.
-          if (m.full && !$("shelf").hidden) drawShelf();
+          if (m.full) {
+            // The whole of what the device holds of what was asked for: a piece tied to something that is
+            // not in it has nothing to show.
+            for (const [id, fns] of subs) {
+              if (id.startsWith(m.plugin + "|") && !held.has(id.slice(m.plugin.length + 1))) {
+                for (const fn of fns) fn(undefined);
+              }
+            }
+            // A starter made from a device's ready-made buttons can only be offered once they have arrived.
+            if (!$("shelf").hidden) drawShelf();
+            if (arr) arr.heard();
+          }
         }
         if (m.type === "ack") {
           const on = asked.get(m.ref);

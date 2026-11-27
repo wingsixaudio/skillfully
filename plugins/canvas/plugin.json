@@ -10,6 +10,7 @@
     "any": "write",
     "documents": "write"
   },
+  "values": "asked",
   "abilities": [
     {
       "id": "see",

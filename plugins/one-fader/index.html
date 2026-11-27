@@ -473,6 +473,16 @@
           ol.append(li);
         }
       }
+      // This screen shows two values: the name of input 1 and its send into this person's ears. It tells
+      // the hub so, and is sent those two and nothing else.
+      let told = "";
+      const tellWatch = () => {
+        if (!board) return;
+        const keys = { [board]: [NAME, ...(KEY ? [KEY] : [])] };
+        if (JSON.stringify(keys) === told) return;
+        told = JSON.stringify(keys);
+        toHub({ type: "watch", keys });
+      };
       let logTimer, restTimer;
       const askLogSoon = () => {
         clearTimeout(logTimer);
@@ -499,8 +509,10 @@
           bus = ears;
           if (!KEY) say("Nobody has set which ear mix is yours yet. Ask whoever runs this hub.", true);
         }
+        if (m.type === "hello") told = "";
         if (m.type === "hello" || m.type === "plugins") {
           showPlugins(m.plugins);
+          tellWatch();
           askLogSoon();
         }
         if (m.type === "state" && m.plugin === board) {

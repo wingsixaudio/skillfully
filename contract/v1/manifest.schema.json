@@ -212,6 +212,14 @@
         "uses": {
           "$ref": "#/$defs/uses"
         },
+        "values": {
+          "description": "How the screen is sent the values of its connections. 'all': everything the person may see, when the screen connects and as it changes. 'asked': nothing until the screen says which values it is showing, with a watch message, and then only those. A screen that shows a few values of a large device should ask.",
+          "enum": [
+            "all",
+            "asked"
+          ],
+          "default": "all"
+        },
         "abilities": {
           "$ref": "#/$defs/abilities"
         },

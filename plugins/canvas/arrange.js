@@ -54,6 +54,8 @@
       setPage,
       addPage,
       stop,
+      /** What the devices hold has arrived or changed as a whole: a list being chosen from is drawn again. */
+      heard: () => picker && drawPicker(),
     };
     let undo = [];
     let picker = null; // { kind, done(pick) } while a value is being chosen
