@@ -358,6 +358,17 @@ async def main():
         await do_it.click(); await act()
         await owner.locator("#tryList .reading", has_text=power).locator("b", has_text="on").wait_for(timeout=15000)
         check("then a button on its page really does it, and the reading beside it moves", True)
+        # An action that needs something typed in is done from the device's own page, with no screen.
+        level_row = owner.locator("#tryList .action", has_text="Set level").first
+        check("an action that asks for something first says so, and can be pressed", "It asks for something first" in await level_row.inner_text() and await level_row.get_by_role("button", name="Do it").is_enabled(), await level_row.inner_text())
+        await level_row.get_by_role("button", name="Do it").click()
+        await owner.locator("#dlg[open] #opt-level").wait_for()
+        check("it asks on the page for what the action needs, with the module's note beside it", "Full is 100." in await owner.locator("#dlgBody").inner_text())
+        await owner.fill("#opt-level", "30")
+        if await owner.locator("#dlg #confirm").count(): await owner.fill("#dlg #confirm", OWNER_PIN)
+        await owner.click("#dlgOk")
+        await owner.locator("#tryList .reading", has_text="Level").locator("b", has_text="30").wait_for(timeout=15000)
+        check("and what was typed reaches the device", True)
         tried = await owner.locator("#tryList").inner_text()
         check("what the module's author put together comes first, under the author's headings", 0 <= tried.find("Levels") < tried.find("Full brightness") < tried.find("Power") < tried.find("Lamp on") < tried.find("Everything else") < tried.find(turn_on), tried)
         check("and a press that is not one plain action is not offered", "Two things at once" not in tried and "not there" not in tried)
