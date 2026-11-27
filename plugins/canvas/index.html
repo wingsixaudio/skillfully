@@ -135,6 +135,21 @@
       background: var(--rail);
       color: var(--text);
     }
+    #proposedNote {
+      margin: 0 0 12px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px dashed var(--accent);
+      font-size: 14px;
+      line-height: 1.45;
+      max-width: 528px;
+    }
+    #proposedNote[hidden] {
+      display: none;
+    }
+    #board[inert] {
+      opacity: .8;
+    }
     #notes {
       margin: 0;
       font-size: 13px;
@@ -792,6 +807,10 @@
       <div id="pages" role="tablist" aria-label="Pages" hidden></div>
       <p id="notes"></p>
       <div id="scroll">
+        <p id="proposedNote" hidden>
+          Not saved yet. This is what you are being asked about. Say yes or no where you asked for it. Nothing
+          on it works until it is saved.
+        </p>
         <div id="board"></div>
       </div>
       <section id="shelf" class="card" aria-label="Canvases" hidden></section>
@@ -1196,7 +1215,10 @@
 
       // --- Drawing ---
 
-      const current = () => canvases.find((c) => c.id === chosen) || null;
+      // A canvas that has been put to this person for a yes or a no, and is not kept yet. While there is
+      // one, it is what is drawn, so they can look at it first. Nothing on it works until it is saved.
+      let proposed = null;
+      const current = () => (!arr && proposed) || canvases.find((c) => c.id === chosen) || null;
 
       /** The canvases this person has any use for. Someone who may change them sees them all. */
       function forMe(c) {
@@ -1215,7 +1237,10 @@
 
       function drawHead() {
         const c = current();
-        const many = canvases.length > 1 && !arr;
+        const showing = !arr && !!proposed;
+        const many = canvases.length > 1 && !arr && !showing;
+        $("proposedNote").hidden = !showing;
+        $("board").inert = showing;
         $("name").hidden = many;
         $("pick").hidden = !many;
         $("name").textContent = arr ? arr.doc.name : c ? c.doc.name || c.id : "Canvas";
@@ -1227,7 +1252,7 @@
           );
         }
         const more = $("more");
-        more.hidden = !(mayCreate || canvases.some((x) => x.write)) || !canvases.length || !!arr;
+        more.hidden = !(mayCreate || canvases.some((x) => x.write)) || !canvases.length || !!arr || showing;
         more.setAttribute("aria-expanded", String(shelf));
         $("arrange").hidden = !!arr || shelf || !c || !c.write || !!c.problems.length;
 
@@ -1565,13 +1590,13 @@
       }
 
       function draw() {
-        if (chosen === null || !current()) {
+        if (chosen === null || !canvases.some((c) => c.id === chosen)) {
           chosen = canvases.length ? canvases[0].id : null;
-          page = 0;
+          if (!proposed) page = 0;
         }
         const c = current();
         if (c && !c.problems.length && page >= c.doc.pages.length) page = 0;
-        if (!canvases.length || arr) shelf = false;
+        if (!canvases.length || arr || proposed) shelf = false;
         drawHead();
         drawBoard();
         drawShelf();
@@ -1710,6 +1735,18 @@
         if (m.type === "doc") {
           kept = kept.filter((d) => d.id !== m.id);
           if (!m.gone) kept.push({ id: m.id, doc: m.doc, write: m.write });
+          sort();
+        }
+        // A canvas someone has asked this person to say yes or no to. It is shown, and is not theirs to
+        // press yet. Taken away again, with the word that it was saved, the saved one is what is shown.
+        if (m.type === "doc-proposed") {
+          if (m.gone) {
+            if (proposed && proposed.id === m.id) proposed = null;
+            if (m.saved) wanted = m.id;
+          } else {
+            proposed = { id: m.id, doc: m.doc, write: false, problems: C.check(m.doc) };
+            page = 0;
+          }
           sort();
         }
         if (m.type === "doc-ack") {

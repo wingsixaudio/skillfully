@@ -34,7 +34,30 @@ Deno.serve(
     // deno-lint-ignore no-explicit-any
     const wants = (body.messages as any[]).findLast((m) => m.role === "user" && m.content[0]?.type === "text")
       ?.content[0].text.startsWith("Set ");
-    const content: { type: string; text?: string; id?: string; name?: string; input?: unknown }[] = wants
+    // Asked to make something, it writes a small canvas and asks for it to be kept.
+    // deno-lint-ignore no-explicit-any
+    const makes = (body.messages as any[]).findLast((m) => m.role === "user" && m.content[0]?.type === "text")
+      ?.content[0].text.startsWith("Make ");
+    const drawn = {
+      kind: "canvas",
+      name: "Drawn by Robin",
+      columns: 4,
+      pages: [{
+        name: "One",
+        pieces: [
+          { type: "label", at: [1, 1, 4, 1], text: "Drawn by Robin", size: "large" },
+          { type: "slider", at: [1, 2, 1, 4], key: "console/input/1/bus/1/level", title: "Input 1" },
+        ],
+      }],
+    };
+    const content: { type: string; text?: string; id?: string; name?: string; input?: unknown }[] = makes
+      ? (result ? [{ type: "text", text: result.content }] : [{
+        type: "tool_use",
+        id: `toolu_${heard.length}`,
+        name: "save_document",
+        input: { screen: "canvas", document: "drawn-by-robin", content: drawn },
+      }])
+      : wants
       ? (result ? [{ type: "text", text: result.content }] : [{
         type: "tool_use",
         id: `toolu_${heard.length}`,

@@ -163,6 +163,10 @@ From the hub:
 }
 ```
 
+- **documents**: for a screen that keeps documents, two files in its own folder that say how they are written:
+  `schema`, a JSON Schema for one document, and `about`, a description in words. The hub checks a document an
+  agent writes against the schema before anyone is asked to approve it, and gives both files to an agent that
+  asks. Neither changes what anyone may do.
 - **opens**: `"beside"` for a screen meant to be used with another one in view, such as one for talking to the
   agent. The hub then offers it as a word in the bar above every screen, and opens it in a panel beside the
   screen the person is on: below it on a phone, to its right with room. Both stay whole and both stay live,
@@ -209,6 +213,7 @@ To the screen:
 | `{ type: "docs", ref, ok, docs, create }`                                             | The answer to a `docs`: every document this person may read. Each of `docs` is `{ id, doc, write }`. `create` says whether this person may add one.                                                                                                                                                                                                                                                       |
 | `{ type: "doc", id, doc, write }` or `{ type: "doc", id, gone: true }`                | One document was kept, or removed. Sent to everyone on the screen who may read it, whenever anyone changes it. Only that document is sent.                                                                                                                                                                                                                                                                |
 | `{ type: "doc-ack", ref, id, ok }` or `{ ..., ok: false, message }`                   | The answer to a `doc-put` or a `doc-remove`                                                                                                                                                                                                                                                                                                                                                               |
+| `{ type: "doc-proposed", id, doc }`                                                   | A document this person has been asked to say yes or no to, as it would be kept. It is not kept yet. Show it as not saved, and let nothing on it act. `{ type: "doc-proposed", id, gone: true, saved }` takes it away again: `saved` says whether it has now been kept, in which case a `doc` for it arrives as usual. Only the person who was asked is sent these.                                        |
 | `{ type: "agent", event }`                                                            | One AG-UI event from the person's conversation with the agent: `MESSAGES_SNAPSHOT`, `RUN_STARTED`, `TEXT_MESSAGE_START`, `TEXT_MESSAGE_CONTENT`, `TEXT_MESSAGE_END`, `TOOL_CALL_START`, `TOOL_CALL_ARGS`, `TOOL_CALL_END`, `TOOL_CALL_RESULT`, `RUN_FINISHED`, `RUN_ERROR`, and `CUSTOM` named `skillfully.asked` for the question as the hub took it.                                                    |
 
 A screen does not say who the person is. The hub knows from their sign-in.

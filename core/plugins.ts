@@ -3,7 +3,7 @@
 // exactly what the hub would say.
 
 import type { Manifest } from "../contract/mod.ts";
-import { abilitiesProblem, ANY, RESERVED } from "./access.ts";
+import { abilitiesProblem, ANY, DOCUMENTS, RESERVED } from "./access.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { realPath } from "./paths.ts";
 import { inspectImports, loadManifest } from "./process.ts";
@@ -76,6 +76,28 @@ export async function inspectPlugin(
       warnings.push(
         `its page loads from other sites, which the sandbox blocks: ${outside.slice(0, 3).join(", ")}`,
       );
+    }
+    // The files it says describe its documents have to be there, and the schema has to be one.
+    for (const [what, name] of Object.entries(manifest.documents ?? {})) {
+      let text: string;
+      try {
+        text = await Deno.readTextFile(`${real}/${name}`);
+      } catch {
+        throw new Error(
+          `${manifest.id}: it names ${name} for its documents' ${what}, and there is no such file`,
+        );
+      }
+      if (what !== "schema") continue;
+      try {
+        if (typeof JSON.parse(text) !== "object") throw new Error("not an object");
+      } catch {
+        throw new Error(
+          `${manifest.id}: ${name} is named as the schema of its documents, and is not a JSON Schema`,
+        );
+      }
+    }
+    if (manifest.documents && !(DOCUMENTS in manifest.uses)) {
+      warnings.push(`it says how its documents are written, but does not list "documents" under uses`);
     }
     return { manifest, dir: real, warnings };
   }

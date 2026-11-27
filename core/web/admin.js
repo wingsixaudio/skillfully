@@ -1083,7 +1083,7 @@ function drawAgent(a) {
       className: "help",
       textContent: !a.on && a.needs
         ? a.needs
-        : "People whose role includes Ask the agent talk to it on the Ask screen. With Have the agent do things as well, it can set a value or press a button for them: only what both it and they may change, and only after their yes each time.",
+        : "People whose role includes Ask the agent talk to it on the Ask screen. With Have the agent do things as well, it can set a value, press a button or draw a canvas for them: only what both it and they may change, and only after their yes each time.",
     }),
   );
 }

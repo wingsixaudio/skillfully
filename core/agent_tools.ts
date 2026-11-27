@@ -10,6 +10,7 @@
 // says to it.
 
 import type { Value, ValueDef } from "../contract/mod.ts";
+import type { Keeping } from "./agent_docs.ts";
 import type { Capabilities } from "./capabilities.ts";
 import type { PluginHost } from "./host.ts";
 import type { Log, LogEntry } from "./log.ts";
@@ -32,6 +33,8 @@ export interface Looking {
   entry(e: LogEntry): boolean;
   capabilities: Capabilities;
   log: Log;
+  /** What this run may do with the documents screens keep. */
+  kept: Keeping;
 }
 
 export interface Looked {
@@ -79,7 +82,8 @@ export function toolsFor(l: Looking): Tool[] {
       description:
         "List the devices connected to this hub that you can see. For each: its id and name, what kind of " +
         "thing it is, whether it is working, whether the hub may change it or is only watching it, and the " +
-        "kinds of value it holds with how many of each there are. A kind of value is a name with braces " +
+        "kinds of value it holds: what each is, its unit and range where it has one, whether it can be set " +
+        "or is a button to press, and how many there are. A kind of value is a name with braces " +
         "around each part that varies, a number or a name" + (eg ? `, such as ${eg.shape}` : "") +
         ". Start here when you do not know what is connected.",
       input: { type: "object", properties: {}, additionalProperties: false },
@@ -88,7 +92,8 @@ export function toolsFor(l: Looking): Tool[] {
       name: "find_values",
       description:
         "Search one device's values by words. A value matches when every word is in its name, its title or " +
-        "what it holds now, so searching for what a channel or a button is called finds the value that " +
+        "what it holds now, as the start of a word, so searching for what a channel or a button is called " +
+        "finds the value that " +
         "holds that. What something is called is usually a value of its own, beside its other values: find " +
         "it first, then read what is beside it. A number said straight after a word belongs to that word.",
       input: {
@@ -216,14 +221,27 @@ class Pace {
 }
 
 /** What kind of value each of a device's values is. It follows from the name alone, so it is worked out once. */
-const kinds = new WeakMap<PluginHost, Map<string, { shape: string; def: ValueDef } | null>>();
-function kindOf(l: Looking, h: PluginHost, key: string): { shape: string; def: ValueDef } | null {
+interface Kind {
+  shape: string;
+  def: ValueDef;
+  min?: number;
+  max?: number;
+}
+const kinds = new WeakMap<PluginHost, Map<string, Kind | null>>();
+function kindOf(l: Looking, h: PluginHost, key: string): Kind | null {
   let known = kinds.get(h);
   if (!known) kinds.set(h, known = new Map());
   let kind = known.get(key);
   if (kind === undefined) {
     const found = l.capabilities.resolve(h.manifest.capabilities, key);
-    kind = found ? { shape: `${found.capability}/${found.def.key}`, def: found.def } : null;
+    kind = found
+      ? {
+        shape: `${found.capability}/${found.def.key}`,
+        def: found.def,
+        ...(found.min !== undefined ? { min: found.min } : {}),
+        ...(found.max !== undefined ? { max: found.max } : {}),
+      }
+      : null;
     known.set(key, kind);
   }
   return kind;
@@ -250,23 +268,54 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
     const out = [];
     for (const h of hosts) {
       const see = l.seer(h.id);
-      const held = new Map<string, { title: string; kind: string; unit?: string; count: number }>();
+      const held = new Map<string, Record<string, unknown> & { count: number }>();
       let count = 0;
+      const pressed = new Set<string>();
+      const tally = (kind: Kind) => {
+        const had = held.get(kind.shape);
+        if (had) return void had.count++;
+        // Everything the kind of device says about this kind of value: what it is, what it is measured
+        // in, how far it goes, and whether it is something to read, to set, or to press.
+        held.set(kind.shape, {
+          title: kind.def.title,
+          ...(kind.def.description ? { about: kind.def.description.slice(0, 240) } : {}),
+          kind: kind.def.kind === "trigger" ? "button" : kind.def.kind,
+          ...(kind.def.unit ? { unit: kind.def.unit } : {}),
+          ...(kind.min !== undefined ? { min: kind.min } : {}),
+          ...(kind.max !== undefined ? { max: kind.max } : {}),
+          ...(kind.def.kind === "trigger"
+            ? { can_be_pressed: true }
+            : kind.def.writable
+            ? { can_be_set: true }
+            : {}),
+          count: 1,
+        });
+      };
       for (const key of h.state.keys()) {
         if (pace.due()) await pace.rest();
         if (!see(key)) continue;
         count++;
         const kind = kindOf(l, h, key);
         if (!kind) continue;
-        const had = held.get(kind.shape);
-        if (had) had.count++;
-        else {
-          held.set(kind.shape, {
-            title: kind.def.title,
-            kind: kind.def.kind,
-            ...(kind.def.unit ? { unit: kind.def.unit } : {}),
-            count: 1,
-          });
+        tally(kind);
+        // A button holds nothing, so it is not among what the device holds. It is known by what is kept
+        // beside it, such as its name, and counted once however much is beside it.
+        const up = key.slice(0, key.lastIndexOf("/"));
+        if (pressed.has(up)) continue;
+        const button = kindOf(l, h, up);
+        if (button?.def.kind === "trigger" && see(up)) {
+          pressed.add(up);
+          tally(button);
+        }
+      }
+      // A button with nothing beside it and no part of its name that varies is there if the device has
+      // that kind of thing at all.
+      for (const cap of Object.keys(h.manifest.capabilities)) {
+        for (const def of l.capabilities.get(cap)?.def.values ?? []) {
+          const key = `${cap}/${def.key}`;
+          if (def.kind !== "trigger" || def.key.includes("{") || pressed.has(key) || !see(key)) continue;
+          const button = kindOf(l, h, key);
+          if (button) tally(button);
         }
       }
       out.push({
@@ -275,6 +324,9 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
         is: Object.keys(h.manifest.capabilities).filter((cap) => l.sees(h.id, cap)).map((cap) =>
           l.capabilities.get(cap)?.def.title ?? cap
         ),
+        about: Object.keys(h.manifest.capabilities).filter((cap) => l.sees(h.id, cap)).map((cap) =>
+          l.capabilities.get(cap)?.def.description ?? ""
+        ).filter(Boolean).join(" ").slice(0, 500),
         working: h.health.status === "ok" ? "yes" : `no: ${h.health.reason ?? h.health.status}`.slice(0, 200),
         hub: h.mode === "act" ? "may change it" : "is only watching it",
         values: count,
@@ -297,7 +349,7 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
     const note = { tool: name, device: h.id, words: words.join(" ") };
     if (!words.length) return no("Give at least one word to search for.", note, "Searched for nothing");
     const limit = whole(input.limit, 1, 100, 30);
-    type Found = { name: string; title: string; holds: Value; can_be_set?: true };
+    type Found = { name: string; title: string; holds: Value; can_be_set?: true; belongs_to_button?: string };
     // A number said straight after a word belongs to that word: "input 2" is input 2, not bus 2 of some
     // other input. Only when nothing fits that way are the words taken in any order.
     const close: Found[] = [];
@@ -312,23 +364,28 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
       const hay = `${key} ${def?.title ?? ""} ${typeof value === "string" ? value : ""}`.toLowerCase();
       // Most values have none of the words in them, and that is seen without taking the name apart.
       if (!words.every((w) => hay.includes(w))) continue;
+      // A word has to begin a part of the name or of what it holds: "on" finds "lamp on" and not
+      // "button". A number has to be a whole part.
+      const parts = hay.split(/[^\p{L}\p{N}]+/u);
       let fits = true, tight = true;
-      if (numbers.includes(true)) {
-        const parts = hay.split(/[^\p{L}\p{N}]+/u);
-        for (let i = 0; i < words.length && fits; i++) {
-          if (!numbers[i]) continue;
-          if (!parts.includes(words[i])) fits = false;
-          else if (i > 0 && !numbers[i - 1]) {
-            tight &&= parts.some((p, at) => p.includes(words[i - 1]) && parts[at + 1] === words[i]);
-          }
+      for (let i = 0; i < words.length && fits; i++) {
+        if (!numbers[i]) fits = parts.some((p) => p.startsWith(words[i]));
+        else if (!parts.includes(words[i])) fits = false;
+        else if (i > 0 && !numbers[i - 1]) {
+          tight &&= parts.some((p, at) => p.startsWith(words[i - 1]) && parts[at + 1] === words[i]);
         }
       }
       if (!fits) continue;
+      // A button holds nothing, so it is found by what is beside it: its name, its options. When this
+      // value belongs to a button, the button's own name is given too, since that is what gets pressed.
+      const up = key.slice(0, key.lastIndexOf("/"));
+      const button = kindOf(l, h, up)?.def.kind === "trigger" && see(up) ? up : undefined;
       const one: Found = {
         name: key,
         title: def?.title ?? "",
         holds: shown(value),
         ...(def?.writable && def.kind !== "trigger" ? { can_be_set: true } : {}),
+        ...(button ? { belongs_to_button: button } : {}),
       };
       if (tight) close.length < limit ? close.push(one) : closeMore++;
       else loose.length < limit ? loose.push(one) : looseMore++;

@@ -53,6 +53,15 @@ export class Reach {
     return this.#parts.some((p) => this.#approvals.allowed(p.screen.id, host) && p.access.canRead(key));
   }
 
+  /** May they read this document of this screen? Only by their abilities on that screen itself. */
+  docRead(screen: string, id: string): boolean {
+    return this.#parts.some((p) => p.screen.id === screen && p.access.canRead(`documents/${id}`));
+  }
+  /** May they keep or replace this document of this screen? */
+  docWrite(screen: string, id: string): boolean {
+    return this.#parts.some((p) => p.screen.id === screen && p.access.canWrite(`documents/${id}`));
+  }
+
   /**
    * The same question for many values of one device: which screens reach the device is worked out once,
    * and not again for every value.

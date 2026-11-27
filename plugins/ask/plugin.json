@@ -23,7 +23,7 @@
     {
       "id": "act",
       "title": "Have the agent do things",
-      "description": "Ask the hub's agent to set a value or press a button. It asks this person yes or no each time, showing exactly what would change, and can change only what both it and this person may change.",
+      "description": "Ask the hub's agent to set a value, press a button, or write something a screen keeps, such as a canvas. It asks this person yes or no each time, showing exactly what would change, and can change only what both it and this person may change.",
       "caution": "The agent can then change, for this person, whatever this person could already change themselves. Nothing is changed without their yes.",
       "allows": {
         "agent": "write"

@@ -220,6 +220,23 @@
           ],
           "default": "all"
         },
+        "documents": {
+          "description": "For a screen that keeps documents: how they are written, as two files in the screen's own folder. The hub checks a document an agent writes against the schema before asking anyone to approve it, and gives both files to an agent that asks how this screen's documents are written. Neither changes what anyone may do.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema": {
+              "description": "A JSON Schema (2020-12) for one document.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+            },
+            "about": {
+              "description": "A description in words, for a person or an agent writing one. At most 16,000 characters are read.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+            }
+          }
+        },
         "opens": {
           "description": "How the screen is opened. 'page': on its own. 'beside': as a panel beside whichever screen the person is on, from a link in the bar above it, so both are in view at once. A screen that opens beside others can still be opened on its own.",
           "enum": [

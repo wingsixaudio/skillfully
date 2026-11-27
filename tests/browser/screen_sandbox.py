@@ -843,6 +843,33 @@ async def main():
         check("someone who was not given Ask has no such word in their bar", await sam_page.locator("#besides a").count() == 0)
         await sam_page.close()
 
+        # --- The agent draws a canvas: it is on Canvas to look at before the yes, and kept only after it ---
+        made = await owner.evaluate("""async () => (await (await fetch('/admin/api/role', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({role: {name: 'Draws canvases', grants: {canvas: ['see', 'use', 'arrange']}}})})).json()).ok""")
+        await owner.goto(base + "/admin/people"); await owner.wait_for_selector("#people .item")
+        await robin.get_by_role("button", name="Roles").click()
+        await owner.locator("#dlgBody label.check", has_text="Draws canvases").locator("input").check()
+        await ok_dialog()
+        await owner.set_viewport_size({"width": 1200, "height": 800})
+        await owner.goto(base + "/s/canvas")
+        await owner.locator("#besides a", has_text="Ask").click()
+        beside = owner.frame_locator("#besideFrame"); canvas_f = owner.frame_locator("#screen")
+        await beside.locator("#name", has_text="Ask Robin").wait_for(timeout=8000)
+        await beside.locator("#q").fill("Make a canvas with input 1 on it"); await beside.locator("#q").press("Enter")
+        await beside.locator(".yesno").wait_for(timeout=15000)
+        await canvas_f.locator("#proposedNote").wait_for(timeout=8000)
+        card = await beside.locator(".yesno").inner_text()
+        check("asked to make a canvas, the hub asks yes or no, and Canvas beside it shows what was drawn, marked as not saved", made and "Keep “drawn-by-robin” in Canvas? It is new." in card and "Not saved yet" in await canvas_f.locator("#proposedNote").inner_text() and "Drawn by Robin" in await canvas_f.locator("#board").inner_text() and await canvas_f.locator("#name").inner_text() == "Drawn by Robin", card)
+        check("what is shown before the yes cannot be pressed, and cannot be arranged", await canvas_f.locator("#board").get_attribute("inert") is not None and await canvas_f.locator("#arrange").is_hidden())
+        if shots: await owner.screenshot(path=f"{shots}/20-canvas-proposed.png")
+        await beside.locator(".yesno button", has_text="Yes, do it").click()
+        await beside.locator(".theirs", has_text="it was kept").wait_for(timeout=15000)
+        await canvas_f.locator("#proposedNote").wait_for(state="hidden")
+        await canvas_f.locator("#arrange").wait_for()
+        check("after the yes it is a canvas like any other: shown, live, and theirs to arrange", (await canvas_f.locator("#pick").is_visible() or await canvas_f.locator("#name").is_visible()) and await beside.locator(".waiting.done").inner_text() == "You said yes." and "Drawn by Robin" in await canvas_f.locator("#board").inner_text() and await canvas_f.locator("#board").get_attribute("inert") is None and "Saved “drawn-by-robin” in Canvas" in await beside.locator("#talk").inner_text())
+        if shots: await owner.screenshot(path=f"{shots}/21-canvas-kept.png")
+        await owner.click("#besideClose")
+        await owner.set_viewport_size({"width": 390, "height": 844})
+
         sam_screens = [s["id"] for s in (await (await sam_ctx.request.get(base + "/auth/me")).json()).get("screens", [])]
         check("someone who was not given the ability has no Ask screen", "ask" not in sam_screens and len(sam_screens) > 0, str(sam_screens))
 

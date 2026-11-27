@@ -10,6 +10,10 @@
     "any": "write",
     "documents": "write"
   },
+  "documents": {
+    "schema": "canvas.schema.json",
+    "about": "README.md"
+  },
   "values": "asked",
   "abilities": [
     {
@@ -75,7 +79,11 @@
   "roles": [
     {
       "name": "Canvas builder",
-      "abilities": ["see", "use", "arrange"]
+      "abilities": [
+        "see",
+        "use",
+        "arrange"
+      ]
     }
   ]
 }
