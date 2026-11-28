@@ -19,9 +19,18 @@ const ESCAPES: Record<string, string> = {
 };
 const text = (s: string) => s.replace(/[&<>"']/g, (c) => ESCAPES[c]);
 
-/** Read a page and fill it in. Everything is filled in as text, except what is named as the hub's own HTML. */
+/**
+ * Read a page and fill it in. Everything is filled in as text, except what is named as the hub's own HTML.
+ * {{bar}} is the bar across the top of the page (bar.html), with {{here}} saying where in the hub this page
+ * is. A page with no {{here}} has no bar: signing in, joining and setting up.
+ */
 async function page(file: string, values: Record<string, string> = {}, html: string[] = []): Promise<string> {
-  const raw = await Deno.readTextFile(WEB + file);
+  let raw = await Deno.readTextFile(WEB + file);
+  const BAR = /\{\{\s*bar\s*\}\}/;
+  if (BAR.test(raw)) {
+    const bar = values.here ? (await Deno.readTextFile(WEB + "bar.html")).trim() : "";
+    raw = raw.replace(BAR, () => bar);
+  }
   return raw.replace(
     /\{\{\s*([a-z]+)\s*\}\}/g,
     (_, k) => (html.includes(k) ? values[k] ?? "" : text(values[k] ?? "")),
@@ -36,10 +45,11 @@ const TITLES = {
 };
 
 /** Setting up a new hub, signing in, using an invitation, and your own account. One page, four forms. */
-export const authPage = (mode: keyof typeof TITLES) => page("auth.html", { title: TITLES[mode], mode });
+export const authPage = (mode: keyof typeof TITLES) =>
+  page("auth.html", { title: TITLES[mode], mode, here: mode === "account" ? "account" : "" });
 
 /** People, roles, screens, devices and sign-in rules. Superusers only. */
-export const adminPage = () => page("admin.html");
+export const adminPage = () => page("admin.html", { here: "admin" });
 
 /** A plain page with one message, for dead ends. The message is the hub's own words and may hold a link. */
 export const notePage = (title: string, message: string) =>
@@ -47,7 +57,7 @@ export const notePage = (title: string, message: string) =>
 
 /** The frame a screen is shown in. */
 export const shellPage = (screen: { id: string; name: string; entry: string }) =>
-  page("shell.html", { id: screen.id, name: screen.name, entry: screen.entry });
+  page("shell.html", { id: screen.id, name: screen.name, entry: screen.entry, here: screen.id });
 
 /**
  * What one of the hub's own pages may load: its scripts and styles from the hub's own folder of them and
