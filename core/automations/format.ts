@@ -116,6 +116,8 @@ export interface Rule {
   max?: number;
   /** The link form, in place of everything but `if`: these values are kept equal, whichever is changed. */
   link?: Ref[];
+  /** With `link`: the values keep their distances. Moving one by 3 moves each of the others by 3. */
+  relative?: true;
 }
 
 export const LIMITS = {
@@ -439,7 +441,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     "(root)",
     r,
     form === "link"
-      ? [...shared, "if", "link"]
+      ? [...shared, "if", "link", "relative"]
       : form === "follow"
       ? [...shared, "if", "follow", "set", "scale", "min", "max"]
       : form === "while"
@@ -458,6 +460,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
   }
   if (r.if !== undefined) condition("if", r.if, 1);
   if (form === "link") {
+    if (r.relative !== undefined && r.relative !== true) say("relative", "must be true");
     // One name with a range is already several values, so a link may be written as a single one.
     const several = Array.isArray(r.link) && r.link.some((v) => isObject(v) && v.range !== undefined);
     if (!Array.isArray(r.link) || r.link.length < (several ? 1 : 2) || r.link.length > LIMITS.linked) {

@@ -97,6 +97,7 @@ function notInForm(rule) {
     if (s && "wait_until" in s) return "a step that waits for a condition";
     if (s && "then" in s) return "a step with if and else";
   }
+  if (rule.relative) return "a link that keeps the distances between its values";
   if (JSON.stringify(rule).includes('"range":')) return "a name that stands for a range of values";
   return "";
 }

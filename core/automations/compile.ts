@@ -110,6 +110,8 @@ export interface Compiled {
   follow?: { from: At; to: At; scale?: Scale; min?: number; max?: number };
   /** The link form: the values kept equal to each other. */
   link?: At[];
+  /** The link keeps the distances between its values, and does not make them equal. */
+  relative?: true;
   /** Every value it reads, and every value it may set. Each once. */
   reads: At[];
   writes: At[];
@@ -419,6 +421,9 @@ export function compile(
       return got;
     });
     const kinds = new Set(found.map((f) => f.kind).filter(Boolean));
+    if (rule.relative && [...kinds].some((k) => k !== "number")) {
+      say("relative", "a relative link is for numbers, and these are not all numbers");
+    }
     if (kinds.size > 1) {
       say("link", `linked values must be the same kind, and these are ${[...kinds].join(" and ")}`);
     }
@@ -452,6 +457,7 @@ export function compile(
       ...(cancel ? { cancel } : {}),
       ...(follow ? { follow } : {}),
       ...(link ? { link } : {}),
+      ...(link && rule.relative ? { relative: true as const } : {}),
       reads: once(read),
       writes,
     },

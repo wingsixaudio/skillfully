@@ -125,6 +125,8 @@ export const RULE_FORMAT = `A rule is one JSON object. It takes one of four form
 
 4. Keep several values equal to each other, whichever one is changed:
 { "kind": "automation", "name": "...", "link": [{ "key": K1 }, { "key": K2 }, { "key": K3 }], "if": {...} }
+   With "relative": true the values keep their distances and are not made equal: moving one by 3 moves each
+   of the others by 3. Numbers only. Use it to move a balanced set of levels together.
 
 kind   always "automation".
 name   1 to 60 characters, shown to people.
