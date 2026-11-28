@@ -218,7 +218,7 @@ export class Engine {
         const a = mine.reader(host), b = theirs?.reader(host);
         return b ? (key) => a(key) && b(key) : a;
       },
-      readsLog: this.deps.agent.about().readsLog && (!theirs || theirs.showsLog),
+      readsLog: this.deps.agent.about(agent.id).readsLog && (!theirs || theirs.showsLog),
       entry: (e) => mine.entry(e, false) && (!theirs || theirs.entry(e, true)),
       capabilities,
       log,
@@ -241,7 +241,8 @@ export class Engine {
   /** May this person be answered at all, and can the agent answer now? Null when so, or why not. */
   cannot(asker: Person, question: unknown): { code: string; message: string } | null {
     const no = (code: string, message: string) => ({ code, message });
-    const about = this.deps.agent.about();
+    // The agent a superuser gave this person, or the default.
+    const about = this.deps.agent.for(asker.id);
     if (!about.person) return no("no_agent", "This hub has no agent yet.");
     if (!about.ready) {
       return no("not_ready", about.on ? `Agent unavailable: ${about.needs}` : "Agent disabled.");
@@ -271,7 +272,7 @@ export class Engine {
       talk.hear?.({ type: "RUN_ERROR", ...no });
       return Promise.resolve({ ok: false, ...no });
     }
-    const agent = this.deps.agent.about().person!;
+    const agent = this.deps.agent.for(asker.id).person!;
     const run = this.#run(agent, asker, (question as string).trim(), via, talk).finally(() =>
       this.#running.delete(asker.id)
     );
@@ -336,7 +337,7 @@ export class Engine {
     const { log } = this.deps;
     const traceid = newId();
     const began = Date.now();
-    const about = this.deps.agent.about();
+    const about = this.deps.agent.about(agent.id);
     const acts = !!first.act;
     let looking = this.looking(agent, asker);
     const tools = [...toolsFor(looking), ...docTools(looking, acts), ...(acts ? [SET] : [])];
@@ -414,7 +415,7 @@ export class Engine {
     const go = async (from: number): Promise<Answered> => {
       for (let step = from; step <= maxSteps; step++) {
         // Asked for again before every call: turned off, or its key taken away, it stops where it is.
-        const key = this.deps.agent.keyForModel();
+        const key = this.deps.agent.keyForModel(agent.id);
         if (!key) return failed("stopped", "The agent was turned off before it finished.", step);
         let turn;
         const asked = Date.now();
@@ -614,7 +615,7 @@ export class Engine {
             stop = AbortSignal.any([this.#stop.signal, ended, ...(next.stop ? [next.stop] : [])]);
             hear({ type: "RUN_STARTED", threadId, runId });
             // What they may each do is worked out again now. It may have changed while this waited.
-            const now = this.deps.agent.about();
+            const now = this.deps.agent.about(agent.id);
             const still = now.ready && this.deps.accounts.person(asker.id);
             if (still && !still.disabled) looking = this.looking(now.person!, still);
             const done = new Set<string>();
@@ -676,9 +677,10 @@ export class Engine {
    */
   async models(
     by: Person,
+    which?: string,
   ): Promise<{ ok: true; models: Offered[] } | { ok: false; code: string; message: string }> {
     const { agent, log } = this.deps;
-    const key = agent.keyForChoosing();
+    const key = agent.keyForChoosing(which);
     if (!key) {
       return {
         ok: false,
@@ -690,14 +692,14 @@ export class Engine {
       log.append({
         type: "skillfully.agent.models",
         source: "core",
-        subject: agent.about().person?.id,
+        subject: agent.about(which).person?.id,
         actor: by.id,
         via: "admin",
         data,
       });
     try {
       const models = await listModels(
-        { address: agent.about().address, key },
+        { address: agent.about(which).address, key },
         this.#stop.signal,
         this.tuning,
       );

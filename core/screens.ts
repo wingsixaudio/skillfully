@@ -300,7 +300,7 @@ export class Screens {
         plugins: mine.map((h) => this.describe(h, c)),
         capabilities: this.#definitionsFor(c),
         // A screen that may talk to the agent is told its name and whether it can answer now.
-        ...(access.sees(AGENT) ? { agent: this.talks?.about() ?? null } : {}),
+        ...(access.sees(AGENT) ? { agent: this.talks?.about(me.id) ?? null } : {}),
       });
       if (!c.watch) { for (const h of mine) socket.send(this.#everything(c, h)); }
     };

@@ -574,3 +574,46 @@ Deno.test("the agent is told about buttons, which hold nothing, by what a device
   ]);
   await hub.stop();
 });
+
+Deno.test("a person given another agent is answered by it, with its key and model, and still only as far as they may see", async () => {
+  const t = await withAgent(() => [says("Robin here.")]);
+  const { hub, seesAll } = t;
+  const by = hub.owner.id;
+  const other = pretendModel((_sent, nth) => nth === 1 ? [uses("devices")] : [says("Kit here.")]);
+  const kit = hub.agent.make(by, "Kit");
+  assert(kit.ok && hub.accounts.setRoles(by, kit.person.id, [seesAll]).ok);
+  assert(hub.agent.setKey(by, "sk-kits-own-key", kit.person.id).ok);
+  assert(hub.agent.set(by, { address: other.address, model: "kits-model" }, kit.person.id).ok);
+  assert(hub.agent.turn(by, true, kit.person.id).ok);
+
+  // Sam may adjust one ear mix and nothing else. Alex has the same role and the default agent.
+  const sam = await hub.member("Sam"), alex = await hub.member("Alex");
+  assert(hub.agent.give(by, sam.id, kit.person.id).ok);
+
+  const fromKit = await hub.engine.ask(person(hub, sam), "Who is this?");
+  assert(fromKit.ok && fromKit.answer === "Kit here.", JSON.stringify(fromKit));
+  const fromRobin = await hub.engine.ask(person(hub, alex), "Who is this?");
+  assert(fromRobin.ok && fromRobin.answer === "Robin here.");
+
+  // Each question went to its own agent's model, with that agent's key, and nowhere else.
+  assertEquals([other.sent.length, t.model.sent.length], [2, 1]);
+  assertEquals(other.sent[0].headers.get("x-api-key"), "sk-kits-own-key");
+  assertEquals(other.sent[0].body.model, "kits-model");
+  assertEquals(t.model.sent[0].headers.get("x-api-key"), KEY);
+  assert(
+    !other.sent.some((s) => s.text.includes(KEY)) && !t.model.sent.some((s) => s.text.includes("kits-own")),
+  );
+
+  // Kit sees every device by its own roles, and showed Sam only the one Sam may see.
+  const listed = results(other.sent[1])[0].read;
+  assertEquals(listed.devices.map((d: { id: string }) => d.id), ["sim-console"]);
+  // What each did is on the record under its own ID.
+  const asked = agentLog(hub).filter((e) => e.type === "skillfully.agent.asked");
+  assertEquals(asked.map((e) => [e.actor, e.subject]), [[sam.id, kit.person.id], [alex.id, t.robin]]);
+
+  // What a screen is told about the agent is about that person's agent.
+  assertEquals(hub.screening.talks!.about(sam.id)?.name, "Kit");
+  assertEquals(hub.screening.talks!.about(alex.id)?.name, "Robin");
+  await other.stop();
+  await t.done();
+});

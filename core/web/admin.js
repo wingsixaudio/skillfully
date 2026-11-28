@@ -4,7 +4,9 @@
 //   /admin/screens    Screens  what people open, and which devices each may use
 //   /admin/people     People   who is on the team and what each can do
 //   /admin/hub        Hub      the hub's own settings
-let people = [], roles = [], offered = [], drivers = [], tags = [], meId = "";
+let people = [], roles = [], offered = [], drivers = [], tags = [], agents = [], meId = "";
+// Which agent the Agent card is showing, by its ID. The default until another is chosen.
+let agentShown = "";
 let proposed = { changes: 0, power: 0, problems: 0 };
 let canAdd = false;
 const SUPER = "superuser";
@@ -149,10 +151,11 @@ async function load() {
   if (!r.ok) return location.replace("/");
   ({ people, roles, offered, drivers } = r);
   tags = r.tags || [];
-  drawAgent(r.agent);
+  meId = r.me;
+  agents = r.agents || [];
+  drawAgent(agents.find((a) => a.person.id === agentShown) || r.agent);
   drawVersion(r.version);
   proposed = r.config || proposed;
-  meId = r.me;
   unlockedUntil = r.unlocked ? Date.now() + r.unlocked * 1000 : 0;
   drawLock();
   canAdd = !!r.canAdd;
@@ -190,6 +193,9 @@ function drawPeople() {
     }
     const isAgent = p.kind === "agent";
     if (isAgent) chips.prepend(el("span", { className: "chip on", textContent: "Agent" }));
+    // Said only when it is not the default: which agent answers this person.
+    const theirs = agents.find((a) => a.givenTo.includes(p.id));
+    if (theirs) chips.append(el("span", { className: "chip", textContent: "Agent: " + theirs.person.name }));
     if (p.disabled) chips.append(el("span", { className: "chip", textContent: "Disabled" }));
     if (!p.hasSecret && !isAgent) {
       chips.append(el("span", { className: "chip", textContent: "Invited" }));
@@ -258,6 +264,29 @@ function drawPeople() {
           id: p.id,
           roles: [...$("dlgBody").querySelectorAll("input[type=checkbox]:checked")].map((c) => c.value),
         })));
+    if (!isAgent && agents.length > 1) {
+      btn("Agent", () =>
+        ask("Agent for " + p.name, (b) => {
+          const sel = el("select", { id: "personAgent" });
+          for (const a of agents) {
+            sel.append(el("option", {
+              value: a.isDefault ? "" : a.person.id,
+              textContent: a.person.name + (a.isDefault ? " (default)" : ""),
+            }));
+          }
+          sel.value = theirs ? theirs.person.id : "";
+          b.append(
+            el("label", { htmlFor: "personAgent", textContent: "Agent" }),
+            sel,
+            el("p", {
+              className: "help",
+              textContent: "It answers " + p.name + " with only what " + p.name +
+                " may see. What it reads is sent to that agent's model provider.",
+            }),
+          );
+          confirmField(b);
+        }, () => sureCall("/admin/api/agent/give", { person: p.id, agent: $("personAgent").value || null })));
+    }
     btn("Assign", () =>
       ask("Assignments for " + p.name, (b) => {
         b.append(
@@ -1075,8 +1104,11 @@ $("agentAsk").onsubmit = async (e) => {
 function drawAgent(a) {
   const box = $("agent");
   if (!box || !a) return;
-  $("agentAsk").hidden = !a.ready;
+  // Asking here is answered by the agent this superuser was given, or the default.
+  const mine = agents.find((x) => x.givenTo.includes(meId)) || agents.find((x) => x.isDefault) || a;
+  $("agentAsk").hidden = !mine.ready;
   box.innerHTML = "";
+  const me = a.person ? { agent: a.person.id } : {};
   const line = (label, words, ...buttons) =>
     box.append(
       el(
@@ -1118,6 +1150,38 @@ function drawAgent(a) {
     );
     return;
   }
+  // More than one: choose which is shown here. Each has its own key, model and roles.
+  const add = button("Add agent", () =>
+    ask("Add agent", (x) => {
+      input(x, "agentName", "Name", { required: true, maxLength: 40 });
+      x.append(
+        el("p", {
+          className: "help",
+          textContent:
+            "Another agent has its own API key, model and roles. Give it to someone under People. Everyone else keeps the default.",
+        }),
+      );
+      confirmField(x);
+    }, async () => {
+      const r = await sureCall("/admin/api/agent/make", { name: $("agentName").value });
+      if (r.ok) agentShown = r.person.id;
+      return r;
+    }), "agentAdd");
+  if (agents.length > 1) {
+    const sel = el("select", { id: "agentWhich" });
+    sel.setAttribute("aria-label", "Agent");
+    for (const x of agents) {
+      sel.append(
+        el("option", { value: x.person.id, textContent: x.person.name + (x.isDefault ? " (default)" : "") }),
+      );
+    }
+    sel.value = a.person.id;
+    sel.onchange = () => {
+      agentShown = sel.value;
+      drawAgent(agents.find((x) => x.person.id === agentShown));
+    };
+    box.append(el("div", { className: "row", style: "margin-bottom:12px" }, sel, add));
+  }
   box.append(
     el("p", {
       className: "status" + (a.ready ? " ok" : a.on ? " bad" : ""),
@@ -1132,6 +1196,30 @@ function drawAgent(a) {
       ? "Roles: " + named.join(", ") + ". Access is limited to what these roles allow."
       : "No roles. It has no access.",
     el("a", { className: "open", href: "/admin/people", textContent: "Manage roles in People" }),
+  );
+  const given = people.filter((p) => a.givenTo.includes(p.id)).map((p) => p.name);
+  line(
+    "Answers",
+    a.isDefault
+      ? (agents.length > 1 ? "Everyone who has not been given another agent." : "Everyone who may ask.")
+      : given.length
+      ? given.join(", ") + "."
+      : "Nobody yet. Give it to someone under People.",
+    ...(a.isDefault ? [] : [
+      button("Make default", () =>
+        ask("Make " + a.person.name + " the default", (x) => {
+          x.append(
+            el("p", {
+              className: "dim",
+              textContent:
+                "It will answer everyone who has not been given another agent. What they ask about is sent to its model provider.",
+            }),
+          );
+          confirmField(x);
+        }, () =>
+          sureCall("/admin/api/agent/default", me), "Make default"), "agentDefault"),
+    ]),
+    ...(agents.length > 1 ? [] : [add]),
   );
   line(
     "Access",
@@ -1150,7 +1238,7 @@ function drawAgent(a) {
         }),
       );
       confirmField(x);
-    }, () => sureCall("/admin/api/agent/key", { key: $("agentKey").value }));
+    }, () => sureCall("/admin/api/agent/key", { ...me, key: $("agentKey").value }));
   line(
     "API key",
     a.keySet
@@ -1159,7 +1247,7 @@ function drawAgent(a) {
     button(a.keySet ? "Replace" : "Set API key", setKey, "agentKeySet"),
     ...(a.keySet
       ? [
-        button("Remove", async () => done(await call("/admin/api/agent/key/remove", {})), "agentKeyRemove"),
+        button("Remove", async () => done(await call("/admin/api/agent/key/remove", me)), "agentKeyRemove"),
       ]
       : []),
   );
@@ -1198,7 +1286,7 @@ function drawAgent(a) {
               if (sel.value === OTHER) other.focus();
             };
             note.textContent = "Loading models…";
-            call("/admin/api/agent/models", {}).then((r) => {
+            call("/admin/api/agent/models", me).then((r) => {
               if (!sel.isConnected) return;
               if (!r.ok) {
                 // No list to choose from: the name is typed, as before.
@@ -1245,6 +1333,7 @@ function drawAgent(a) {
           },
           () =>
             sureCall("/admin/api/agent/set", {
+              ...me,
               model: $("agentModel").hidden || $("agentModelOther").required
                 ? $("agentModelOther").value
                 : $("agentModel").value,
@@ -1258,7 +1347,7 @@ function drawAgent(a) {
     "Log access",
     a.readsLog ? "Allowed. Log entries it reads are sent to the model provider." : "Not allowed.",
     button(a.readsLog ? "Revoke log access" : "Allow log access", () => {
-      if (a.readsLog) return call("/admin/api/agent/set", { readsLog: false }).then(done);
+      if (a.readsLog) return call("/admin/api/agent/set", { ...me, readsLog: false }).then(done);
       ask(
         "Allow log access?",
         (x) => {
@@ -1271,13 +1360,13 @@ function drawAgent(a) {
           );
           confirmField(x);
         },
-        () => sureCall("/admin/api/agent/set", { readsLog: true }),
+        () => sureCall("/admin/api/agent/set", { ...me, readsLog: true }),
         "Allow",
       );
     }, "agentLog"),
   );
   const turn = button(a.on ? "Disable agent" : "Enable agent", async () => {
-    if (a.on) return done(await call("/admin/api/agent/off", {}));
+    if (a.on) return done(await call("/admin/api/agent/off", me));
     ask(
       "Enable agent?",
       (x) => {
@@ -1291,7 +1380,7 @@ function drawAgent(a) {
         );
         confirmField(x);
       },
-      () => sureCall("/admin/api/agent/on", {}),
+      () => sureCall("/admin/api/agent/on", { ...me }),
       "Enable",
     );
   }, "agentTurn");

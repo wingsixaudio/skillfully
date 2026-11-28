@@ -60,9 +60,9 @@ export class Talks {
     private idleMs = IDLE_MS,
   ) {}
 
-  /** What a screen is told about the agent when it connects: its name, and whether it can answer now. */
-  about(): { name: string; ready: boolean; why?: string } | null {
-    const a = this.deps.agent.about();
+  /** What a screen is told about its person's agent when it connects: its name, and whether it can answer now. */
+  about(person: string): { name: string; ready: boolean; why?: string } | null {
+    const a = this.deps.agent.for(person);
     if (!a.person) return null;
     return {
       name: a.person.name,
