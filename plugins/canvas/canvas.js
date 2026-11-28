@@ -30,6 +30,8 @@
   ];
   const COLORS = ["orange", "red", "green", "blue", "yellow", "white"];
   const LIMITS = {
+    steps: 16,
+    wait: 30,
     pages: 20,
     pieces: 200,
     drawn: 600,
@@ -47,7 +49,7 @@
   const WORDS = {
     label: ["text", "size"],
     readout: ["key", "device", "title"],
-    button: ["key", "device", "title", "value", "lit", "color"],
+    button: ["key", "device", "title", "value", "lit", "color", "steps"],
     toggle: ["key", "device", "title", "on", "off", "color"],
     slider: ["key", "device", "title", "min", "max", "step", "sends", "shows"],
     meter: ["key", "device", "title", "min", "max", "color"],
@@ -136,8 +138,43 @@
         out.push(`${where}: "size" is small, normal or large`);
       }
     }
-    if (["readout", "button", "toggle", "slider", "meter", "light", "choice", "stepper"].includes(p.type)) {
+    if (["readout", "toggle", "slider", "meter", "light", "choice", "stepper"].includes(p.type)) {
       key(p.key);
+    }
+    if (p.type === "button" && p.steps === undefined) key(p.key);
+    if (p.type === "button" && p.steps !== undefined) {
+      // One press, several things in turn: each step sets a value or runs an action, or waits.
+      if (p.key !== undefined || p.value !== undefined || p.device !== undefined) {
+        out.push(
+          `${where}: a button with "steps" has no "key", "device" or "value" of its own: each step has one`,
+        );
+      }
+      if (p.title === undefined) out.push(`${where}: a button with "steps" needs a "title"`);
+      if (!Array.isArray(p.steps) || !p.steps.length || p.steps.length > LIMITS.steps) {
+        out.push(`${where}: "steps" is a list of 1 to ${LIMITS.steps} steps`);
+      } else {
+        p.steps.forEach((st, i) => {
+          const at = `${where}, step ${i + 1}`;
+          if (!isObject(st)) return out.push(`${at} is { "key": ..., "value": ... } or { "wait": seconds }`);
+          if (st.wait !== undefined) {
+            if (Object.keys(st).length > 1) out.push(`${at}: a wait has nothing but "wait"`);
+            if (!Number.isFinite(st.wait) || st.wait <= 0 || st.wait > LIMITS.wait) {
+              out.push(`${at}: "wait" is a number of seconds, more than 0 and ${LIMITS.wait} at most`);
+            }
+            return;
+          }
+          const extra = Object.keys(st).find((k) => !["key", "device", "value"].includes(k));
+          if (extra) out.push(`${at} has "${extra}", which a step does not have`);
+          const problem = keyProblem(st.key, at);
+          if (problem) out.push(problem);
+          if (st.device !== undefined && (typeof st.device !== "string" || !st.device)) {
+            out.push(`${at}: "device" is the id of a device, as text`);
+          }
+          if (st.value !== undefined && !isScalar(st.value) && !isObject(st.value)) {
+            out.push(`${at}: "value" is text, a number, true or false, or an action's options`);
+          }
+        });
+      }
     }
     if (p.type === "button") {
       if (p.value !== undefined && !isScalar(p.value) && !isObject(p.value)) {
@@ -461,6 +498,14 @@
             ...(p.lit.device === undefined ? {} : { device: fill(p.lit.device, scope, missing) }),
             is: p.lit.is ?? true,
           };
+        } else if (k === "steps") {
+          made.steps = p.steps.map((st) =>
+            st.wait !== undefined ? { wait: st.wait } : {
+              key: fill(st.key, scope, missing),
+              ...(st.device === undefined ? {} : { device: fill(st.device, scope, missing) }),
+              ...(st.value === undefined ? {} : { value: st.value }),
+            }
+          );
         } else if (k === "shows") {
           made.shows = {
             key: fill(p.shows.key, scope, missing),

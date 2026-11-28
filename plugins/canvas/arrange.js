@@ -695,7 +695,10 @@
           );
         }
       }
-      if (["button", "toggle", "slider", "readout", "meter", "light", "choice", "stepper"].includes(p.type)) {
+      if (p.type === "button" && p.steps) titled(p, box, "Name");
+      else if (
+        ["button", "toggle", "slider", "readout", "meter", "light", "choice", "stepper"].includes(p.type)
+      ) {
         tied(p, p.type, box);
         titled(p, box, "Device default");
       }
@@ -739,8 +742,16 @@
       if (p.type === "meter") box.append(colors(p));
       // What an action's option a piece sends, and the options of a choice, are written by the agent or in
       // the canvas's file. Here they are said, so nobody wonders where they went.
-      if (p.sends || p.type === "choice" || p.type === "goto") {
-        const said = p.type === "goto"
+      if (p.sends || p.type === "choice" || p.type === "goto" || p.steps) {
+        const step = (st) =>
+          st.wait !== undefined
+            ? `wait ${st.wait} s`
+            : `${st.key}${st.value === undefined ? "" : " → " + unparse(st.value)}`;
+        const said = p.steps
+          ? `Does ${p.steps.length} ${p.steps.length === 1 ? "step" : "steps"} in turn: ${
+            p.steps.map(step).join("; ")
+          }.`
+          : p.type === "goto"
           ? `Opens page “${p.page}”.`
           : p.type === "choice"
           ? `Options: ${p.options.map((o) => o.title ?? String(o.value)).join(", ")}.`
@@ -760,7 +771,8 @@
           el("label", { className: "field tick" }, secs, el("span", { textContent: "Show seconds" })),
         );
       }
-      if (p.type === "button") {
+      if (p.type === "button" && p.steps) box.append(colors(p));
+      if (p.type === "button" && !p.steps) {
         box.append(
           field(
             "Sends",

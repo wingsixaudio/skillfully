@@ -687,6 +687,32 @@ async def main():
         await cv.locator("#board button.piece.lit", has_text="Outlet 3").wait_for(timeout=5000)
         check("a repeated row of buttons: the one pressed turns the outlet on and lights up", not was and (await state("sim-switch"))["switch/outlet/3/on"] is True)
         if shots: await owner.screenshot(path=f"{shots}/10b-canvas-switcher.png")
+
+        # --- One button, several steps in turn ---
+        with open(os.path.join(canvas_dir, "scene.json"), "w") as f:
+            json.dump({"kind": "canvas", "name": "Scene", "pages": [{"name": "One", "pieces": [
+                {"type": "button", "at": [1, 1, 4, 1], "title": "Walk-in", "steps": [
+                    {"key": "switch/outlet/1/on", "value": True},
+                    {"key": "switch/outlet/2/brightness", "value": 42},
+                    {"wait": 0.6},
+                    {"key": "switch/outlet/1/on", "value": False}]},
+                {"type": "button", "at": [1, 2, 4, 1], "title": "Broken scene", "steps": [
+                    {"key": "switch/outlet/4/on", "value": True},
+                    {"key": "switch/outlet/9/on", "value": True}]}]}]}, f)
+        await owner.goto(base + "/s/canvas"); cv = owner.frame_locator("#screen")
+        await cv.locator("#switchList [data-id]", has_text="Scene").wait_for(state="attached", timeout=8000)
+        await choose(cv, "scene")
+        walk = cv.locator("#board button.piece", has_text="Walk-in")
+        await walk.click()
+        await cv.locator("#board button.piece.busy", has_text="Walk-in").wait_for(timeout=3000)
+        midway = await state("sim-switch")
+        await cv.locator("#board button.piece.busy").wait_for(state="detached", timeout=8000)
+        after = await state("sim-switch")
+        check("a button with steps does them in turn, waiting where it says, and shows it is busy meanwhile", midway["switch/outlet/1/on"] is True and round(after["switch/outlet/2/brightness"]) == 42 and after["switch/outlet/1/on"] is False, f"{midway.get('switch/outlet/1/on')} {after.get('switch/outlet/2/brightness')} {after.get('switch/outlet/1/on')}")
+        await cv.locator("#board button.piece", has_text="Broken scene").click()
+        await cv.locator("#said", has_text="Stopped at step 2 of 2").wait_for(timeout=8000)
+        check("it stops at the first step that fails and says which", (await state("sim-switch"))["switch/outlet/4/on"] is True)
+        await choose(cv, "switcher"); await cv.locator("#board button.piece", has_text="Outlet 3").wait_for(timeout=8000)
         await choose(cv, "run-sheet"); await cv.locator("#board .clock .num").wait_for()
         check("one canvas holds pieces of several devices, and a clock", re.match(r"^\d{1,2}:\d\d:\d\d", await cv.locator("#board .clock .num").inner_text()) is not None and await cv.locator("#board .readout .num").inner_text() == "on" and await cv.locator("#board button.piece[aria-pressed]").count() == 2, await cv.locator("#board").inner_text())
         house = cv.locator("#board .slider", has_text="House lights")
