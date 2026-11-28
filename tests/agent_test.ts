@@ -312,8 +312,21 @@ Deno.test("a hub has several agents: one default, and another for whoever a supe
   const hub = await hubWith([{ dir: SIM }], `${dir}/hub.db`);
   const by = hub.owner.id;
   const sam = await hub.member("Sam"), alex = await hub.member("Alex");
-  const robin = hub.agent.make(by, "Robin"), kit = hub.agent.make(by, "Kit");
-  assert(robin.ok && kit.ok);
+  const robin = hub.agent.make(by, "Robin");
+  assert(robin.ok && hub.accounts.setRoles(by, robin.person.id, [hub.musician]).ok);
+  assert(hub.agent.set(by, { model: "the-usual-model", readsLog: true }).ok);
+  // One made after the default starts like it, so asking it is the same. It has no key of its own yet.
+  const kit = hub.agent.make(by, "Kit");
+  assert(kit.ok);
+  assertEquals(kit.person.roles, [hub.musician]);
+  const likeIt = hub.agent.about(kit.person.id);
+  assertEquals([likeIt.model, likeIt.readsLog, likeIt.keySet, likeIt.on], [
+    "the-usual-model",
+    true,
+    false,
+    false,
+  ]);
+  assert(hub.agent.set(by, { model: DEFAULT_MODEL }).ok);
   assertEquals(hub.agent.all().map((a) => [a.person!.name, a.isDefault]), [["Robin", true], ["Kit", false]]);
 
   // Each has its own key, model and switch. Nothing said about one changes the other.

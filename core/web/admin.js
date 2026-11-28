@@ -1158,7 +1158,7 @@ function drawAgent(a) {
         el("p", {
           className: "help",
           textContent:
-            "Another agent has its own API key, model and roles. Give it to someone under People. Everyone else keeps the default.",
+            "It starts with the same roles and model as the default agent, and needs its own API key. Give it to someone under People. Everyone else keeps the default.",
         }),
       );
       confirmField(x);

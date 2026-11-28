@@ -1007,7 +1007,7 @@ async def main():
         options = await owner.locator("#agentWhich option").all_text_contents()
         check("the card chooses between the agents, and says which is the default", options == ["Robin (default)", "Kit"], str(options))
         told = await owner.locator("#agent").inner_text()
-        check("a new agent is shown once made: no key, off, and nobody's until it is given", "Nobody yet" in told and "Not set" in told and "Disabled" in told, told[:400])
+        check("a new agent is shown once made: the default's roles, no key, off, and nobody's until it is given", "Nobody yet" in told and "Not set" in told and "Disabled" in told and "No roles" not in told, told[:400])
         if shots: await owner.locator("#secAgent").screenshot(path=os.path.join(shots, "13c-agents.png"))
         await place("People")
         sam_row = owner.locator("#people .item", has_text="Sam")
