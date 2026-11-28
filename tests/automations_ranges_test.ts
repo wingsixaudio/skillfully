@@ -126,6 +126,22 @@ Deno.test("one link over a range: every pan of eight inputs on two buses moves a
   await until("all sixteen follow", () => all().every((x) => x === -35));
   assertEquals(board(hub).state.get(pan(1, 3)), 0, "a bus outside the range is not part of it");
   assertEquals(board(hub).state.get(pan(9, 1)), 0, "an input outside the range is not part of it");
+
+  // The whole of it: eight inputs on all sixteen buses, 128 values, one rule.
+  hub.rules.setState("all-pans", "off", who);
+  await rule(hub, "every-pan", {
+    link: [{ ...PANS, range: { input: { from: 1, to: 8 }, bus: { from: 1, to: 16 } } }],
+  });
+  assertEquals(view(hub, "every-pan").touches.writes.length, 128);
+  const began = performance.now();
+  assert((await board(hub).set(pan(8, 16), 64, who)).ok);
+  const every = () =>
+    Array.from({ length: 128 }, (_, i) => board(hub).state.get(pan((i % 8) + 1, Math.floor(i / 8) + 1)));
+  await until("all 128 follow", () => every().every((x) => x === 64));
+  console.log(
+    `      one move, 128 linked values: all equal after ${Math.round(performance.now() - began)} ms`,
+  );
+  assertEquals(view(hub, "every-pan").state, "on");
   await hub.stop();
 });
 
