@@ -14,7 +14,10 @@ import type { Approvals } from "./approvals.ts";
 import { aboutWords, advised, attemptWords, classify, grantWords } from "./asks.ts";
 import type { Config } from "./config.ts";
 import type { Devices } from "./devices.ts";
+import { newId } from "./log.ts";
 import type { HubDevice } from "./hub_device.ts";
+import type { Automations } from "./automations/engine.ts";
+import type { RuleStore } from "./automations/store.ts";
 import { json, notOurPage, outcome, readFile, readJson, refuse, sentence } from "./http.ts";
 import { networkNotes, type Package, readPackage } from "./packages.ts";
 import type { Origin } from "./registry.ts";
@@ -63,6 +66,9 @@ export interface AdminDeps {
   devices: Devices;
   /** The hub's own device, for its tags. */
   hubDevice: HubDevice;
+  /** The rules the hub runs by itself, and where they are kept. */
+  automations: Automations;
+  rules: RuleStore;
   screens: Screens;
   store: Store;
   /** Whether any plugin, of any kind, already has this id. */
@@ -70,7 +76,20 @@ export interface AdminDeps {
 }
 
 export function adminApi(deps: AdminDeps) {
-  const { accounts, agent, approvals, config, devices, engine, hubDevice, screens, store, updates } = deps;
+  const {
+    accounts,
+    agent,
+    approvals,
+    automations,
+    config,
+    devices,
+    engine,
+    hubDevice,
+    rules,
+    screens,
+    store,
+    updates,
+  } = deps;
   /** The package each superuser is looking at, checked but not yet added. One each, for a few minutes. */
   const looking = new Map<string, { pkg: Package; at: number; from?: StoreModule }>();
   const kinds = (pkg: Package) => Object.keys((pkg.manifest.capabilities ?? {}) as Record<string, unknown>);
@@ -265,6 +284,17 @@ export function adminApi(deps: AdminDeps) {
           usedBy: screens.using(h.id).map((m) => m.name),
         };
       }),
+      // The rules the hub runs, what is proposed and waiting for a yes, and what is paused.
+      automations: {
+        paused: automations.paused,
+        rules: automations.views(),
+        proposed: (await rules.proposals(automations.check)).map((p) => ({
+          id: p.id,
+          hash: p.hash,
+          problems: p.problems,
+          ...(p.rule ? { name: p.rule.name, rule: p.rule, ...automations.describe(p.id, p.rule) } : {}),
+        })),
+      },
       // The tags the hub holds, with what each holds now.
       tags: hubDevice.tags().map((t) => ({ ...t, value: hubDevice.state.get(`tag/${t.kind}/${t.name}`) })),
       // What each screen offers a role, and which per-person slots its abilities refer to.
@@ -574,6 +604,49 @@ export function adminApi(deps: AdminDeps) {
       }
       case "policy":
         return (await sure()) ?? outcome(accounts.setPolicy(me.id, b.policy));
+
+      // --- Rules. Writing one proposes it. Approving it is what lets it run, so that is confirmed. ---
+      case "automation/save": {
+        let candidate: unknown;
+        try {
+          candidate = typeof b.text === "string" ? JSON.parse(b.text.slice(0, 70_000)) : b.rule;
+        } catch {
+          return refuse(400, "This is not JSON.");
+        }
+        const saved = await rules.propose(id, candidate, who);
+        if (!saved.ok) return refuse(400, saved.message);
+        return json({ ...saved, problems: automations.check(saved.id, candidate as never) });
+      }
+      case "automation/approve": {
+        const no = await sure();
+        if (no) return no;
+        const done = await rules.approve(id, b.hash, who, automations.check, b.rate);
+        return done.ok ? json({ ok: true }) : refuse(400, done.message);
+      }
+      case "automation/state": {
+        const state = String(b.state);
+        if (!["on", "off", "test"].includes(state)) return refuse(400, "A rule is on, off or in test.");
+        // Turning a rule on lets it act by itself. Turning it off or to test does not.
+        const no = state === "on" ? await sure() : null;
+        if (no) return no;
+        const done = rules.setState(id, state as "on" | "off" | "test", who);
+        return done.ok ? json({ ok: true }) : refuse(400, done.message);
+      }
+      case "automation/remove": {
+        const done = await rules.remove(id, who);
+        return done.ok ? json({ ok: true }) : refuse(400, done.message);
+      }
+      case "automation/pause":
+        automations.pause(b.on === true, who, typeof b.group === "string" && b.group ? b.group : undefined);
+        return json({ ok: true });
+      case "automation/run": {
+        const why = automations.run(id, { ...who, traceid: newId() });
+        return why === null ? json({ ok: true }) : refuse(400, why);
+      }
+      case "automation/live": {
+        const live = automations.live(id);
+        return live ? json({ ok: true, ...live }) : refuse(400, "Rule not found.");
+      }
 
       case "tag": {
         const made = hubDevice.define(b.tag, who);

@@ -210,6 +210,67 @@ made on the People page. A screen can suggest starter roles so a new team is not
 Changes take effect at once. When a person's roles or slots change, or they are signed out or turned off,
 their open screens are disconnected and come back under the new rules or not at all.
 
+## Automations
+
+An automation is a rule the hub runs by itself: **when** something happens, **if** conditions hold, **do** a
+list of steps. A rule is one JSON document. It is data the hub checks word by word before it runs any of it,
+and it is never a program.
+
+```json
+{
+  "kind": "automation",
+  "name": "Go live when the music starts",
+  "group": "sound",
+  "when": [{ "key": "tag/choice/phase", "becomes": "music" }],
+  "if": { "key": "tag/flag/service-live", "is": false },
+  "do": [
+    { "key": "tag/flag/service-live", "value": true },
+    { "wait": 2 },
+    { "key": "console/input/3/bus/1/level", "add": 2, "max": 0 }
+  ]
+}
+```
+
+| Part    | What it can say                                                                                                                                                                         |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `when`  | Up to 8 triggers: `rises_past`, `falls_past` (with `within`), `becomes`, `changes`, or `holds` a condition, optionally `for` some seconds. With none, the rule runs only when it is run |
+| `if`    | Compares (`is`, `is_not`, `>`, `>=`, `<`, `<=`, `between`) joined by `all`, `any` and `not`. Any part can say `for`                                                                     |
+| `do`    | Up to 32 steps: set a `value`, copy `from` another value, `add`, `multiply`, with `min` and `max`, or `wait`                                                                            |
+| `mode`  | What a new firing does while it is running: `single` ignores it, `restart` starts over, `queue` runs it after                                                                           |
+| `group` | Rules of one group are paused together                                                                                                                                                  |
+
+How a rule comes to run:
+
+1. **It is proposed.** A person or an agent writes `config/automations/<id>.json`. A file is a proposal and
+   runs nothing.
+2. **It is checked.** Every value it names is looked up. A device the hub does not have, a value that cannot
+   be set, a word a choice cannot be: each is refused with the reason. What comes out is the rule as a
+   sentence and its reach, every value it reads and every value it can set, worked out from the text alone.
+3. **A superuser approves that exact text.** The approval names the text by its hash, so a yes cannot be spent
+   on a file that has since changed. The hub runs rules from its database, never from the file.
+4. **It is turned on,** or put in **Test**, where it watches the real hub and logs what it would have sent.
+
+What keeps it safe:
+
+- **Unknown means no.** A value is unknown when its device is not connected or has never reported it. A
+  trigger fires only on false to true, so starting the hub, turning a rule on, or a device coming back fires
+  nothing.
+- **A rule acts through the same door as a person,** under its own name, `automation/<id>`. Every write is in
+  the log on the trace of what set it off.
+- **Chains end.** Every change carries how many reactions deep it is. Past 8, the rule is stopped.
+- **A rule that runs more than 10 times in 10 seconds is stopped** until a person turns it back on.
+- **Pause all** stops every rule, and one in the middle of its steps stops there. A group's pause stops that
+  group.
+
+Rules are values too. The hub's device offers `automation/run/<id>`, `automation/enabled/<id>`,
+`automation/active/<id>`, `automation/paused` and `automation/paused/<group>`, so a canvas button can run a
+rule and a canvas switch can pause a group. Running a rule that does not run says why.
+
+The code is in `core/automations/`: `format.ts` (what a rule may say), `compile.ts` (settling names and
+working out reach), `evaluate.ts` (true, false, unknown), `engine.ts` (running them), `store.ts` (proposals
+and approvals) and `words.ts` (a rule as a sentence). Still to come: schedules, fades, the `while` and
+`follow` forms, and tools for the agent to write rules.
+
 ## What is deliberately not here
 
 - **A general app builder.** Screens are written, not assembled.
@@ -223,7 +284,6 @@ their open screens are disconnected and come back under the new rules or not at 
 | Piece                                    | What it would be                                                                                                                                                                                                    |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Service**                              | A background program that uses capabilities the way a screen does: automation, scheduling, an agent's own process. Same `uses` rule, same driver-style sandbox                                                      |
-| **Rule**                                 | "When this, do that" as data, switched on by a person. The groundwork is in: tags, device status, and a cause on every change                                                                                       |
 | **An agent from outside**                | The hub has an agent of its own, which looks and answers (`core/engine.ts`). Still planned: a way in for an agent that runs somewhere else, such as an MCP server, held to an account and its roles in the same way |
 | **Install, update, rollback, uninstall** | Today plugins are folders the hub scans at start                                                                                                                                                                    |
 | **A place for plugins to keep data**     | The team roster and saved mixes need somewhere to live. Screens cannot store anything yet                                                                                                                           |

@@ -1,0 +1,59 @@
+{
+  "capability": "automation",
+  "version": 1,
+  "title": "Automations",
+  "description": "The rules a hub runs by itself, as values: a button that runs one, a switch that turns one on or off, a light that shows one is running, and switches that pause them all or pause one group. Held by the hub itself. Only a rule a superuser approved can be run or turned on.",
+  "options": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "values": [
+    {
+      "key": "run/{id}",
+      "title": "Run",
+      "description": "Send true to run the rule now, as if one of its triggers had fired. Its condition is still checked.",
+      "kind": "trigger",
+      "writable": true,
+      "names": ["id"]
+    },
+    {
+      "key": "enabled/{id}",
+      "title": "On",
+      "description": "True while the rule is on.",
+      "kind": "boolean",
+      "writable": true,
+      "names": ["id"]
+    },
+    {
+      "key": "enabled/{id}/title",
+      "title": "Rule name",
+      "kind": "text",
+      "writable": false,
+      "names": ["id"]
+    },
+    {
+      "key": "active/{id}",
+      "title": "Running",
+      "description": "True while the rule is in the middle of its steps.",
+      "kind": "boolean",
+      "writable": false,
+      "names": ["id"]
+    },
+    {
+      "key": "paused",
+      "title": "Pause all",
+      "description": "True stops every rule: none fires, and one in the middle of its steps stops there.",
+      "kind": "boolean",
+      "writable": true
+    },
+    {
+      "key": "paused/{group}",
+      "title": "Pause group",
+      "description": "True stops the rules of one group and leaves the rest running.",
+      "kind": "boolean",
+      "writable": true,
+      "names": ["group"]
+    }
+  ]
+}

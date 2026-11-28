@@ -203,14 +203,25 @@ export class Agent {
     return { ok: true };
   }
 
-  /** Make an agent its account. It starts with no roles, so it can see and do nothing. The first is the default. */
+  /**
+   * Make an agent its account. The first starts with no roles, so it can see and do nothing, and is the
+   * default. One made after it starts with the default's roles, model, address and leave to read the log,
+   * so that asking it is the same as asking the default. It has no key until it is given its own.
+   */
   make(by: string, name: unknown): Outcome<{ person: Person }> {
     if (this.all().length >= MAX_AGENTS) return no("too_many", `A hub has up to ${MAX_AGENTS} agents.`);
+    const like = this.person() ? this.about() : null;
     const made = this.accounts.addAgent(by, name);
     if (!made.ok) return made;
-    this.#db.prepare("INSERT INTO agents (person) VALUES (?)").run(made.person.id);
-    if (!this.person()) this.kept.set("agent.person", made.person.id);
-    return made;
+    this.#db.prepare("INSERT INTO agents (person, model, address, reads_log) VALUES (?, ?, ?, ?)").run(
+      made.person.id,
+      like ? like.model : null,
+      like ? like.address : null,
+      like?.readsLog ? 1 : 0,
+    );
+    if (!like) this.kept.set("agent.person", made.person.id);
+    else if (like.person!.roles.length) this.accounts.setRoles(by, made.person.id, like.person!.roles);
+    return { ok: true, person: this.accounts.person(made.person.id)! };
   }
 
   /** Choose which agent answers everyone who has not been given another. */

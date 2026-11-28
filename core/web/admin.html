@@ -12,7 +12,7 @@
     {{ bar }}
     <main class="wide">
       <nav id="places"
-        aria-label="Places"><a href="/admin" data-go="1" data-place="">Home</a><a href="/admin/devices" data-go="1" data-place="devices">Devices</a><a href="/admin/screens" data-go="1" data-place="screens">Screens</a><a href="/admin/people" data-go="1" data-place="people">People</a><a href="/admin/hub" data-go="1" data-place="hub">Settings</a></nav>
+        aria-label="Places"><a href="/admin" data-go="1" data-place="">Home</a><a href="/admin/devices" data-go="1" data-place="devices">Devices</a><a href="/admin/screens" data-go="1" data-place="screens">Screens</a><a href="/admin/automations" data-go="1" data-place="automations">Automations</a><a href="/admin/people" data-go="1" data-place="people">People</a><a href="/admin/hub" data-go="1" data-place="hub">Settings</a></nav>
       <p class="lockbar" id="lockbar"
         hidden><span id="lockLeft"></span> <button type="button" class="small quiet" id="lockNow">Lock now</button></p>
       <div class="place" data-place="">
@@ -49,6 +49,18 @@
             class="dim">A screen can only use the devices you choose for it.</p>
           <div id="screens"></div>
           <p class="msg" id="screensMsg" role="status"></p>
+        </section>
+      </div>
+      <div class="place" data-place="automations" hidden>
+        <section class="card" id="secAutomations">
+          <h2>Automations</h2>
+          <p class="dim">Rules the hub runs by itself: when something happens, it does a list of steps. A rule runs only after you approve it and turn it on.</p>
+          <p class="status" id="autoStatus"></p>
+          <div class="row" id="autoPauses"></div>
+          <div id="autoProposed"></div>
+          <div id="autoRules"></div>
+          <button class="small quiet" id="newAutomation" style="margin-top:14px">New automation</button>
+          <p class="msg" id="autoMsg" role="status"></p>
         </section>
       </div>
       <div class="place" data-place="devices" hidden>

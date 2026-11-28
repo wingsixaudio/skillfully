@@ -21,6 +21,8 @@ import { Capabilities, CAPABILITIES_DIR } from "./capabilities.ts";
 import { Devices, type DriverChoices } from "./devices.ts";
 import type { PluginHost } from "./host.ts";
 import { HUB_DEVICE, HubDevice } from "./hub_device.ts";
+import { Automations, type AutomationTuning } from "./automations/engine.ts";
+import { RuleStore } from "./automations/store.ts";
 import { cookieOf, go, json, outcome, readJson, refuse, setCookie, TYPES } from "./http.ts";
 import { Kept } from "./kept.ts";
 import { Log } from "./log.ts";
@@ -64,6 +66,10 @@ export interface HubOptions {
   updates?: Omit<UpdatesOptions, "backup" | "log">;
   /** Timings of the agent's engine a test may shorten. */
   engine?: EngineTuning;
+  /** Timings of the rules a test may shorten. */
+  automations?: AutomationTuning;
+  /** Start with every rule left alone: none fires and none can be run. */
+  noAutomations?: boolean;
 }
 
 export interface Hub {
@@ -90,6 +96,9 @@ export interface Hub {
   store: Store;
   /** The hub's own device: tags, and how each driver is doing. */
   hubDevice: HubDevice;
+  /** The rules the hub runs by itself, and where they are kept. */
+  automations: Automations;
+  rules: RuleStore;
   /** Drivers, by id. */
   hosts: Map<string, PluginHost>;
   screens: Map<string, Screen>;
@@ -212,6 +221,14 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
   for (const host of hosts.values()) hubDevice.watch(host);
   await devices.startAll();
   await config.start();
+  // The rules. They start once every driver has been started, and nothing fires because the hub did.
+  const rules = new RuleStore(db, log, dataDir);
+  const automations = new Automations(
+    { devices, hubDevice, capabilities, log, store: rules, kept },
+    opts.automations,
+  );
+  automations.start(opts.noAutomations === true);
+  if (opts.noAutomations) log.append({ type: "skillfully.automation.left", source: "core", data: {} });
 
   // The newest signed list this hub has read from this store is remembered, so an older one is refused.
   const newest = `store.newest ${opts.storeUrl ?? ""}`;
@@ -234,9 +251,11 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     agent,
     approvals,
     config,
+    automations,
     devices,
     engine,
     hubDevice,
+    rules,
     screens,
     store,
     taken,
@@ -485,10 +504,13 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     devices,
     store,
     hubDevice,
+    automations,
+    rules,
     hosts,
     screens: screens.all,
     skills,
     async stop() {
+      automations.stop();
       updates.stop();
       await engine.stop();
       screens.closeAll();
