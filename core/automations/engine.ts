@@ -67,8 +67,11 @@ export interface AutomationTuning {
 class Clock {
   #items: { at: number; fn: () => void }[] = [];
   #timer?: ReturnType<typeof setTimeout>;
+  #stopped = false;
 
   after(ms: number, fn: () => void): () => void {
+    // Once stopped, nothing more is timed: a run that is being wound up must not set the clock going again.
+    if (this.#stopped) return () => {};
     const item = { at: performance.now() + ms, fn };
     let i = this.#items.length;
     while (i > 0 && this.#items[i - 1].at > item.at) i--;
@@ -92,6 +95,7 @@ class Clock {
     }, Math.max(0, next.at - performance.now()));
   }
   stop(): void {
+    this.#stopped = true;
     clearTimeout(this.#timer);
     this.#items = [];
   }
@@ -487,6 +491,7 @@ export class Automations {
 
   /** Look at a rule's triggers again. Whichever went from false to true fires. */
   #look(live: Live, changed?: { device: string; values: Values; cause?: Cause }): void {
+    if (this.#stopped) return;
     if (live.c.follow) return this.#follow(live, changed);
     // Anything in its condition that is being timed keeps its time, whether or not a trigger fires.
     if (live.c.cond) this.#is(live, live.c.cond);
@@ -711,6 +716,7 @@ export class Automations {
 
   /** Set a rule off. Says in words why it did not run, or nothing when it did. */
   #fire(live: Live, firing: Firing): string | null {
+    if (this.#stopped) return "The hub is stopping.";
     if (this.#isPaused(live)) return this.#skip(live, "Automations are paused.");
     const depth = (firing.cause?.depth ?? 0) + 1;
     if (depth > MAX_DEPTH) {

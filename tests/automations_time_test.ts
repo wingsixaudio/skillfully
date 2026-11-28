@@ -266,7 +266,10 @@ Deno.test("the while form acts on both edges of a condition, and waits while it 
   );
   // The strip comes back with its outlet off. That is the condition ending, and now the hub can tell.
   await until("back, and off", () => tag(hub, "tag/number/count") === 11, 15000);
+  // Stopping takes the strip away once more. A stopped hub times nothing and runs nothing, however long after.
+  // (Before this was so, the rule above fired after its hub had closed, and that broke whatever ran next.)
   await hub.stop();
+  await sleep(200);
 });
 
 Deno.test("cancel_when stops a run in the middle of its steps", async () => {
