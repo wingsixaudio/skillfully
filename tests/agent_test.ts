@@ -24,8 +24,8 @@ Deno.test("the agent is an account with roles like anyone's, that nobody can sig
   assert(made.ok);
   const robin = made.person;
   assertEquals([robin.kind, robin.roles, robin.hasSecret, robin.name], ["agent", [], false, "Robin"]);
-  assertEquals(hub.agent.make(by, "Another").ok, false, "a hub has one agent");
   assertEquals(hub.accounts.people().filter((p) => p.kind === "agent").map((p) => p.id), [robin.id]);
+  assertEquals(hub.agent.about().isDefault, true, "the first agent answers everyone");
   assertEquals(hub.accounts.person(hub.owner.id)!.kind, "person");
 
   // It is given roles the way a person is, and never the one that runs the hub.
@@ -145,7 +145,7 @@ Deno.test("the agent's key goes one way: it is kept, used, and never shown, logg
   await hub.stop();
   // It was in the database and is not any more.
   const db = new DatabaseSync(`${dir}/hub.db`);
-  assertEquals(db.prepare("SELECT count(*) AS n FROM agent_key").get()!.n, 0);
+  assertEquals(db.prepare("SELECT count(*) AS n FROM agent_keys").get()!.n, 0);
   db.close();
   await Deno.remove(dir, { recursive: true });
 });
@@ -305,4 +305,105 @@ Deno.test("the models a key can use are asked of the model's service, by the hub
   await hub.stop();
   await model.stop();
   await elsewhere.stop();
+});
+
+Deno.test("a hub has several agents: one default, and another for whoever a superuser gives it to", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "skillfully-agents-" });
+  const hub = await hubWith([{ dir: SIM }], `${dir}/hub.db`);
+  const by = hub.owner.id;
+  const sam = await hub.member("Sam"), alex = await hub.member("Alex");
+  const robin = hub.agent.make(by, "Robin"), kit = hub.agent.make(by, "Kit");
+  assert(robin.ok && kit.ok);
+  assertEquals(hub.agent.all().map((a) => [a.person!.name, a.isDefault]), [["Robin", true], ["Kit", false]]);
+
+  // Each has its own key, model and switch. Nothing said about one changes the other.
+  assert(hub.agent.setKey(by, "key-for-robin").ok && hub.agent.turn(by, true).ok);
+  assert(hub.agent.setKey(by, "key-for-kit", kit.person.id).ok);
+  assert(
+    hub.agent.set(by, { model: "another-model", address: "https://elsewhere.example" }, kit.person.id).ok,
+  );
+  assertEquals([hub.agent.keyForModel(), hub.agent.keyForModel(kit.person.id)], ["key-for-robin", null]);
+  assert(hub.agent.turn(by, true, kit.person.id).ok);
+  assertEquals(hub.agent.keyForModel(kit.person.id), "key-for-kit");
+  assertEquals([hub.agent.about().model, hub.agent.about(kit.person.id).model], [
+    DEFAULT_MODEL,
+    "another-model",
+  ]);
+  assertEquals(hub.agent.setKey(by, "x", "p_nobody").ok, false);
+
+  // Everyone has the default until a superuser gives them another.
+  assertEquals(hub.agent.for(sam.id).person!.id, robin.person.id);
+  assert(hub.agent.give(by, sam.id, kit.person.id).ok);
+  assertEquals([hub.agent.for(sam.id).person!.name, hub.agent.for(alex.id).person!.name], ["Kit", "Robin"]);
+  assertEquals(hub.agent.about(kit.person.id).givenTo, [sam.id]);
+  assertEquals(hub.agent.give(by, sam.id, "p_nobody").ok, false);
+  assertEquals(
+    hub.agent.give(by, kit.person.id, robin.person.id).ok,
+    false,
+    "an agent is not given an agent",
+  );
+  // The one they were given is turned off: they are not quietly answered by another, which reads elsewhere.
+  assert(hub.agent.turn(by, false, kit.person.id).ok);
+  assertEquals([hub.agent.for(sam.id).person!.name, hub.agent.for(sam.id).ready], ["Kit", false]);
+  assert(hub.agent.give(by, sam.id, null).ok);
+  assertEquals(hub.agent.for(sam.id).person!.name, "Robin");
+
+  // Another can be made the default. Whoever had it by name now has it as the default.
+  assert(hub.agent.give(by, sam.id, kit.person.id).ok);
+  assert(hub.agent.setDefault(by, kit.person.id).ok);
+  assertEquals(hub.agent.all().map((a) => [a.person!.name, a.isDefault, a.givenTo]), [
+    ["Kit", true, []],
+    ["Robin", false, []],
+  ]);
+  assertEquals(hub.agent.for(alex.id).person!.name, "Kit");
+  const said = hub.log.read({ limit: 500 }).filter((e) =>
+    ["skillfully.agent.given", "skillfully.agent.default"].includes(e.type)
+  );
+  assert(said.length === 4 && said.every((e) => e.actor === by));
+  assert(!JSON.stringify(hub.log.read({ limit: 5000 })).includes("key-for-"), "no key is in the log");
+  await hub.stop();
+
+  // All of it is still so after a restart.
+  const again = await startHub({ dbPath: `${dir}/hub.db`, plugins: [{ dir: SIM }] });
+  assertEquals(again.agent.all().map((a) => [a.person!.name, a.isDefault, a.keySet]), [
+    ["Kit", true, true],
+    ["Robin", false, true],
+  ]);
+  await again.stop();
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("a hub from when there was one agent keeps it, its key and its settings, as the default", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "skillfully-agent-" });
+  const old = await hubWith([{ dir: SIM }], `${dir}/hub.db`);
+  const made = old.agent.make(old.owner.id, "Robin");
+  assert(made.ok);
+  await old.stop();
+  // Put the database back to how one agent was kept: a few kept values and a table with one row.
+  const db = new DatabaseSync(`${dir}/hub.db`);
+  db.exec(`
+    DELETE FROM agents; DELETE FROM agent_keys;
+    CREATE TABLE agent_key (id INTEGER PRIMARY KEY CHECK (id = 1), key TEXT NOT NULL, set_at TEXT NOT NULL);
+    INSERT INTO agent_key VALUES (1, 'the-old-key', '2026-01-01T00:00:00.000Z');
+    INSERT INTO kept (name, value) VALUES ('agent.on', '1'), ('agent.model', 'old-model'), ('agent.log', '1');
+  `);
+  db.close();
+  const hub = await startHub({ dbPath: `${dir}/hub.db`, plugins: [{ dir: SIM }] });
+  const a = hub.agent.about();
+  assertEquals([a.person!.id, a.isDefault, a.on, a.ready, a.model, a.readsLog, a.keySetAt], [
+    made.person.id,
+    true,
+    true,
+    true,
+    "old-model",
+    true,
+    "2026-01-01T00:00:00.000Z",
+  ]);
+  assertEquals(hub.agent.keyForModel(), "the-old-key");
+  await hub.stop();
+  // The key is in one place only.
+  const after = new DatabaseSync(`${dir}/hub.db`);
+  assertEquals(after.prepare("SELECT count(*) AS n FROM agent_key").get()!.n, 0);
+  after.close();
+  await Deno.remove(dir, { recursive: true });
 });

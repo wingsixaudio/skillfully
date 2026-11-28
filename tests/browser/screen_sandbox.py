@@ -1000,6 +1000,27 @@ async def main():
         await owner.wait_for_function("() => document.querySelector('#secAgent').innerText.includes('claude-sonnet-5-5 · ')")
         check("a model that is not in the list can still be typed", True)
 
+        # A second agent, for someone with a key of their own. The first stays the default.
+        check("one agent answers everyone who may ask", "Everyone who may ask." in await owner.locator("#secAgent").inner_text())
+        await owner.click("#agentAdd"); await owner.fill("#agentName", "Kit"); await ok_dialog()
+        await owner.wait_for_selector("#agentWhich")
+        options = await owner.locator("#agentWhich option").all_text_contents()
+        check("the card chooses between the agents, and says which is the default", options == ["Robin (default)", "Kit"], str(options))
+        told = await owner.locator("#agent").inner_text()
+        check("a new agent is shown once made: no key, off, and nobody's until it is given", "Nobody yet" in told and "Not set" in told and "Disabled" in told, told[:400])
+        if shots: await owner.locator("#secAgent").screenshot(path=os.path.join(shots, "13c-agents.png"))
+        await place("People")
+        sam_row = owner.locator("#people .item", has_text="Sam")
+        await sam_row.get_by_role("button", name="Agent", exact=True).click()
+        await owner.select_option("#personAgent", label="Kit"); await ok_dialog()
+        await owner.locator("#people .item", has_text="Agent: Kit").wait_for(timeout=8000)
+        check("a person is given the other agent under People, and their row says so", "Sam" in await owner.locator("#people .item", has_text="Agent: Kit").inner_text())
+        await sam_row.get_by_role("button", name="Agent", exact=True).click()
+        await owner.select_option("#personAgent", label="Robin (default)"); await ok_dialog()
+        await owner.locator("#people .item", has_text="Agent: Kit").wait_for(state="detached", timeout=8000)
+        check("given the default again, nothing is said: the default is what everyone has", True)
+        await place("Settings"); await owner.select_option("#agentWhich", label="Robin (default)")
+
         # --- Talking to it, on a screen of its own ---
         await owner.goto(base + "/s/ask")
         ask = owner.frame_locator("#screen")

@@ -7,7 +7,7 @@
 import type { Value } from "../contract/types.ts";
 import type { Accounts, Person } from "./accounts.ts";
 import { OWN } from "./access.ts";
-import type { Agent } from "./agent.ts";
+import type { AboutAgent, Agent } from "./agent.ts";
 import type { Engine } from "./engine.ts";
 import type { Updates } from "./update.ts";
 import type { Approvals } from "./approvals.ts";
@@ -188,6 +188,13 @@ export function adminApi(deps: AdminDeps) {
     return out;
   }
 
+  /** An agent as the admin page shows it. Never its key: only whether one is set. */
+  const describeAgent = (a: AboutAgent) => ({
+    ...a,
+    // The devices it can see anything of, by what its roles give it. Not what the person looking can.
+    sees: a.person ? screens.reachOf(a.person).hosts().map((h) => h.name) : [],
+  });
+
   /** Everything the admin page shows. */
   async function overview(me: Person, session: string) {
     return {
@@ -200,11 +207,9 @@ export function adminApi(deps: AdminDeps) {
       // Who the agent is and whether it is on. Never its key: only whether one is set.
       // Which version of the hub this is, and whether there is a newer one.
       version: updates.about(),
-      agent: {
-        ...agent.about(),
-        // The devices it can see anything of, by what its roles give it. Not what the person looking can.
-        sees: agent.person() ? screens.reachOf(agent.person()!).hosts().map((h) => h.name) : [],
-      },
+      agent: describeAgent(agent.about()),
+      // Every agent the hub has, the default first, and which one each person was given.
+      agents: agent.all().map(describeAgent),
       people: accounts.people().map((p) => ({ ...p, devices: accounts.sessions(p.id).length })),
       roles: accounts.roles(),
       policy: accounts.policy(),
@@ -445,6 +450,7 @@ export function adminApi(deps: AdminDeps) {
   ): Promise<Response> {
     const id = String(b.id ?? "");
     const who = { actor: me.id, via: "admin" };
+    const which = typeof b.agent === "string" && b.agent ? b.agent : undefined;
     // A change that hands out power is made by someone who has just said who they are: with this request,
     // or within the last few minutes on this same session. A secret that is sent is always checked, so a
     // wrong one is refused even while the session is unlocked.
@@ -492,23 +498,29 @@ export function adminApi(deps: AdminDeps) {
         return json({ ok: true, trust: config.trust() });
       }
       // --- The agent. Making it, giving it a key and switching it on hand out power, so each is confirmed. ---
+      // `agent` names which one, by its ID. Without it, the default is meant.
       case "agent/make":
         return (await sure()) ?? outcome(agent.make(me.id, b.name));
       case "agent/key":
-        return (await sure()) ?? outcome(agent.setKey(me.id, b.key));
+        return (await sure()) ?? outcome(agent.setKey(me.id, b.key, which));
       case "agent/key/remove":
-        return outcome(agent.removeKey(me.id));
+        return outcome(agent.removeKey(me.id, which));
       case "agent/set": {
         // Letting it read the log, or pointing it at another address, is confirmed. Choosing a model is not.
-        const about = agent.about();
+        const about = agent.about(which);
         const more = (b.readsLog === true && !about.readsLog) ||
           (b.address !== undefined && String(b.address).trim() !== about.address);
-        return (more ? await sure() : null) ?? outcome(agent.set(me.id, b));
+        return (more ? await sure() : null) ?? outcome(agent.set(me.id, b, which));
       }
       case "agent/on":
-        return (await sure()) ?? outcome(agent.turn(me.id, true));
+        return (await sure()) ?? outcome(agent.turn(me.id, true, which));
       case "agent/off":
-        return outcome(agent.turn(me.id, false));
+        return outcome(agent.turn(me.id, false, which));
+      // Which agent answers everyone, and which answers one person, decide where what they read is sent.
+      case "agent/default":
+        return (await sure()) ?? outcome(agent.setDefault(me.id, b.agent));
+      case "agent/give":
+        return (await sure()) ?? outcome(agent.give(me.id, b.person, b.agent ?? null));
       // Look for a newer version of the hub now.
       case "update/look":
         return json({ ok: true, version: await updates.look() });
@@ -517,7 +529,7 @@ export function adminApi(deps: AdminDeps) {
         return (await sure()) ?? outcome(await updates.update(me.id));
       // Which models its key may use, asked of the model's service. The key goes where it already goes.
       case "agent/models":
-        return outcome(await engine.models(me));
+        return outcome(await engine.models(me, which));
       // Asking it something hands out nothing: it can only look, and a superuser already sees everything.
       case "agent/ask":
         // `raw` is the answer with IDs where the names are, kept to carry a conversation on. A page has no use for it.
