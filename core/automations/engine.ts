@@ -1023,6 +1023,10 @@ export class Automations {
   #valueOf(s: CAct): { value: Value } | { problem: string } {
     let value: Value;
     if (s.does === "press") return { value: true };
+    if (s.does === "toggle") {
+      const held = this.#read(s.at);
+      return typeof held === "boolean" ? { value: !held } : { problem: `${this.#name(s.at)} is unknown` };
+    }
     if (s.does === "set") value = s.value;
     else if (s.does === "from") {
       const from = this.#read(s.from);

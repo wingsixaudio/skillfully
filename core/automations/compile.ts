@@ -45,6 +45,7 @@ interface Shaping {
 export type CAct =
   | ({ at: At; does: "set"; value: Value } & Shaping)
   | { at: At; does: "press" }
+  | { at: At; does: "toggle" }
   | ({ at: At; does: "from"; from: At; scale?: Scale } & Shaping)
   | ({ at: At; does: "add" | "multiply"; by: number } & Shaping);
 export type CStep =
@@ -250,6 +251,10 @@ export function compile(
           ...shaping,
         };
       }
+      if (s.toggle) {
+        if (kind && kind !== "boolean") say(here, `${at.key} is not on or off, so it cannot be toggled`);
+        return { at, does: "toggle" };
+      }
       if (s.value === undefined) {
         if (kind && kind !== "trigger") {
           say(here, `${at.key} needs a value to be set to`);
@@ -337,7 +342,10 @@ export function compile(
   for (const s of every) if (s.does === "from") read.push(s.from);
   // What it adds to, multiplies or moves over time, it reads first.
   for (const s of every) {
-    if (s.does === "add" || s.does === "multiply" || ("over" in s && s.over !== undefined)) read.push(s.at);
+    if (
+      s.does === "add" || s.does === "multiply" || s.does === "toggle" ||
+      ("over" in s && s.over !== undefined)
+    ) read.push(s.at);
   }
   if (follow) read.push(follow.from);
   // Every linked value is read, to know it moved, and set, to match the one that did.

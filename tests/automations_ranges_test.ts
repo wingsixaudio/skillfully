@@ -234,3 +234,43 @@ Deno.test("a trigger over a range is any one of them, and steps written as toget
   ]);
   await hub.stop();
 });
+
+Deno.test("a toggle flips what is on or off, one value or a range of them, and says so when it cannot tell", async () => {
+  const hub = await hubWithBoard();
+  const c = checkRule({ kind: "automation", name: "x", do: [{ key: "a/b", toggle: true, over: 2 }] });
+  assert(!c.ok && c.problems.some((p) => p.includes("over goes with a number")), JSON.stringify(c));
+  assert(!checkRule({ kind: "automation", name: "x", do: [{ key: "a/b", toggle: false }] }).ok);
+  assert(
+    hub.automations.check("n", {
+      kind: "automation",
+      name: "n",
+      do: [{ key: "tag/number/count", toggle: true }],
+    })
+      .some((p) => p.includes("is not on or off, so it cannot be toggled")),
+  );
+  await rule(hub, "flip", {
+    do: [{ key: "tag/flag/live", toggle: true }, {
+      key: "switch/outlet/{outlet}/on",
+      range: { outlet: [1, 2] },
+      toggle: true,
+    }],
+  });
+  assertEquals(
+    view(hub, "flip").sentence,
+    "When it is run: toggle Service live, then toggle On (outlet 1, 2) on Simulated switch.",
+  );
+  const strip = hub.hosts.get("sim-switch")!;
+  assert((await strip.set("switch/outlet/2/on", true, who)).ok);
+  const now = () => [
+    hub.hubDevice.state.get("tag/flag/live"),
+    strip.state.get("switch/outlet/1/on"),
+    strip.state.get("switch/outlet/2/on"),
+  ];
+  assertEquals(now(), [false, false, true]);
+  assert((await press(hub, "flip")).ok);
+  await until("each is flipped from where it was", () => JSON.stringify(now()) === "[true,true,false]");
+  await until("the run ends", () => ofType(hub, "skillfully.automation.finished").length === 1);
+  assert((await press(hub, "flip")).ok);
+  await until("and flipped back", () => JSON.stringify(now()) === "[false,false,true]");
+  await hub.stop();
+});

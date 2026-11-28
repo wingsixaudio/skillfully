@@ -579,6 +579,8 @@ const newTrigger = (kind) =>
 const stepKind = (s) =>
   "wait" in s
     ? "wait"
+    : "toggle" in s
+    ? "toggle"
     : "from" in s
     ? "copy"
     : "add" in s || "multiply" in s
@@ -610,6 +612,8 @@ function stepRow(list, i, redraw) {
     );
   } else if (kind === "run") {
     row.append(word("Run"), target("run"));
+  } else if (kind === "toggle") {
+    row.append(word("Toggle"), target("write"));
   } else if (kind === "copy") {
     row.append(
       word("Set"),
@@ -687,6 +691,8 @@ const newStep = (kind) =>
     ? { wait: 5 }
     : kind === "run"
     ? { key: "" }
+    : kind === "toggle"
+    ? { key: "", toggle: true }
     : kind === "copy"
     ? { key: "", from: { key: "" } }
     : kind === "change"
@@ -704,6 +710,7 @@ function stepList(rule, part) {
       ["set", "Set a value"],
       ["change", "Change a value by an amount"],
       ["copy", "Copy one value to another"],
+      ["toggle", "Toggle a value on or off"],
       ["run", "Run an action"],
       ["wait", "Wait"],
     ], (kind) => {

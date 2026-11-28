@@ -73,6 +73,8 @@ export type Step =
     scale?: Scale;
     add?: number;
     multiply?: number;
+    /** Flip something that is on or off. */
+    toggle?: true;
     min?: number;
     max?: number;
     /** Get there over this many seconds, not at once. */
@@ -345,6 +347,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
       "scale",
       "add",
       "multiply",
+      "toggle",
       "min",
       "max",
       "over",
@@ -352,8 +355,9 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     // A range on a step done together with others would be a list inside a list. It is written out, or the
     // step stands alone.
     ref(where, s, !inside);
-    const does = ["value", "from", "add", "multiply"].filter((k) => k in s);
-    if (does.length > 1) return say(where, "use only one of value, from, add or multiply");
+    const does = ["value", "from", "add", "multiply", "toggle"].filter((k) => k in s);
+    if (does.length > 1) return say(where, "use only one of value, from, add, multiply or toggle");
+    if ("toggle" in s && s.toggle !== true) say(`${where}.toggle`, "must be true");
     if ("value" in s && !isValue(s.value)) say(`${where}.value`, "must be a number, text, true or false");
     // What it copies from may use the same parts in braces: each value copied from the one that matches it.
     if ("from" in s) refOnly(`${where}.from`, s.from, false, isObject(s.range) ? Object.keys(s.range) : []);
@@ -361,7 +365,8 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
       if (k in s && !isNumber(s[k])) say(`${where}.${k}`, "must be a number");
     }
     limits(where, s);
-    const numeric = does.length > 0 && !(does[0] === "value" && typeof s.value !== "number");
+    const numeric = does.length > 0 && does[0] !== "toggle" &&
+      !(does[0] === "value" && typeof s.value !== "number");
     if (("min" in s || "max" in s) && !numeric) say(where, "min and max go with a number");
     if ("scale" in s) {
       if (!("from" in s)) say(where, "scale goes with from");

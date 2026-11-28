@@ -642,6 +642,7 @@ async def main():
         await pick(do.locator(".rule-row").nth(4), LEVEL, LEVEL)
         await do.locator(".rule-row").nth(4).get_by_label("How it changes").select_option("multiply")
         await do.locator(".rule-row").nth(4).get_by_label("Amount").fill("0.5")
+        await add_row(do, "toggle"); await pick(do.locator(".rule-row").nth(5), "service live", "Service live")
         await only.locator(".rule-row").nth(0).get_by_label("Comparison").select_option("between")
         await only.locator(".rule-row").nth(0).get_by_label("Low").fill("-30"); await only.locator(".rule-row").nth(0).get_by_label("High").fill("-5")
         await owner.locator("#ruleForm summary").click()
@@ -654,10 +655,10 @@ async def main():
         clean = await owner.locator("#ruleProblems .msg").count() == 0
         await owner.click("#ruleFlip"); await owner.wait_for_selector("#ruleText")
         made = json.loads(await owner.input_value("#ruleText"))
-        want["do"] += [{"key": LEVEL, "from": {"key": "console/input/2/bus/1/level"}}, {"key": LEVEL, "multiply": 0.5}]
+        want["do"] += [{"key": LEVEL, "from": {"key": "console/input/2/bus/1/level"}}, {"key": LEVEL, "multiply": 0.5}, {"key": "tag/flag/service-live", "toggle": True}]
         want["if"]["any"][0] = {"key": LEVEL, "between": [-30, -5]}
         want["cancel_when"] = {"key": "tag/flag/service-live", "is": {"key": "automation/paused"}}
-        check("and the rest: a copy, a multiply, a range, a value compared with another value, and what stops a run", clean and made == want, json.dumps(made))
+        check("and the rest: a copy, a multiply, a toggle, a range, a value compared with another value, and what stops a run", clean and made == want, json.dumps(made))
         await owner.click("#ruleFlip"); await owner.wait_for_selector("#ruleType")
         # The other two kinds of rule keep what the kinds share.
         await owner.click("#ruleType button[data-type='while']"); await owner.locator("#ruleType button[data-type='while'][aria-checked='true']").wait_for()

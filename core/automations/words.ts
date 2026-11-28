@@ -71,6 +71,7 @@ export function stepWords(s: CStep, name: Namer): string {
     return `at once: ${each.slice(0, -1).join(", ")} and ${each.at(-1)}`;
   }
   if (s.does === "press") return `press ${name(s.at)}`;
+  if (s.does === "toggle") return `toggle ${name(s.at)}`;
   const limits = [
     ...(s.min !== undefined ? [`at least ${s.min}`] : []),
     ...(s.max !== undefined ? [`at most ${s.max}`] : []),
