@@ -1475,7 +1475,8 @@ function drawAgent(a) {
   );
   line(
     "Model",
-    a.model + " · " + a.address.replace(/^https:\/\//, ""),
+    a.model + " · " + a.address.replace(/^https:\/\//, "") +
+      (a.speaks === "chat" ? " · Chat Completions" : ""),
     button(
       "Change",
       () =>
@@ -1529,6 +1530,16 @@ function drawAgent(a) {
               sel.value = a.model;
               note.textContent = "";
             });
+            // Which way of asking the model's service understands. Each has a usual address.
+            const USUAL = { messages: "https://api.anthropic.com", chat: "https://api.openai.com/v1" };
+            const speaks = el(
+              "select",
+              { id: "agentSpeaks" },
+              option("messages", "Anthropic (Messages API)"),
+              option("chat", "OpenAI and compatible (Chat Completions)"),
+            );
+            speaks.value = a.speaks;
+            x.append(el("label", { htmlFor: "agentSpeaks", textContent: "API" }), speaks);
             const address = input(x, "agentAddress", "API endpoint", {
               value: a.address,
               required: true,
@@ -1543,6 +1554,15 @@ function drawAgent(a) {
               }),
             );
             // Choosing a model hands out nothing. Sending the key somewhere else does, and is confirmed.
+            speaks.onchange = () => {
+              // An address that is only the other API's usual one follows the choice. One that was typed stays.
+              const other = USUAL[speaks.value === "chat" ? "messages" : "chat"];
+              if (address.value.trim().replace(/\/+$/, "") === other) address.value = USUAL[speaks.value];
+              if (speaks.value !== a.speaks) {
+                note.textContent = "Save, then open this again to choose from that provider's models.";
+              }
+              address.oninput();
+            };
             address.oninput = () => {
               const moved = address.value.trim().replace(/\/+$/, "") !== a.address;
               const field = $("confirm");
@@ -1560,6 +1580,7 @@ function drawAgent(a) {
                 ? $("agentModelOther").value
                 : $("agentModel").value,
               address: $("agentAddress").value,
+              speaks: $("agentSpeaks").value,
             }),
         ),
       "agentModelSet",

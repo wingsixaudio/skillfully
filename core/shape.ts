@@ -13,7 +13,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 /** The shape this hub's code reads and writes. */
-export const SHAPE = 2;
+export const SHAPE = 3;
 
 export type Steps = Record<number, (db: DatabaseSync) => void>;
 
@@ -28,6 +28,13 @@ const STEPS: Steps = {
     const people =
       (db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name = 'people'").get() as { n: number }).n;
     if (people && !has) db.exec("ALTER TABLE people ADD COLUMN kind TEXT NOT NULL DEFAULT 'person'");
+  },
+  // 3: an agent says which way its model's service is asked.
+  3: (db) => {
+    const count = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+    const agents = count("SELECT count(*) AS n FROM sqlite_master WHERE name = 'agents'");
+    const has = count("SELECT count(*) AS n FROM pragma_table_info('agents') WHERE name = 'speaks'");
+    if (agents && !has) db.exec("ALTER TABLE agents ADD COLUMN speaks TEXT");
   },
 };
 

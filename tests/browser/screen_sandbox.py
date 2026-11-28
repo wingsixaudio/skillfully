@@ -1043,6 +1043,12 @@ async def main():
         await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
         await owner.wait_for_function("() => document.querySelector('#secAgent').innerText.includes('claude-sonnet-5-5 · ')")
         check("a model that is not in the list can still be typed", True)
+        # Which API the agent's provider speaks is chosen in the same place as its model and endpoint.
+        await owner.click("#agentModelSet"); await owner.wait_for_selector("#agentSpeaks")
+        check("an agent is asked through the Messages API until told otherwise", await owner.input_value("#agentSpeaks") == "messages")
+        await owner.select_option("#agentSpeaks", "chat")
+        check("choosing the other API says its models can be chosen once that is saved", "that provider's models" in await owner.locator("#agentModelNote").inner_text())
+        await owner.locator("#dlgForm button[value='cancel']").click(); await owner.wait_for_selector("#dlg:not([open])", state="attached")
 
         # A second agent, for someone with a key of their own. The first stays the default.
         check("one agent answers everyone who may ask", "Everyone who may ask." in await owner.locator("#secAgent").inner_text())

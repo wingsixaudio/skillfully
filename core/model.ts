@@ -1,9 +1,15 @@
 // Talking to the model the agent thinks with.
 //
 // The model runs somewhere else. This is the one place in the hub that reaches it, and the only thing
-// here that the hub's own knowledge goes out through. It speaks one way of asking, the Messages API:
-// a system text, the tools on offer, and the conversation so far go out; the model's next turn comes
-// back, which is words, or a request to use one of the tools.
+// here that the hub's own knowledge goes out through. A system text, the tools on offer, and the
+// conversation so far go out; the model's next turn comes back, which is words, or a request to use one
+// of the tools.
+//
+// It speaks two ways of asking, and an agent is set to one:
+//   messages  the Messages API, which Anthropic's models are asked through
+//   chat      Chat Completions, which OpenAI's models are asked through, and many others that copied it
+// Inside the hub a conversation is kept one way, the first. For the second it is put into that service's
+// words on the way out and back into the hub's on the way in, here and nowhere else.
 //
 // It holds nothing and decides nothing. What the model may be told, and whether what it asks for is
 // done, is the engine's business. The key is passed in for each call and kept nowhere here.
@@ -54,10 +60,21 @@ export class ModelError extends Error {
   }
 }
 
+/** Which way of asking a model's service understands. */
+export type Speaks = "messages" | "chat";
+export const SPEAKS: Speaks[] = ["messages", "chat"];
+/** Where each way of asking is usually found. */
+export const USUAL_ADDRESS: Record<Speaks, string> = {
+  messages: "https://api.anthropic.com",
+  chat: "https://api.openai.com/v1",
+};
+
 export interface Where {
   address: string;
   key: string;
   model: string;
+  /** Left out, the Messages API. */
+  speaks?: Speaks;
 }
 
 export interface Asking {
@@ -180,6 +197,118 @@ async function readPieces(res: Response, hear: (words: string) => void, clean: (
   };
 }
 
+// --- Chat Completions, put into the hub's words and back ---
+
+const STOPS: Record<string, string> = { stop: "end_turn", tool_calls: "tool_use", length: "max_tokens" };
+
+/** The conversation so far, as Chat Completions takes it: a tool's result is a message of its own. */
+function chatMessages(system: string, messages: Message[]): unknown[] {
+  const out: unknown[] = [{ role: "system", content: system }];
+  for (const m of messages) {
+    // deno-lint-ignore no-explicit-any
+    const blocks = (Array.isArray(m.content) ? m.content : []) as any[];
+    const words = blocks.filter((b) => b?.type === "text" && typeof b.text === "string").map((b) => b.text)
+      .join("");
+    if (m.role === "assistant") {
+      const calls = blocks.filter((b) => b?.type === "tool_use").map((b) => ({
+        id: String(b.id),
+        type: "function",
+        function: { name: String(b.name), arguments: JSON.stringify(b.input ?? {}) },
+      }));
+      // What a model thought before it spoke is another service's to read. It is left out here.
+      out.push({ role: "assistant", content: words || null, ...(calls.length ? { tool_calls: calls } : {}) });
+      continue;
+    }
+    // The answers to what it asked for come first, each on its own, straight after the turn that asked.
+    for (const b of blocks) {
+      if (b?.type !== "tool_result") continue;
+      const content = typeof b.content === "string" ? b.content : JSON.stringify(b.content ?? "");
+      out.push({ role: "tool", tool_call_id: String(b.tool_use_id), content });
+    }
+    if (words) out.push({ role: "user", content: words });
+  }
+  return out;
+}
+
+/** One answer from Chat Completions, as the hub keeps a turn. */
+// deno-lint-ignore no-explicit-any
+function fromChat(message: any, finish: unknown, usage: any) {
+  const content: unknown[] = [];
+  if (typeof message?.content === "string" && message.content) {
+    content.push({ type: "text", text: message.content });
+  }
+  for (const call of Array.isArray(message?.tool_calls) ? message.tool_calls.slice(0, 64) : []) {
+    if (typeof call?.id !== "string" || typeof call.function?.name !== "string") continue;
+    let input: unknown = {};
+    try {
+      input = JSON.parse(call.function.arguments || "{}");
+    } catch { /* what could not be read is asked for with nothing, and the tool says what is missing */ }
+    content.push({ type: "tool_use", id: call.id, name: call.function.name, input });
+  }
+  const stop = typeof finish === "string" ? STOPS[finish] ?? finish : "";
+  return {
+    content,
+    stop_reason: stop,
+    usage: { input_tokens: usage?.prompt_tokens, output_tokens: usage?.completion_tokens },
+  };
+}
+
+/** A Chat Completions turn that arrives a piece at a time, put back together as the hub keeps a turn. */
+async function readChatPieces(res: Response, hear: (words: string) => void, clean: (t: unknown) => string) {
+  let words = "", finish: unknown = "", total = 0, held = "";
+  // deno-lint-ignore no-explicit-any
+  let usage: any = null;
+  const calls: { id: string; type: string; function: { name: string; arguments: string } }[] = [];
+  const decoder = new TextDecoder();
+  // deno-lint-ignore no-explicit-any
+  const take = (e: any) => {
+    if (e?.error) {
+      const why = clean(e.error?.message ?? "");
+      throw new ModelError("turned_away", "Model response ended early." + (why ? ` Error: ${why}` : ""));
+    }
+    if (e?.usage) usage = e.usage;
+    const choice = e?.choices?.[0];
+    if (!choice) return;
+    if (typeof choice.finish_reason === "string") finish = choice.finish_reason;
+    const delta = choice.delta ?? {};
+    if (typeof delta.content === "string" && delta.content) {
+      words += delta.content;
+      hear(delta.content);
+    }
+    for (const piece of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
+      const index = typeof piece?.index === "number" ? piece.index : 0;
+      if (index < 0 || index >= 64) continue;
+      const call = calls[index] ??= { id: "", type: "function", function: { name: "", arguments: "" } };
+      if (typeof piece.id === "string") call.id = piece.id;
+      if (typeof piece.function?.name === "string") call.function.name += piece.function.name;
+      if (typeof piece.function?.arguments === "string") call.function.arguments += piece.function.arguments;
+    }
+  };
+  for await (const chunk of res.body ?? []) {
+    total += chunk.length;
+    if (total > ANSWER_MAX) {
+      await res.body?.cancel().catch(() => {});
+      throw new ModelError("not_understood", "Model response too large.");
+    }
+    held += decoder.decode(chunk, { stream: true }).replaceAll("\r\n", "\n");
+    for (let end = held.indexOf("\n\n"); end >= 0; end = held.indexOf("\n\n")) {
+      const data = held.slice(0, end).split("\n").filter((l) => l.startsWith("data:")).map((l) =>
+        l.slice(5).trim()
+      ).join("\n");
+      held = held.slice(end + 2);
+      if (!data || data === "[DONE]") continue;
+      let e;
+      try {
+        e = JSON.parse(data);
+      } catch {
+        continue;
+      }
+      take(e);
+    }
+  }
+  return fromChat({ content: words, tool_calls: calls.filter(Boolean) }, finish, usage);
+}
+
 /**
  * Ask the model for its next turn. With `hear`, its words are passed on as they are written, where the
  * model's service can send them that way.
@@ -193,19 +322,46 @@ export async function askModel(
 ): Promise<Turn> {
   // Whatever the service says back is repeated to a person and written down. The key is never in it.
   const clean = (text: unknown) => String(text ?? "").split(where.key).join("[key]").slice(0, 300);
-  const url = where.address.replace(/\/+$/, "") + (/\/v1$/.test(where.address) ? "" : "/v1") + "/messages";
-  const body = JSON.stringify({
-    model: where.model,
-    max_tokens: asking.maxTokens,
-    system: asking.system,
-    ...(asking.tools.length
+  const chat = where.speaks === "chat";
+  const base = where.address.replace(/\/+$/, "") + (/\/v1$/.test(where.address) ? "" : "/v1");
+  const url = base + (chat ? "/chat/completions" : "/messages");
+  const headers: Record<string, string> = chat
+    ? { authorization: `Bearer ${where.key}`, "content-type": "application/json" }
+    : { "x-api-key": where.key, "anthropic-version": "2023-06-01", "content-type": "application/json" };
+  const body = JSON.stringify(
+    chat
       ? {
-        tools: asking.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input })),
+        model: where.model,
+        max_completion_tokens: asking.maxTokens,
+        messages: chatMessages(asking.system, asking.messages),
+        ...(asking.tools.length
+          ? {
+            tools: asking.tools.map((t) => ({
+              type: "function",
+              function: { name: t.name, description: t.description, parameters: t.input },
+            })),
+          }
+          : {}),
+        // How much was used is only sent with a stream when it is asked for.
+        ...(hear ? { stream: true, stream_options: { include_usage: true } } : {}),
       }
-      : {}),
-    messages: asking.messages,
-    ...(hear ? { stream: true } : {}),
-  });
+      : {
+        model: where.model,
+        max_tokens: asking.maxTokens,
+        system: asking.system,
+        ...(asking.tools.length
+          ? {
+            tools: asking.tools.map((t) => ({
+              name: t.name,
+              description: t.description,
+              input_schema: t.input,
+            })),
+          }
+          : {}),
+        messages: asking.messages,
+        ...(hear ? { stream: true } : {}),
+      },
+  );
 
   for (let tries = 1;; tries++) {
     const signal = AbortSignal.any([stop, AbortSignal.timeout(tuning.timeoutMs ?? 60_000)]);
@@ -216,11 +372,7 @@ export async function askModel(
     try {
       res = await fetch(url, {
         method: "POST",
-        headers: {
-          "x-api-key": where.key,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
+        headers,
         body,
         signal,
         // The key goes to the address a superuser chose, and to nowhere that address points on to.
@@ -228,7 +380,7 @@ export async function askModel(
       });
       // Its words a piece at a time, when that is how they are sent. Anything else is read whole.
       if (hear && res.ok && (res.headers.get("content-type") ?? "").includes("text/event-stream")) {
-        said = await readPieces(res, hear, clean);
+        said = await (chat ? readChatPieces : readPieces)(res, hear, clean);
       } else {
         text = await readSome(res);
       }
@@ -277,6 +429,10 @@ export async function askModel(
       );
     }
 
+    // An answer that came whole from Chat Completions is put into the hub's words here.
+    if (chat && text !== "" && said?.choices?.[0]?.message) {
+      said = fromChat(said.choices[0].message, said.choices[0].finish_reason, said.usage);
+    }
     if (!said || !Array.isArray(said.content)) {
       throw new ModelError("not_understood", "Unrecognized model response.");
     }
@@ -324,13 +480,16 @@ export async function listModels(
   tuning: ModelTuning = {},
 ): Promise<Offered[]> {
   const clean = (text: unknown) => String(text ?? "").split(where.key).join("[key]").slice(0, 300);
+  const chat = where.speaks === "chat";
   const url = where.address.replace(/\/+$/, "") + (/\/v1$/.test(where.address) ? "" : "/v1") +
-    "/models?limit=1000";
+    (chat ? "/models" : "/models?limit=1000");
   let res: Response;
   let text: string;
   try {
     res = await fetch(url, {
-      headers: { "x-api-key": where.key, "anthropic-version": "2023-06-01" },
+      headers: chat
+        ? { authorization: `Bearer ${where.key}` }
+        : { "x-api-key": where.key, "anthropic-version": "2023-06-01" },
       signal: AbortSignal.any([stop, AbortSignal.timeout(tuning.timeoutMs ?? 15_000)]),
       // The key goes to the address a superuser chose, and to nowhere that address points on to.
       redirect: "error",

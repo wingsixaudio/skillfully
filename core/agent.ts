@@ -20,7 +20,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Accounts, Person } from "./accounts.ts";
 import type { Kept } from "./kept.ts";
 import type { Log } from "./log.ts";
-import { MODEL_NAME } from "./model.ts";
+import { MODEL_NAME, SPEAKS, type Speaks } from "./model.ts";
 
 /** The model asked for when nobody has chosen one, and where it is asked. */
 export const DEFAULT_MODEL = "claude-sonnet-5-5";
@@ -44,6 +44,8 @@ export interface AboutAgent {
   keySetAt: string | null;
   model: string;
   address: string;
+  /** Which way of asking its model's service understands. */
+  speaks: Speaks;
   /** May it read the hub's log. Off until a superuser says so. */
   readsLog: boolean;
 }
@@ -59,6 +61,7 @@ interface Row {
   model: string | null;
   address: string | null;
   reads_log: number;
+  speaks: string | null;
 }
 
 export class Agent {
@@ -75,7 +78,7 @@ export class Agent {
     db.exec(`
       CREATE TABLE IF NOT EXISTS agents (
         person TEXT PRIMARY KEY, is_on INTEGER NOT NULL DEFAULT 0, model TEXT, address TEXT,
-        reads_log INTEGER NOT NULL DEFAULT 0
+        reads_log INTEGER NOT NULL DEFAULT 0, speaks TEXT
       );
       CREATE TABLE IF NOT EXISTS agent_keys (person TEXT PRIMARY KEY, key TEXT NOT NULL, set_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS agent_given (person TEXT PRIMARY KEY, agent TEXT NOT NULL);
@@ -158,6 +161,7 @@ export class Agent {
       keySetAt: key?.set_at ?? null,
       model: row?.model || DEFAULT_MODEL,
       address: row?.address || DEFAULT_ADDRESS,
+      speaks: row?.speaks === "chat" ? "chat" : "messages",
       readsLog: !!row?.reads_log,
     };
   }
@@ -213,12 +217,14 @@ export class Agent {
     const like = this.person() ? this.about() : null;
     const made = this.accounts.addAgent(by, name);
     if (!made.ok) return made;
-    this.#db.prepare("INSERT INTO agents (person, model, address, reads_log) VALUES (?, ?, ?, ?)").run(
-      made.person.id,
-      like ? like.model : null,
-      like ? like.address : null,
-      like?.readsLog ? 1 : 0,
-    );
+    this.#db.prepare("INSERT INTO agents (person, model, address, reads_log, speaks) VALUES (?, ?, ?, ?, ?)")
+      .run(
+        made.person.id,
+        like ? like.model : null,
+        like ? like.address : null,
+        like?.readsLog ? 1 : 0,
+        like ? like.speaks : null,
+      );
     if (!like) this.kept.set("agent.person", made.person.id);
     else if (like.person!.roles.length) this.accounts.setRoles(by, made.person.id, like.person!.roles);
     return { ok: true, person: this.accounts.person(made.person.id)! };
@@ -260,7 +266,11 @@ export class Agent {
   }
 
   /** Choose its model, where the model is, and whether it may read the log. */
-  set(by: string, wanted: { model?: unknown; address?: unknown; readsLog?: unknown }, id?: string): Outcome {
+  set(
+    by: string,
+    wanted: { model?: unknown; address?: unknown; readsLog?: unknown; speaks?: unknown },
+    id?: string,
+  ): Outcome {
     const which = this.#which(id);
     if (!which) return no("unknown", "Agent not found.");
     const before = this.about(which);
@@ -292,6 +302,12 @@ export class Agent {
       const clean = url.origin + url.pathname.replace(/\/+$/, "");
       if (clean !== before.address) changed.address = clean;
     }
+    if (wanted.speaks !== undefined) {
+      if (!SPEAKS.includes(wanted.speaks as Speaks)) {
+        return no("bad_speaks", "Choose how its model is asked.");
+      }
+      if (wanted.speaks !== before.speaks) changed.speaks = wanted.speaks;
+    }
     if (wanted.readsLog !== undefined && !!wanted.readsLog !== before.readsLog) {
       changed.readsLog = !!wanted.readsLog;
     }
@@ -300,6 +316,7 @@ export class Agent {
     if ("model" in changed) put("model", changed.model as string);
     if ("address" in changed) put("address", changed.address as string);
     if ("readsLog" in changed) put("reads_log", changed.readsLog ? 1 : 0);
+    if ("speaks" in changed) put("speaks", changed.speaks as string);
     if (Object.keys(changed).length) this.#note("skillfully.agent.changed", by, which, changed);
     return { ok: true };
   }
