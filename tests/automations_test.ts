@@ -108,7 +108,9 @@ Deno.test("a rule is checked word by word: what the hub does not know is refused
   bad({ when: [{ key: "a/b", rise_past: 24 }] }, '"rise_past" is not a word');
   bad({ when: [{ key: "a/b", rises_past: "24" }] }, "must be a number");
   bad({ when: [{ key: "a/b", rises_past: 1, becomes: 2 }] }, "exactly one of");
-  bad({ when: [{ at: "08:45" }] }, "Schedules are not available yet");
+  bad({ when: [{ at: "8:45" }] }, "must be a time of day");
+  bad({ when: [{ at: "08:45", days: ["sunday"] }] }, "must be a list of days");
+  bad({ if: { time: { from: "09:00", to: "09:00" } } }, "from and to must differ");
   bad({ when: new Array(9).fill({ key: "a/b", changes: true }) }, "up to 8 triggers");
   bad({ if: { key: "a/b", is: 1, ">": 2 } }, "exactly one of");
   bad({ if: { key: "a/b" } }, "exactly one of");
@@ -118,7 +120,14 @@ Deno.test("a rule is checked word by word: what the hub does not know is refused
   bad({ if: { key: "no-slash", is: 1 } }, "must be a value's name");
   bad({ do: [] }, "1 to 32 steps");
   bad({ do: [{ key: "a/b", value: 1, add: 2 }] }, "one of value, from, add or multiply");
-  bad({ do: [{ key: "a/b", value: 1, over: 4 }] }, "Fades are not available yet");
+  bad({ do: [{ key: "a/b", value: "x", over: 4 }] }, "over goes with a number");
+  bad({ do: [{ key: "a/b", value: 1, over: 601 }] }, "up to 600");
+  bad({ do: [{ key: "a/b", value: 1, scale: { in: [0, 1], out: [0, 1] } }] }, "scale goes with from");
+  bad({ do: [{ key: "a/b", from: { key: "c/d" }, scale: { in: [5, 5], out: [0, 1] } }] }, "must differ");
+  // The three forms do not mix.
+  bad({ while: { key: "a/b", is: 1 }, when: [{ key: "a/b", changes: true }] }, '"when" is not a word');
+  bad({ while: { key: "a/b", is: 1 }, if: { key: "a/b", is: 1 } }, '"if" is not a word');
+  bad({ follow: { key: "a/b" }, set: { key: "c/d" } }, '"do" is not a word');
   bad({ do: [{ wait: 601 }] }, "up to 600");
   bad({ do: [{ key: "a/b", value: "x", max: 3 }] }, "min and max go with a number");
   bad({ mode: "parallel" }, "single, restart or queue");

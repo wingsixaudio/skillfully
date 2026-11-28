@@ -231,13 +231,24 @@ and it is never a program.
 }
 ```
 
-| Part    | What it can say                                                                                                                                                                         |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `when`  | Up to 8 triggers: `rises_past`, `falls_past` (with `within`), `becomes`, `changes`, or `holds` a condition, optionally `for` some seconds. With none, the rule runs only when it is run |
-| `if`    | Compares (`is`, `is_not`, `>`, `>=`, `<`, `<=`, `between`) joined by `all`, `any` and `not`. Any part can say `for`                                                                     |
-| `do`    | Up to 32 steps: set a `value`, copy `from` another value, `add`, `multiply`, with `min` and `max`, or `wait`                                                                            |
-| `mode`  | What a new firing does while it is running: `single` ignores it, `restart` starts over, `queue` runs it after                                                                           |
-| `group` | Rules of one group are paused together                                                                                                                                                  |
+| Part          | What it can say                                                                                                                                                                                                             |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `when`        | Up to 8 triggers: `rises_past`, `falls_past` (with `within`), `becomes`, `changes`, `holds` a condition, optionally `for` some seconds, or `at` a time of day on given `days`. With none, the rule runs only when it is run |
+| `if`          | Compares (`is`, `is_not`, `>`, `>=`, `<`, `<=`, `between`) joined by `all`, `any` and `not`, and `time` for a span of the day. Any compare or group can say `for`                                                           |
+| `do`          | Up to 32 steps: set a `value`, copy `from` another value (with `scale`), `add`, `multiply`, with `min` and `max`, or `wait`. A number step can say `over` to fade there                                                     |
+| `mode`        | What a new firing does while it is running: `single` ignores it, `restart` starts over, `queue` runs it after                                                                                                               |
+| `cancel_when` | A condition. A run in the middle of its steps stops the moment it is true                                                                                                                                                   |
+| `group`       | Rules of one group are paused together                                                                                                                                                                                      |
+
+A rule can take two other forms. The **while** form (`while`, `do`, `otherwise`) does one list of steps as
+soon as a condition is true and another when that ends. The **follow** form (`follow`, `set`, with `scale`,
+`min` and `max`) keeps one value equal to another whenever that one changes. It is not a run, so it is not
+held to the run limit: the device takes what it can and keeps the newest.
+
+Time is the hub's own clock. A schedule fires once when the clock reaches its minute. One that passes while
+the hub is off is not run late, and is written to the log as missed. A fade is the hub sending steps toward
+the target thirty times a second. Anyone else setting that value, or already asking to, ends the fade where
+they put it.
 
 How a rule comes to run:
 
@@ -275,7 +286,8 @@ written, try a draft against how the hub stands right now, and ask for one to be
 the person's yes to be written down and a superuser's approval to run. A rule may be proposed only if both the
 agent and the person asking could do each of its steps by hand.
 
-Still to come: schedules, fades, and the `while` and `follow` forms.
+Still to come: a form to write rules without JSON, roles that can manage rules, replaying the log against a
+draft, and automations in the store.
 
 ## What is deliberately not here
 
