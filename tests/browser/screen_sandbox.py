@@ -634,12 +634,37 @@ async def main():
                 "if": {"any": [{"key": LEVEL, ">": -20}, {"time": {"from": "08:00", "to": "12:00"}}]}}
         check("the form writes the rule its rows say: a schedule, a condition held, any-of conditions, a wait, a fade and a run, in the order they were put", made == want, json.dumps(made))
         await owner.click("#ruleFlip"); await owner.wait_for_selector("#ruleType")
+        # The rows not used above: a copy, a multiply, between, a value compared with another, and a stop condition.
+        await add_row(do, "copy")
+        await pick(do.locator(".rule-row").nth(3), LEVEL, LEVEL, 0)
+        await pick(do.locator(".rule-row").nth(3), "console/input/2/bus/1/level", "console/input/2/bus/1/level", 1)
+        await add_row(do, "change")
+        await pick(do.locator(".rule-row").nth(4), LEVEL, LEVEL)
+        await do.locator(".rule-row").nth(4).get_by_label("How it changes").select_option("multiply")
+        await do.locator(".rule-row").nth(4).get_by_label("Amount").fill("0.5")
+        await only.locator(".rule-row").nth(0).get_by_label("Comparison").select_option("between")
+        await only.locator(".rule-row").nth(0).get_by_label("Low").fill("-30"); await only.locator(".rule-row").nth(0).get_by_label("High").fill("-5")
+        await owner.locator("#ruleForm summary").click()
+        stop = owner.locator("#ruleForm .rule-more")
+        await add_row(stop, "value"); await pick(stop.locator(".rule-row").nth(0), "service live", "Service live")
+        await stop.locator(".rule-row").nth(0).get_by_role("button", name="Compare to a value").click()
+        await owner.fill("#pickFind", "pause all"); await owner.locator("#pickList button", has_text="Pause all automations").click()
+        await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.locator("#ruleSentence", has_text="It stops if").wait_for(timeout=8000)
+        clean = await owner.locator("#ruleProblems .msg").count() == 0
+        await owner.click("#ruleFlip"); await owner.wait_for_selector("#ruleText")
+        made = json.loads(await owner.input_value("#ruleText"))
+        want["do"] += [{"key": LEVEL, "from": {"key": "console/input/2/bus/1/level"}}, {"key": LEVEL, "multiply": 0.5}]
+        want["if"]["any"][0] = {"key": LEVEL, "between": [-30, -5]}
+        want["cancel_when"] = {"key": "tag/flag/service-live", "is": {"key": "automation/paused"}}
+        check("and the rest: a copy, a multiply, a range, a value compared with another value, and what stops a run", clean and made == want, json.dumps(made))
+        await owner.click("#ruleFlip"); await owner.wait_for_selector("#ruleType")
         # The other two kinds of rule keep what the kinds share.
         await owner.click("#ruleType button[data-type='while']"); await owner.locator("#ruleType button[data-type='while'][aria-checked='true']").wait_for()
         titles = await owner.evaluate("() => [...document.querySelectorAll('#ruleForm .rule-part h3')].map((h) => h.firstChild.textContent)")
         await owner.click("#ruleFlip"); await owner.wait_for_selector("#ruleText")
         made = json.loads(await owner.input_value("#ruleText"))
-        check("changed to run while a condition is true, it keeps its condition and its steps", titles == ["While", "When it becomes true", "When it stops being true"] and made.get("while") == want["if"] and made.get("do") == want["do"] and made.get("otherwise") == [] and "when" not in made, json.dumps(made))
+        check("changed to run while a condition is true, it keeps its condition and its steps", titles == ["While", "When it becomes true", "When it stops being true"] and made.get("while") == want["if"] and made.get("do") == want["do"] and made.get("otherwise") == [] and made.get("cancel_when") == want["cancel_when"] and "when" not in made, json.dumps(made))
         await owner.click("#ruleFlip"); await owner.wait_for_selector("#ruleType")
         await owner.click("#ruleType button[data-type='follow']"); await owner.locator("#ruleType button[data-type='follow'][aria-checked='true']").wait_for()
         sync = owner.locator("#ruleForm .rule-part").nth(0)

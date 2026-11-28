@@ -729,10 +729,18 @@ function retype(rule, to) {
   if (to === "follow") {
     return { ...keep, follow: { key: "" }, set: { key: "" }, ...(cond !== undefined ? { if: cond } : {}) };
   }
+  // What stops a run in the middle goes with the steps, whichever way they are set off.
+  const stop = rule.cancel_when !== undefined ? { cancel_when: rule.cancel_when } : {};
   if (to === "while") {
-    return { ...keep, while: cond !== undefined ? cond : { key: "", is: true }, do: steps, otherwise: [] };
+    return {
+      ...keep,
+      while: cond !== undefined ? cond : { key: "", is: true },
+      do: steps,
+      otherwise: [],
+      ...stop,
+    };
   }
-  return { ...keep, when: [], ...(cond !== undefined ? { if: cond } : {}), do: steps };
+  return { ...keep, when: [], ...(cond !== undefined ? { if: cond } : {}), do: steps, ...stop };
 }
 function drawRuleForm() {
   const box = $("ruleForm");
