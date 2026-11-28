@@ -1,6 +1,8 @@
 // The agent's engine: a question becomes an answer by looking, and only as far as it may look.
 
+import { DatabaseSync } from "node:sqlite";
 import { look, type Looking } from "../core/agent_tools.ts";
+import { bringToShape, SHAPE } from "../core/shape.ts";
 import { assert, assertEquals } from "./assert.ts";
 import { CONTROLS, hubWith, type Member, OWNER_PIN, SIM, SWITCH, type TestHub } from "./helpers.ts";
 import {
@@ -86,7 +88,7 @@ Deno.test("the agent answers by looking, and everything it did is on the record 
     KEY,
     "2023-06-01",
   ]);
-  assertEquals([first.body.model, first.body.max_tokens], [hub.agent.about().model, 4096]);
+  assertEquals([first.body.model, first.body.max_tokens], [hub.agent.about().model, 8192]);
   assertEquals(first.body.messages, [{ role: "user", content: [{ type: "text", text: QUESTION }] }]);
   // It is offered looking and nothing else. The log is not on offer until a superuser says so.
   assertEquals(first.body.tools.map((x: { name: string }) => x.name), [
@@ -450,7 +452,11 @@ Deno.test("when its model cannot be asked, the agent says why in words, and the 
     1,
   ]);
   assertEquals(await fails("slow"), ["too_slow", "Model request timed out.", 1]);
-  assertEquals(await fails("forever"), ["too_much", "Stopped: too many steps without an answer.", 4]);
+  assertEquals(await fails("forever"), [
+    "too_much",
+    "Stopped: reached Max steps (4) before finishing. Ask for less in one request, or raise Max steps in the agent's settings.",
+    4,
+  ]);
   assertEquals(await fails("empty"), ["no_answer", "Model returned an empty response.", 1]);
   // On its last look it is told to answer now. That is the hub speaking, after the results.
   assertEquals(model.sent.at(-2)!.body.messages.at(-1).content.at(-1), {
@@ -624,4 +630,80 @@ Deno.test("a person given another agent is answered by it, with its key and mode
   assertEquals(hub.screening.talks!.about(alex.id)?.name, "Robin");
   await other.stop();
   await t.done();
+});
+
+Deno.test("max steps and max output tokens are each agent's own settings, and reaching either is reported", async () => {
+  // A reply cut off with nothing in it, then one cut off in the middle of asking for something, then an answer.
+  const t = await withAgent((_sent, nth) =>
+    nth === 1 ? { content: [], stop_reason: "max_tokens" } : nth === 2
+      ? {
+        content: [uses("devices"), uses("read_values", { device: "sim-console", values: ["console/inp"] })],
+        stop_reason: "max_tokens",
+      }
+      : [says("Done in smaller pieces.")]
+  );
+  const { hub, model } = t;
+  const by = hub.owner.id, owner = person(hub, hub.owner);
+  assertEquals([hub.agent.about().maxSteps, hub.agent.about().maxTokens], [12, 8192]);
+  for (
+    const bad of [{ maxSteps: 1 }, { maxSteps: 41 }, { maxSteps: 2.5 }, { maxTokens: 500 }, {
+      maxTokens: "lots",
+    }]
+  ) {
+    assertEquals(hub.agent.set(by, bad).ok, false, JSON.stringify(bad));
+  }
+  assert(hub.agent.set(by, { maxSteps: 3, maxTokens: 2000 }).ok);
+  const kit = hub.agent.make(by, "Kit");
+  assert(kit.ok);
+  assertEquals([hub.agent.about(kit.person.id).maxSteps, hub.agent.about(kit.person.id).maxTokens], [
+    3,
+    2000,
+  ]);
+
+  // Nothing came back and it had run out of room: that is said, with the limit and where to change it.
+  const empty = await hub.engine.ask(owner, "Build me a canvas.");
+  assert(!empty.ok && empty.code === "max_tokens", JSON.stringify(empty));
+  assert(empty.message.includes("Max output tokens (2,000)") && empty.message.includes("agent's settings"));
+  assertEquals(model.sent[0].body.max_tokens, 2000);
+
+  // Cut off while asking: what it asked for whole is done, the last is not, and it is told to write less.
+  const r = await hub.engine.ask(owner, "Build me a canvas.");
+  assert(r.ok && r.answer === "Done in smaller pieces.", JSON.stringify(r));
+  const [whole, cut] = results(model.sent[2]);
+  assert(!whole.is_error && whole.read.devices.length > 0);
+  assert(
+    cut.is_error && cut.content.includes("cut off at the max output tokens limit (2,000)") &&
+      cut.content.includes("smaller pieces"),
+  );
+  assertEquals(r.looked, [
+    "Listed devices: Simulated board, Simulated switch",
+    "Tool call cut off at Max output tokens; asked to retry in smaller pieces",
+  ]);
+
+  // The step limit is the agent's own too.
+  const forever = pretendModel(() => [uses("devices")]);
+  assert(hub.agent.set(by, { address: forever.address, maxSteps: 2 }).ok);
+  const stopped = await hub.engine.ask(owner, "Keep looking.");
+  assert(
+    !stopped.ok && stopped.code === "too_much" && stopped.message.includes("reached Max steps (2)"),
+    JSON.stringify(stopped),
+  );
+  assertEquals(forever.sent.length, 2);
+  await forever.stop();
+  await t.done();
+
+  // A database from before agents had these settings gains them.
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE agents (person TEXT PRIMARY KEY, is_on INTEGER NOT NULL DEFAULT 0, model TEXT, address TEXT,
+      reads_log INTEGER NOT NULL DEFAULT 0, speaks TEXT);
+    INSERT INTO agents (person) VALUES ('p_old');
+    PRAGMA user_version = 3;
+  `);
+  assertEquals(bringToShape(db), { from: 3, to: SHAPE });
+  assertEquals({ ...db.prepare("SELECT max_steps, max_tokens FROM agents").get() }, {
+    max_steps: null,
+    max_tokens: null,
+  });
+  db.close();
 });
