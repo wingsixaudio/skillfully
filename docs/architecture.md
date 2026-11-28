@@ -252,6 +252,13 @@ set of each other value and nothing goes round. Do not build this out of follow 
 loop: each hop is a round trip to the device, a drag leaves the far end trailing, and the hub's loop limit
 stops one of the rules, after which the ring is broken.
 
+With `relative`, a link keeps the distances between its numbers and does not make them equal: moving one by 3
+moves each of the others by 3, the way a group fader moves a balanced mix. The rule remembers where each value
+is meant to be, which can be past what the device holds. A value pushed against its limit stays there and
+comes off it only once the move that put it there is undone, so the distances come back as they were. A person
+who takes hold of a value at its limit moves it from where it is. Several of the values changing at once, a
+scene recalled at the device, are simply their places from then on, and nothing is passed along.
+
 One name can stand for many values. A key with parts in braces and a `range` saying what they stand for,
 `console/input/{input}/bus/{bus}/pan` with inputs 1 to 8 and buses 1 and 2, is sixteen values. Before anything
 else reads the rule, `core/automations/ranges.ts` writes every such name out, so what is checked, approved and

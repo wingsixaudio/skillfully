@@ -153,6 +153,10 @@ interface Live {
   during?: boolean;
   /** Some part of it asks what time it is, so it is looked at again every minute. */
   clocked: boolean;
+  /** A relative link: where each of its values is meant to be, which may be past what the device holds. */
+  known?: Map<string, number>;
+  /** A relative link: where each of its values was last seen to be. */
+  seen?: Map<string, number>;
   /** The link form: what it last sent to each value and when, to know its own work coming back. */
   sent?: Map<string, { value: Value; at: number }>;
   /** The follow form: the minute it last said in the log that it followed. */
@@ -578,6 +582,8 @@ export class Automations {
         ]
           .some((c) => c && asksTheTime(c)),
       };
+      // A relative link has to know where its values are before one of them moves.
+      if (compiled.relative) this.#known(live);
       live.kept = kept;
       if (!same) {
         // A rule that is new here starts by noting how things stand. Noting is not firing.
@@ -889,6 +895,7 @@ export class Automations {
   #link(live: Live, changed?: { device: string; values: Values; cause?: Cause }): void {
     const members = live.c.link!;
     if (!changed) return;
+    if (live.c.relative) return this.#linkRelative(live, changed);
     const moved = members.find((m) => m.device === changed.device && m.key in changed.values);
     if (!moved) return;
     const me = `automation/${live.kept.id}`;
@@ -897,7 +904,8 @@ export class Automations {
     // A device that reports back without saying why: what this rule just sent it, arriving, is still its own.
     const sent = (live.sent ??= new Map<string, { value: Value; at: number }>());
     const echo = sent.get(`${moved.device}\n${moved.key}`);
-    if (echo && echo.value === value && performance.now() - echo.at < LINK_ECHO_MS) return;
+    // Only when nothing says who changed it: a person setting the same value is a person, not an echo.
+    if (!changed.cause && echo && echo.value === value && performance.now() - echo.at < LINK_ECHO_MS) return;
     if (this.#isPaused(live)) return;
     if (live.c.cond && this.#is(live, live.c.cond) !== true) return;
     const depth = (changed.cause?.depth ?? 0) + 1;
@@ -909,9 +917,88 @@ export class Automations {
     }
     const others = members.filter((m) => m !== moved).flatMap((m) => {
       const source = this.deps.devices.source(m.device);
-      return source && source.state.get(m.key) !== value ? [{ m, source }] : [];
+      return source && source.state.get(m.key) !== value ? [{ m, source, value }] : [];
     });
+    this.#linkSend(live, changed, others, depth);
+  }
+
+  /**
+   * A link that keeps distances: moving one of its numbers by some amount moves each of the others by the
+   * same amount. The rule keeps where each value is meant to be, which may be past what the device can
+   * hold. So a value pushed against its limit stays there, and comes off it again only once the move that
+   * put it there has been undone: the distances come back as they were.
+   */
+  #linkRelative(live: Live, changed: { device: string; values: Values; cause?: Cause }): void {
+    const members = live.c.link!;
+    const id = (m: At) => `${m.device}\n${m.key}`;
+    const known = this.#known(live);
+    // Where each was last seen to be, which is what a move is measured from. Where it is meant to be may be
+    // further, past its limit, and a person taking hold of it there moves it from where it is.
+    const seen = (live.seen ??= new Map(known));
+    const me = `automation/${live.kept.id}`;
+    const here = members.filter((m) => m.device === changed.device && m.key in changed.values);
+    const moved = here.flatMap((m) => {
+      const now = asNumber(changed.values[m.key]);
+      const sent = live.sent?.get(id(m));
+      // What this rule set, coming back, is not a move. A device that reports back without saying why is
+      // known by the value: what was just sent to it, arriving.
+      const own = changed.cause
+        ? changed.cause.actor === me
+        : sent !== undefined && sent.value === now && performance.now() - sent.at < LINK_ECHO_MS;
+      return now === null || own ? [] : [{ m, now, was: seen.get(id(m)) }];
+    });
+    for (const m of here) {
+      const now = asNumber(changed.values[m.key]);
+      if (now !== null) seen.set(id(m), now);
+    }
+    for (const { m, now } of moved) known.set(id(m), now);
+    // Several changed at once, a scene recalled at the device: those are their places now. Nothing is passed on.
+    if (moved.length !== 1 || moved[0].was === undefined) return;
+    const by = moved[0].now - moved[0].was;
+    if (!by || this.#isPaused(live)) return;
+    if (live.c.cond && this.#is(live, live.c.cond) !== true) return;
+    const depth = (changed.cause?.depth ?? 0) + 1;
+    if (depth > MAX_DEPTH) {
+      return this.#halt(
+        live,
+        `Loop detected: automations triggered each other more than ${MAX_DEPTH} levels deep.`,
+      );
+    }
+    const testing = live.kept.state === "test";
+    const others = members.filter((m) => m !== moved[0].m).flatMap((m) => {
+      const source = this.deps.devices.source(m.device);
+      const from = known.get(id(m));
+      if (!source || from === undefined) return [];
+      const meant = from + by;
+      if (!testing) known.set(id(m), meant);
+      const range = this.deps.capabilities.resolve(source.capabilities, m.key);
+      const value = Math.min(range?.max ?? Infinity, Math.max(range?.min ?? -Infinity, meant));
+      return source.state.get(m.key) !== value ? [{ m, source, value }] : [];
+    });
+    this.#linkSend(live, changed, others, depth);
+  }
+
+  /** Where each value of a relative link is meant to be. Begun from where they are. */
+  #known(live: Live): Map<string, number> {
+    if (live.known) return live.known;
+    const known = (live.known = new Map<string, number>());
+    for (const m of live.c.link ?? []) {
+      const now = asNumber(this.#read(m));
+      if (now !== null) known.set(`${m.device}\n${m.key}`, now);
+    }
+    return known;
+  }
+
+  /** Set what a link worked out, all at once, and say so in the log once a minute at most. */
+  #linkSend(
+    live: Live,
+    changed: { cause?: Cause },
+    others: { m: At; source: Source; value: Value }[],
+    depth: number,
+  ): void {
     if (!others.length) return;
+    const me = `automation/${live.kept.id}`;
+    const sent = (live.sent ??= new Map<string, { value: Value; at: number }>());
     const traceid = changed.cause?.traceid ?? newId();
     // Said once a minute at most, however often the values move: that it linked them, or would have.
     const stamp = `${Math.floor(Date.now() / 60_000)} ${live.kept.state}`;
@@ -920,7 +1007,7 @@ export class Automations {
     if (live.kept.state === "test") {
       if (first) {
         this.#log("would", live, { traceid }, {
-          writes: others.map(({ m }) => ({ device: m.device, key: m.key, value })),
+          writes: others.map(({ m, value }) => ({ device: m.device, key: m.key, value })),
         });
       }
       return;
@@ -932,7 +1019,7 @@ export class Automations {
       if (view) view.lastRan = at;
     }
     const now = performance.now();
-    for (const { m, source } of others) {
+    for (const { m, source, value } of others) {
       sent.set(`${m.device}\n${m.key}`, { value, at: now });
       source.set(m.key, value, { actor: me, via: "automation", traceid, depth }).then((r) => {
         if (r.ok || !first) return;

@@ -138,3 +138,66 @@ Deno.test("a link holds only while its condition does, says what it would do in 
   assert(!pressed.ok && pressed.error.message.includes("links values"), JSON.stringify(pressed));
   await hub.stop();
 });
+
+Deno.test("a relative link moves its values by the same amount, and gives back their distances after a limit", async () => {
+  const hub = await hubWithBoard();
+  const level = (n: number) => `console/input/${n}/bus/1/level`;
+  const THREE = [1, 2, 3].map((n) => ({ key: level(n) }));
+  const levels = () => [1, 2, 3].map((n) => board(hub).state.get(level(n)));
+  assert(
+    hub.automations.check("x", {
+      kind: "automation",
+      name: "x",
+      link: [{ key: level(1) }, { key: "tag/flag/live" }],
+      relative: true,
+    })
+      .some((p) => p.includes("a relative link is for numbers")),
+  );
+  for (const [n, v] of [[1, -3], [2, -6], [3, 5]]) assert((await board(hub).set(level(n), v, who)).ok);
+  await rule(hub, "band", { link: THREE, relative: true });
+  assertEquals(
+    hub.automations.views()[0].sentence,
+    "Send level (input 1, bus 1) on Simulated board, Send level (input 2, bus 1) on Simulated board and Send level (input 3, bus 1) on Simulated board move together: changing any one moves the others by the same amount.",
+  );
+  await sleep(100);
+  assertEquals(levels(), [-3, -6, 5], "turning it on moves nothing");
+
+  // Moved by 2, each of the others moves by 2 from where it was.
+  assert((await board(hub).set(level(2), -4, who)).ok);
+  await until("the others move by the same", () => JSON.stringify(levels()) === "[-1,-4,7]");
+  // Pushed past what one of them can hold, that one stays at its limit.
+  assert((await board(hub).set(level(1), 7, who)).ok);
+  await until("the third is held at its top", () => JSON.stringify(levels()) === "[7,4,10]");
+  // Brought back, it comes off its limit only once the move is undone: the distances are as they were.
+  assert((await board(hub).set(level(1), -1, who)).ok);
+  await until("the distances come back", () => JSON.stringify(levels()) === "[-1,-4,7]");
+
+  // Someone takes hold of the one at its limit: it is moved from where it is, not from where it was meant to be.
+  assert((await board(hub).set(level(1), 7, who)).ok);
+  await until("up against the top again", () => JSON.stringify(levels()) === "[7,4,10]");
+  assert((await board(hub).set(level(3), 9, who)).ok);
+  await until("the others move by one", () => JSON.stringify(levels()) === "[6,3,9]");
+
+  // A drag: they end the same distances apart as they began.
+  for (let i = 1; i <= 20; i++) {
+    board(hub).set(level(1), 6 - i, who);
+    await sleep(20);
+  }
+  await until("they settle", () => JSON.stringify(levels()) === "[-14,-17,-11]");
+  assertEquals(hub.automations.views()[0].state, "on");
+  assertEquals(ofType(hub, "skillfully.automation.stopped").length, 0);
+
+  // In test it says what it would do and moves nothing, and is not thrown off for when it is turned on again.
+  assert(hub.rules.setState("band", "test", who).ok);
+  assert((await board(hub).set(level(1), -10, who)).ok);
+  await until(
+    "it says what it would have done",
+    () => ofType(hub, "skillfully.automation.would").length === 1,
+  );
+  assertEquals(ofType(hub, "skillfully.automation.would")[0].data.writes, [
+    { device: "sim-console", key: level(2), value: -13 },
+    { device: "sim-console", key: level(3), value: -7 },
+  ]);
+  assertEquals(levels(), [-10, -17, -11]);
+  await hub.stop();
+});

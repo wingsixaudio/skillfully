@@ -112,6 +112,16 @@ export function sentence(c: Compiled, name: Namer): string {
     // Every one of them is in what the rule can set, listed beside this. Here, enough to know the rule by.
     // Values written out from one name with a range are said once, by that name.
     const names = [...new Set(c.link.map(name))];
+    if (c.relative) {
+      const which = names.length > 3
+        ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`
+        : names.length > 1
+        ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
+        : `${names[0]} (${c.link.length} values)`;
+      return `${which} move together: changing any one moves the ${
+        c.link.length === 2 ? "other" : "others"
+      } by the same amount` + (c.cond ? `, while ${conditionWords(c.cond, name)}` : "") + ".";
+    }
     if (names.length === 1) {
       return `${names[0]} are linked (${c.link.length} values): changing any one sets the others to match` +
         (c.cond ? `, while ${conditionWords(c.cond, name)}` : "") + ".";
