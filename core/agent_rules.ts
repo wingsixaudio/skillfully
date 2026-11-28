@@ -166,11 +166,17 @@ do     1 to 32 steps, done in order. A step that fails stops the rest.
      with "scale": { "in": [0, 127], "out": [-60, 0] } the copy is moved from one range onto the other
   { "key": K, "add": 2 }                    change a number by this much. Negative takes away
   { "key": K, "multiply": 1.02 }
+  { "key": K, "toggle": true }              flip something that is on or off
      a number step may add "min" and "max" to keep the result in range
      a number step may add "over": 4 to get there over 4 seconds. The next step does not wait for it, so
      several can move together. Put a "wait" after it when the next step should come once it has landed.
      If anyone else sets that value on the way, the fade ends where they put it
   { "wait": 3 }                             wait 3 seconds, up to 600
+  { "wait_until": CONDITION, "timeout": 30 }   go on as soon as the condition is true. If it is not within
+                                            the timeout (seconds, up to 600), the run stops there
+  { "if": CONDITION, "then": [STEPS], "else": [STEPS] }   one list or the other, by what is true at that
+                                            moment. "else" is optional. If the hub cannot tell, the run
+                                            stops. No "if" inside an "if"
   { "together": [STEP, STEP, ...] }         2 to 256 steps done at the same moment. The next step waits for
                                             all of them. No "wait" and no "together" inside
 

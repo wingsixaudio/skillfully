@@ -64,6 +64,12 @@ export function triggerWords(t: CTrigger, name: Namer): string {
 
 export function stepWords(s: CStep, name: Namer): string {
   if ("wait" in s) return `wait ${seconds(s.wait)}`;
+  if ("until" in s) return `wait until ${conditionWords(s.until, name)} (up to ${seconds(s.timeout)})`;
+  if ("branch" in s) {
+    const side = (steps: CStep[]) => steps.map((x) => stepWords(x, name)).join(", then ");
+    return `if ${conditionWords(s.branch, name)} (${side(s.then)})` +
+      (s.else.length ? ` otherwise (${side(s.else)})` : "");
+  }
   if ("together" in s) {
     // Written out from one name with a range, they are said once, by that name. Otherwise each is said.
     if (s.of) return stepWords(s.together[0], name);
@@ -71,6 +77,7 @@ export function stepWords(s: CStep, name: Namer): string {
     return `at once: ${each.slice(0, -1).join(", ")} and ${each.at(-1)}`;
   }
   if (s.does === "press") return `press ${name(s.at)}`;
+  if (s.does === "toggle") return `toggle ${name(s.at)}`;
   const limits = [
     ...(s.min !== undefined ? [`at least ${s.min}`] : []),
     ...(s.max !== undefined ? [`at most ${s.max}`] : []),

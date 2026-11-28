@@ -261,6 +261,13 @@ step, the step is done to all of them at the same moment: it becomes one `togeth
 written directly to do unrelated things at once. The next step waits for all of them. A range is said back to
 people as one name, "Send pan (input 1 to 8, bus 1, 2)", and never as sixteen lines.
 
+Steps are done in order, and a few kinds of step shape the order. `together` does several at the same moment.
+`wait_until` goes on as soon as a condition is true, and stops the run if it is not within its timeout. An
+`if` step takes one list of steps or another by what is true at that moment, one level deep. When the hub
+cannot tell which side is right, it takes neither and the run stops: unknown means no here as everywhere. A
+`toggle` flips something that is on or off. There are no loops. A rule that should repeat is set off again by
+a trigger, where the run limit can see it.
+
 Time is the hub's own clock. A schedule fires once when the clock reaches its minute. One that passes while
 the hub is off is not run late, and is written to the log as missed. A fade is the hub sending steps toward
 the target thirty times a second. Anyone else setting that value, or already asking to, ends the fade where

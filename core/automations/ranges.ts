@@ -64,7 +64,10 @@ function spread<T extends Ref>(ref: T, origins: Origins): { ref: T; filling: Rec
 export function writeOut(rule: Rule): { rule: Rule; origins: Origins } {
   const origins: Origins = new WeakMap();
   const step = (s: Step): Step => {
-    if ("wait" in s || "together" in s || !s.range) return s;
+    if ("then" in s) {
+      return { ...s, then: s.then.map(step), ...(s.else ? { else: s.else.map(step) } : {}) };
+    }
+    if ("wait" in s || "wait_until" in s || "together" in s || !s.range) return s;
     const each = spread(s, origins).map(({ ref, filling }) => {
       if (!ref.from) return ref;
       const from = { ...ref.from, key: fill(ref.from.key, filling) };

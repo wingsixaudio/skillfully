@@ -234,3 +234,127 @@ Deno.test("a trigger over a range is any one of them, and steps written as toget
   ]);
   await hub.stop();
 });
+
+Deno.test("a toggle flips what is on or off, one value or a range of them, and says so when it cannot tell", async () => {
+  const hub = await hubWithBoard();
+  const c = checkRule({ kind: "automation", name: "x", do: [{ key: "a/b", toggle: true, over: 2 }] });
+  assert(!c.ok && c.problems.some((p) => p.includes("over goes with a number")), JSON.stringify(c));
+  assert(!checkRule({ kind: "automation", name: "x", do: [{ key: "a/b", toggle: false }] }).ok);
+  assert(
+    hub.automations.check("n", {
+      kind: "automation",
+      name: "n",
+      do: [{ key: "tag/number/count", toggle: true }],
+    })
+      .some((p) => p.includes("is not on or off, so it cannot be toggled")),
+  );
+  await rule(hub, "flip", {
+    do: [{ key: "tag/flag/live", toggle: true }, {
+      key: "switch/outlet/{outlet}/on",
+      range: { outlet: [1, 2] },
+      toggle: true,
+    }],
+  });
+  assertEquals(
+    view(hub, "flip").sentence,
+    "When it is run: toggle Service live, then toggle On (outlet 1, 2) on Simulated switch.",
+  );
+  const strip = hub.hosts.get("sim-switch")!;
+  assert((await strip.set("switch/outlet/2/on", true, who)).ok);
+  const now = () => [
+    hub.hubDevice.state.get("tag/flag/live"),
+    strip.state.get("switch/outlet/1/on"),
+    strip.state.get("switch/outlet/2/on"),
+  ];
+  assertEquals(now(), [false, false, true]);
+  assert((await press(hub, "flip")).ok);
+  await until("each is flipped from where it was", () => JSON.stringify(now()) === "[true,true,false]");
+  await until("the run ends", () => ofType(hub, "skillfully.automation.finished").length === 1);
+  assert((await press(hub, "flip")).ok);
+  await until("and flipped back", () => JSON.stringify(now()) === "[false,false,true]");
+  await hub.stop();
+});
+
+Deno.test("a run can wait for a condition, and take one path or another by what is true when it gets there", async () => {
+  const hub = await hubWithBoard();
+  const bad = (step: unknown, why: string) => {
+    const c = checkRule({ kind: "automation", name: "x", do: [step] });
+    assert(!c.ok && c.problems.some((p) => p.includes(why)), JSON.stringify(c));
+  };
+  bad({ wait_until: { key: "a/b", is: 1 } }, "timeout: must be a number of seconds");
+  bad({ if: { key: "a/b", is: 1 }, then: [] }, "then: must be a list of 1 to 32 steps");
+  bad(
+    { if: { key: "a/b", is: 1 }, then: [{ if: { key: "a/b", is: 1 }, then: [{ wait: 1 }] }] },
+    "an if cannot be inside another if",
+  );
+  bad(
+    { together: [{ key: "a/b", value: 1 }, { wait_until: { key: "a/b", is: 1 }, timeout: 5 }] },
+    "a wait cannot be one of the steps done together",
+  );
+
+  await rule(hub, "cue", {
+    mode: "queue",
+    do: [
+      { wait_until: { key: "tag/flag/live", is: true }, timeout: 20 },
+      {
+        if: { key: level(1), ">": -10 },
+        then: [{ key: "console/input/{input}/bus/1/level", range: { input: [1, 2] }, value: -30 }],
+        else: [{ key: "tag/number/count", add: 100 }],
+      },
+      { key: "tag/number/count", add: 1 },
+    ],
+  });
+  const v = view(hub, "cue");
+  assertEquals(
+    v.sentence,
+    "When it is run: wait until Service live is on (up to 20 seconds), then if Send level (input 1, bus 1) on Simulated board is above -10 (set Send level (input 1, 2, bus 1) on Simulated board to -30) otherwise (add 100 to count), then add 1 to count.",
+  );
+  // What either side could set is in its reach, and what it waits for and chooses by is what it reads.
+  assert(
+    v.touches.writes.some((w) => w.key === level(2)) &&
+      v.touches.writes.some((w) => w.key === "tag/number/count"),
+  );
+  assert(
+    v.touches.reads.some((r) => r.key === "tag/flag/live") && v.touches.reads.some((r) => r.key === level(1)),
+  );
+
+  // It waits, and goes on the moment the condition is true: here, the first side, since the level is 0.
+  assert((await board(hub).set(level(1), 0, who)).ok);
+  assert((await press(hub, "cue")).ok);
+  await sleep(120);
+  assertEquals(hub.hubDevice.state.get("tag/number/count"), 0, "it is still waiting");
+  assert((await hub.hubDevice.set("tag/flag/live", true, who)).ok);
+  await until("it goes on", () => hub.hubDevice.state.get("tag/number/count") === 1);
+  assertEquals([board(hub).state.get(level(1)), board(hub).state.get(level(2))], [-30, -30]);
+  // Run again, the level is now -30: the other side.
+  assert((await press(hub, "cue")).ok);
+  await until("the other side", () => hub.hubDevice.state.get("tag/number/count") === 102);
+
+  // Not true in time, the run stops there and says so. Nothing after it is done.
+  assert((await hub.hubDevice.set("tag/flag/live", false, who)).ok);
+  assert((await press(hub, "cue")).ok);
+  await until("it gives up", () => ofType(hub, "skillfully.automation.failed").length === 1, 8000);
+  const failed = ofType(hub, "skillfully.automation.failed")[0].data;
+  assertEquals([failed.step, failed.why], [1, "Timed out after 20 s waiting until Service live is on"]);
+  assertEquals(hub.hubDevice.state.get("tag/number/count"), 102);
+
+  // A device that is away: the hub cannot tell which side is right, and does neither.
+  await rule(hub, "which", {
+    do: [{
+      if: { key: "switch/outlet/1/on", is: true },
+      then: [{ key: "tag/number/count", value: 1 }],
+      else: [{ key: "tag/number/count", value: 2 }],
+    }],
+  });
+  hub.hosts.get("sim-switch")!.crash();
+  await until("the strip is away", () => hub.hubDevice.state.get("device/connected/sim-switch") === false);
+  await press(hub, "which");
+  await until("it says it cannot tell", () => ofType(hub, "skillfully.automation.failed").length === 2);
+  assert(
+    String(ofType(hub, "skillfully.automation.failed")[1].data.why).startsWith(
+      "Cannot tell whether On (outlet 1)",
+    ),
+  );
+  assertEquals(hub.hubDevice.state.get("tag/number/count"), 102);
+  await hub.stop();
+});

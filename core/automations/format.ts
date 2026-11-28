@@ -67,12 +67,18 @@ export type Step =
   | { wait: number }
   /** Steps done at the same moment. The next step waits for all of them. */
   | { together: Step[] }
+  /** Go on when this becomes true. If it has not by then, the run stops there. */
+  | { wait_until: Condition; timeout: number }
+  /** One list of steps or the other, by what is true at that moment. */
+  | { if: Condition; then: Step[]; else?: Step[] }
   | (Ref & {
     value?: Value;
     from?: Ref;
     scale?: Scale;
     add?: number;
     multiply?: number;
+    /** Flip something that is on or off. */
+    toggle?: true;
     min?: number;
     max?: number;
     /** Get there over this many seconds, not at once. */
@@ -321,12 +327,34 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     }
   };
 
-  const step = (where: string, s: unknown, inside = false): void => {
+  /** `within` says what this step is part of: steps done together, or one side of an if. */
+  const step = (where: string, s: unknown, within: "" | "together" | "if" = ""): void => {
     if (!isObject(s)) return say(where, "must be a step");
+    const inside = within === "together";
     if ("wait" in s) {
       only(where, s, ["wait"]);
       if (inside) say(where, "a wait cannot be one of the steps done together");
       return seconds(`${where}.wait`, s.wait, LIMITS.waitSeconds);
+    }
+    if ("wait_until" in s) {
+      only(where, s, ["wait_until", "timeout"]);
+      if (inside) say(where, "a wait cannot be one of the steps done together");
+      seconds(`${where}.timeout`, s.timeout, LIMITS.waitSeconds);
+      return condition(`${where}.wait_until`, s.wait_until, 1);
+    }
+    if ("then" in s || "else" in s) {
+      only(where, s, ["if", "then", "else"]);
+      if (inside) return say(where, "an if cannot be one of the steps done together");
+      if (within === "if") return say(where, "an if cannot be inside another if");
+      condition(`${where}.if`, s.if, 1);
+      for (const side of ["then", "else"]) {
+        if (side === "else" && s.else === undefined) continue;
+        const list = s[side];
+        if (!Array.isArray(list) || !list.length || list.length > LIMITS.steps) {
+          say(`${where}.${side}`, `must be a list of 1 to ${LIMITS.steps} steps`);
+        } else list.forEach((x, i) => step(`${where}.${side}[${i}]`, x, "if"));
+      }
+      return;
     }
     if ("together" in s) {
       only(where, s, ["together"]);
@@ -334,7 +362,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
       if (!Array.isArray(s.together) || s.together.length < 2 || s.together.length > LIMITS.ranged) {
         return say(`${where}.together`, `must be a list of 2 to ${LIMITS.ranged} steps`);
       }
-      return s.together.forEach((x, i) => step(`${where}.together[${i}]`, x, true));
+      return s.together.forEach((x, i) => step(`${where}.together[${i}]`, x, "together"));
     }
     only(where, s, [
       "key",
@@ -345,6 +373,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
       "scale",
       "add",
       "multiply",
+      "toggle",
       "min",
       "max",
       "over",
@@ -352,8 +381,9 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     // A range on a step done together with others would be a list inside a list. It is written out, or the
     // step stands alone.
     ref(where, s, !inside);
-    const does = ["value", "from", "add", "multiply"].filter((k) => k in s);
-    if (does.length > 1) return say(where, "use only one of value, from, add or multiply");
+    const does = ["value", "from", "add", "multiply", "toggle"].filter((k) => k in s);
+    if (does.length > 1) return say(where, "use only one of value, from, add, multiply or toggle");
+    if ("toggle" in s && s.toggle !== true) say(`${where}.toggle`, "must be true");
     if ("value" in s && !isValue(s.value)) say(`${where}.value`, "must be a number, text, true or false");
     // What it copies from may use the same parts in braces: each value copied from the one that matches it.
     if ("from" in s) refOnly(`${where}.from`, s.from, false, isObject(s.range) ? Object.keys(s.range) : []);
@@ -361,7 +391,8 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
       if (k in s && !isNumber(s[k])) say(`${where}.${k}`, "must be a number");
     }
     limits(where, s);
-    const numeric = does.length > 0 && !(does[0] === "value" && typeof s.value !== "number");
+    const numeric = does.length > 0 && does[0] !== "toggle" &&
+      !(does[0] === "value" && typeof s.value !== "number");
     if (("min" in s || "max" in s) && !numeric) say(where, "min and max go with a number");
     if ("scale" in s) {
       if (!("from" in s)) say(where, "scale goes with from");
