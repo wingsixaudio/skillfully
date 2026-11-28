@@ -121,6 +121,11 @@ Deno.test("the agent writes a canvas, the person sees it on Canvas before it is 
     "read_document",
     "document_format",
     "save_document",
+    "automations",
+    "read_automation",
+    "automation_format",
+    "test_automation",
+    "save_automation",
     "set_value",
   ]);
   assert(model.sent[0].body.system.includes("Some screens are made of documents"));

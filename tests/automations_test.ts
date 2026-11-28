@@ -525,3 +525,60 @@ Deno.test("a rule in test watches the real hub and sends nothing", async () => {
   assertEquals(live.steps[2], "multiply count by 2 (at most 7)");
   await hub.stop();
 });
+
+Deno.test("five hundred rules cost a change nothing unless one of them reads it", async () => {
+  const hub = await hubWith([{ dir: SIM, mode: "act" }]);
+  // A device that reports as fast as it is asked to, with nothing behind it.
+  const listeners: ((values: Record<string, string>) => void)[] = [];
+  const state = new Map<string, string>();
+  const fake = {
+    id: "fake",
+    name: "Fake",
+    capabilities: { generic: {} },
+    mode: "act" as const,
+    status: "running" as const,
+    health: { status: "ok" as const },
+    rev: 0,
+    state,
+    onChange: (l: (values: Record<string, string>) => void) => void listeners.push(l),
+    onHealth: () => {},
+    set: () => Promise.resolve({ ok: false as const, error: { code: "read_only", message: "no" } }),
+  };
+  const report = (key: string, value: string) => {
+    state.set(key, value);
+    const values = { [key]: value };
+    for (const l of listeners) l(values);
+  };
+  hub.devices.attach(fake);
+  hub.hubDevice.define({ name: "count", kind: "number" }, who);
+  for (let i = 0; i < 500; i++) {
+    report(`generic/reading/r${i}`, "0");
+    await rule(hub, `r${i}`, {
+      when: [{ key: `generic/reading/r${i}`, device: "fake", rises_past: 1000 }],
+      if: { key: "tag/number/count", "<": 5 },
+      do: [{ key: "tag/number/count", add: 1 }],
+    });
+  }
+  assertEquals(hub.automations.views().filter((v) => v.state === "on").length, 500);
+  const each = (n: number, fn: (i: number) => void) => {
+    const began = performance.now();
+    for (let i = 0; i < n; i++) fn(i);
+    return (performance.now() - began) / n;
+  };
+  // A value no rule reads: one lookup, and on.
+  const unread = each(100_000, (i) => report("generic/reading/elsewhere", String(i)));
+  // A value one rule reads, moving below its mark: that one rule looks, and nothing fires.
+  const read = each(100_000, (i) => report("generic/reading/r7", String(i % 900)));
+  assertEquals(hub.hubDevice.state.get("tag/number/count"), 0);
+  // And when it passes its mark, it fires.
+  report("generic/reading/r7", "1000");
+  await until("the rule that read it ran", () => hub.hubDevice.state.get("tag/number/count") === 1);
+  console.log(
+    `      a change no rule reads: ${(unread * 1000).toFixed(2)} µs. One a rule reads: ${
+      (read * 1000).toFixed(2)
+    } µs.`,
+  );
+  // The design asks for well under a millisecond. This is held to a twentieth of one, with room for a slow machine.
+  assert(unread < 0.05 && read < 0.05, `${unread} ms and ${read} ms a change`);
+  await hub.stop();
+});

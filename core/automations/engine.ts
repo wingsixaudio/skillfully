@@ -125,6 +125,8 @@ export interface RuleView {
   missing: string[];
   reads: string[];
   writes: string[];
+  /** The same as values, to check against what someone may see and change. */
+  touches: { reads: At[]; writes: At[] };
   rate: number;
   lastRan?: string;
   active: boolean;
@@ -144,6 +146,9 @@ export class Automations {
   #paused = false;
   #pausedGroups = new Set<string>();
   #views = new Map<string, RuleView>();
+  /** Each rule as it was last settled, kept for as long as the rule and what it could name stay the same. */
+  #settled = new Map<string, { hash: string; result: ReturnType<typeof compile> }>();
+  #ids = "";
   #out?: ReturnType<HubDevice["extend"]>;
   #second: number;
   #stopped = false;
@@ -180,7 +185,9 @@ export class Automations {
     this.#out = hubDevice.extend("automation", { set: (key, value, ctx) => this.#set(key, value, ctx) });
     this.refresh();
     store.onChange(() => this.refresh());
-    devices.onReplaced(() => this.refresh());
+    // What a rule could name changed: a device came or went, or a tag did. Every rule is settled again.
+    devices.onReplaced(() => this.refresh(true));
+    hubDevice.onTags(() => this.refresh(true));
     devices.onChange((source, values, cause) => this.#changed(source, values, cause));
     devices.onHealth((source) => this.#health(source));
   }
@@ -233,12 +240,19 @@ export class Automations {
   describe(
     id: string,
     rule: Rule,
-  ): { sentence: string; reads: string[]; writes: string[]; problems: string[] } {
+  ): {
+    sentence: string;
+    reads: string[];
+    writes: string[];
+    touches: { reads: At[]; writes: At[] };
+    problems: string[];
+  } {
     const { compiled, problems, missing } = compile(id, rule, this.#world());
     return {
       sentence: compiled ? sentence(compiled, this.#name) : "",
       reads: (compiled?.reads ?? []).map(this.#name),
       writes: (compiled?.writes ?? []).map(this.#name),
+      touches: { reads: compiled?.reads ?? [], writes: compiled?.writes ?? [] },
       problems: [...problems, ...missing.map((d) => `there is no device called ${d} on this hub`)],
     };
   }
@@ -249,17 +263,26 @@ export class Automations {
    * Read what is approved and work out again what each rule reads. A rule that is as it was keeps what its
    * triggers remember, so approving one rule does not make another forget where it stood.
    */
-  refresh(): void {
+  refresh(worldChanged = false): void {
     if (this.#stopped) return;
     const world = this.#world();
+    const all = this.deps.store.kept();
+    // A rule can name another rule, so a rule coming or going changes what the rest could name too.
+    const ids = all.map((k) => k.id).join(" ");
+    if (worldChanged || ids !== this.#ids) this.#settled.clear();
+    this.#ids = ids;
     const before = this.#live;
     this.#live = new Map();
     this.#watching = new Map();
     this.#views = new Map();
     const values: Values = { "automation/paused": this.#paused };
     const groups = new Set<string>();
-    for (const kept of this.deps.store.kept()) {
-      const { compiled, problems, missing } = compile(kept.id, kept.rule, world);
+    for (const kept of all) {
+      let settled = this.#settled.get(kept.id);
+      if (!settled || settled.hash !== kept.hash) {
+        this.#settled.set(kept.id, settled = { hash: kept.hash, result: compile(kept.id, kept.rule, world) });
+      }
+      const { compiled, problems, missing } = settled.result;
       if (kept.rule.group) groups.add(kept.rule.group);
       const was = before.get(kept.id);
       const runs = !this.#leftAlone && (kept.state === "on" || kept.state === "test") && compiled &&
@@ -275,6 +298,7 @@ export class Automations {
         missing,
         reads: (compiled?.reads ?? []).map(this.#name),
         writes: (compiled?.writes ?? []).map(this.#name),
+        touches: { reads: compiled?.reads ?? [], writes: compiled?.writes ?? [] },
         rate: kept.rate,
         ...(kept.lastRan ? { lastRan: kept.lastRan } : {}),
         active: false,
@@ -291,7 +315,8 @@ export class Automations {
         continue;
       }
       // The same rule, naming the same things: it carries on as it was, timers and all.
-      const same = was && was.kept.hash === kept.hash && JSON.stringify(was.c) === JSON.stringify(compiled);
+      const same = was && was.kept.hash === kept.hash &&
+        (was.c === compiled || JSON.stringify(was.c) === JSON.stringify(compiled));
       if (was && !same) this.#cancel(was, "it was changed");
       const live: Live = same
         ? was
@@ -524,7 +549,7 @@ export class Automations {
     for (const a of live.c.reads) read[`${a.device}:${a.key}`] = this.#read(a) ?? null;
     this.#log("fired", live, run, { why: firing.why, depth, read });
     if (live.kept.state === "test") {
-      this.#log("would", live, run, { writes: this.#would(live) });
+      this.#log("would", live, run, { writes: this.#would(live.c) });
       return null;
     }
     live.run = run;
@@ -555,8 +580,8 @@ export class Automations {
   }
 
   /** What a rule in Test would have sent. Waits are not waited for, and nothing is sent. */
-  #would(live: Live): unknown[] {
-    return live.c.steps.map((s) => {
+  #would(c: Compiled): unknown[] {
+    return c.steps.map((s) => {
       if ("wait" in s) return { wait: s.wait };
       const v = this.#valueOf(s);
       return {
@@ -721,8 +746,18 @@ export class Automations {
   /** How each trigger and each part of the condition stands right now, for the page that shows a rule live. */
   live(id: string): { triggers: Line[]; condition: Line[]; steps: string[] } | null {
     const view = this.#views.get(id);
-    if (!view) return null;
-    const { compiled } = compile(id, view.rule, this.#world());
+    return view ? this.standing(id, view.rule) : null;
+  }
+
+  /**
+   * How any rule would stand right now, approved or not: each trigger and each part of its condition with
+   * what it reads, and what its steps would send. Nothing is sent and nothing is remembered.
+   */
+  standing(
+    id: string,
+    rule: Rule,
+  ): { triggers: Line[]; condition: Line[]; steps: string[]; would: unknown[] } | null {
+    const { compiled } = compile(id, rule, this.#world());
     if (!compiled) return null;
     const answer = (t: Tri) => (t === null ? "unknown" : t ? "true" : "false");
     const value = (at: At) => {
@@ -758,6 +793,7 @@ export class Automations {
       })),
       condition: compiled.cond ? lines(compiled.cond, 0, []) : [],
       steps: compiled.steps.map((s) => stepWords(s, this.#name)),
+      would: this.#would(compiled),
     };
   }
 }

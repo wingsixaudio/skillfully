@@ -14,6 +14,7 @@ import type { Keeping } from "./agent_docs.ts";
 import type { Capabilities } from "./capabilities.ts";
 import type { Source } from "./source.ts";
 import type { Log, LogEntry } from "./log.ts";
+import type { Ruling } from "./agent_rules.ts";
 import type { Tool } from "./model.ts";
 import { readWatch, watches } from "./watching.ts";
 
@@ -35,6 +36,8 @@ export interface Looking {
   log: Log;
   /** What this run may do with the documents screens keep. */
   kept: Keeping;
+  /** What this run may do with the rules the hub runs by itself. Absent on a hub that runs none. */
+  rules?: Ruling;
 }
 
 export interface Looked {

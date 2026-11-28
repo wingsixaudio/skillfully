@@ -58,6 +58,8 @@ export class RuleStore {
   /** Proposals of a hub that has nowhere to keep files: they last until it stops. */
   #unfiled = new Map<string, string>();
   #changed = new Set<() => void>();
+  /** What the database holds, read once and kept in step with it, so that asking costs nothing. */
+  #kept = new Map<string, KeptRule>();
 
   constructor(db: DatabaseSync, log: Log, dataDir?: string) {
     this.#db = db;
@@ -69,6 +71,7 @@ export class RuleStore {
          approved_at TEXT NOT NULL, state TEXT NOT NULL, stopped TEXT, rate INTEGER NOT NULL, last_ran TEXT
        );`,
     );
+    this.#load();
   }
 
   /** Told whenever what the hub runs changed: a rule approved, switched, stopped or removed. */
@@ -91,10 +94,11 @@ export class RuleStore {
 
   // --- What the hub runs ---
 
-  kept(): KeptRule[] {
-    return this.#db.prepare("SELECT * FROM automations ORDER BY id").all().flatMap((row) => {
+  #load(): void {
+    this.#kept.clear();
+    for (const row of this.#db.prepare("SELECT * FROM automations ORDER BY id").all()) {
       try {
-        return [{
+        this.#kept.set(String(row.id), {
           id: String(row.id),
           rule: JSON.parse(String(row.text)) as Rule,
           hash: String(row.hash),
@@ -104,14 +108,15 @@ export class RuleStore {
           ...(row.stopped ? { stopped: String(row.stopped) } : {}),
           rate: Number(row.rate),
           ...(row.last_ran ? { lastRan: String(row.last_ran) } : {}),
-        }];
-      } catch {
-        return [];
-      }
-    });
+        });
+      } catch { /* a row that cannot be read is left out, and stays in the database untouched */ }
+    }
+  }
+  kept(): KeptRule[] {
+    return [...this.#kept.values()];
   }
   get(id: string): KeptRule | undefined {
-    return this.kept().find((k) => k.id === id);
+    return this.#kept.get(id);
   }
 
   // --- Files: what people and agents propose ---
@@ -231,6 +236,7 @@ export class RuleStore {
       rate: allowed,
       ...(before ? { replaced: before.hash } : {}),
     });
+    this.#load();
     this.#tell();
     return { ok: true, rule: this.get(id)! };
   }
@@ -245,6 +251,8 @@ export class RuleStore {
       why ?? null,
       id,
     );
+    const { stopped: _was, ...rest } = before;
+    this.#kept.set(id, { ...rest, state, ...(why ? { stopped: why } : {}) });
     const type = { on: "enabled", off: "disabled", test: "testing", stopped: "stopped" }[state];
     this.#note(`skillfully.automation.${type}`, id, who, { name: before.rule.name, ...(why ? { why } : {}) });
     this.#tell();
@@ -257,6 +265,7 @@ export class RuleStore {
     const filed = (await this.#texts()).has(id);
     if (!before && !filed) return { ok: false, message: "Rule not found." };
     this.#db.prepare("DELETE FROM automations WHERE id = ?").run(id);
+    this.#kept.delete(id);
     this.#unfiled.delete(id);
     if (this.#dir && RULE_ID.test(id)) await Deno.remove(this.#path(id)).catch(() => {});
     this.#note("skillfully.automation.removed", id, who, before ? { name: before.rule.name } : {});
@@ -267,5 +276,7 @@ export class RuleStore {
   /** It ran just now. */
   ran(id: string, at: string): void {
     this.#db.prepare("UPDATE automations SET last_ran = ? WHERE id = ?").run(at, id);
+    const kept = this.#kept.get(id);
+    if (kept) kept.lastRan = at;
   }
 }

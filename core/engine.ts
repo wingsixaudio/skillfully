@@ -18,6 +18,9 @@ import type { Accounts, Person } from "./accounts.ts";
 import type { Agent } from "./agent.ts";
 import { type Proposal, propose, type Proposed, SET } from "./agent_acts.ts";
 import { docTools, lookDocs, proposeDoc, SAVE } from "./agent_docs.ts";
+import { lookRules, proposeRule, ruleTools, type Ruling, SAVE_RULE } from "./agent_rules.ts";
+import type { Automations } from "./automations/engine.ts";
+import type { RuleStore } from "./automations/store.ts";
 import { look, type Looking, toolsFor } from "./agent_tools.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { type Log, newId } from "./log.ts";
@@ -138,6 +141,9 @@ export class Engine {
       capabilities: Capabilities;
       log: Log;
       screens: Screens;
+      /** The rules the hub runs by itself, and where they are kept. Without them, the agent has no rule tools. */
+      automations?: Automations;
+      rules?: RuleStore;
     },
     private tuning: EngineTuning = {},
   ) {}
@@ -164,6 +170,14 @@ export class Engine {
           ? " You can also ask for one to be kept, new or changed, with save_document. Read how that screen's documents are written first, with document_format, and find the real names of the values you tie anything to. The person is shown what you wrote, on that screen, and asked yes or no, like any other change."
           : ""),
       ]),
+      ...(this.deps.automations
+        ? [
+          "The hub can run rules by itself, called automations: when something happens, if conditions hold, do a list of steps. You can list and read the ones in your reach." +
+          (acts
+            ? " You can also draft one and ask for it to be proposed, with save_automation. Read automation_format first, find the real names of the values with your other tools, and try the rule with test_automation before you ask. A proposal runs nothing. The person's yes only writes it down, and a superuser then has to approve it and turn it on. Say so, and never say a rule is running because you proposed it."
+            : ""),
+        ]
+        : []),
       ...(slots.length
         ? [
           `Some things are each person's own, such as which mix is theirs. That is a slot: a short name with a number or a word, written in braces in a value's name or in a document. The slots used on this hub: ${
@@ -235,6 +249,45 @@ export class Engine {
         open: (screen) => screens.isAt(asker.id, screen),
         save: (screen, id, doc, by) => screens.saveDocument(screen, id, doc, by),
       },
+      ...(this.deps.automations && this.deps.rules ? { rules: this.#ruling() } : {}),
+    };
+  }
+
+  /** The rules as a run is told about them: what is approved, and what is written down and waiting. */
+  #ruling(): Ruling {
+    const automations = this.deps.automations!, rules = this.deps.rules!;
+    return {
+      all: async () => {
+        const proposed = await rules.proposals(automations.check);
+        const waiting = new Set(proposed.map((p) => p.id));
+        return [
+          // A rule with a change waiting is listed as it runs now. The change is listed beside it.
+          ...automations.views().map((v) => ({
+            id: v.id,
+            name: v.name,
+            state: v.state,
+            ...(v.group ? { group: v.group } : {}),
+            sentence: v.sentence,
+            touches: v.touches,
+            rule: v.rule,
+          })),
+          ...proposed.filter((p) => p.rule && !automations.views().some((v) => v.id === p.id)).map((p) => ({
+            id: p.id,
+            name: p.rule!.name,
+            state: "proposed",
+            ...automations.describe(p.id, p.rule!),
+            rule: p.rule!,
+          })),
+        ].map((
+          r,
+        ) => (waiting.has(r.id) && r.state !== "proposed"
+          ? { ...r, state: `${r.state}, change proposed` }
+          : r)
+        );
+      },
+      describe: (id, rule) => automations.describe(id, rule),
+      standing: (id, rule) => automations.standing(id, rule),
+      propose: (id, rule, by) => rules.propose(id, rule, by),
     };
   }
 
@@ -340,12 +393,21 @@ export class Engine {
     const about = this.deps.agent.about(agent.id);
     const acts = !!first.act;
     let looking = this.looking(agent, asker);
-    const tools = [...toolsFor(looking), ...docTools(looking, acts), ...(acts ? [SET] : [])];
+    const tools = [
+      ...toolsFor(looking),
+      ...docTools(looking, acts),
+      ...ruleTools(looking, acts),
+      ...(acts ? [SET] : []),
+    ];
     const proposing = (
       l: Looking,
       use: { name: string; input: Record<string, unknown> },
     ): Promise<Proposed> =>
-      use.name === SAVE.name ? proposeDoc(l, use.input) : Promise.resolve(propose(l, use.input));
+      use.name === SAVE.name
+        ? proposeDoc(l, use.input)
+        : use.name === SAVE_RULE.name
+        ? proposeRule(l, use.input)
+        : Promise.resolve(propose(l, use.input));
     const system = this.#system(
       agent,
       asker,
@@ -512,7 +574,7 @@ export class Engine {
           hear({ type: "TOOL_CALL_END", toolCallId: use.id });
           const subject = (device: unknown) =>
             typeof device === "string" && looking.hosts().some((h) => h.id === device) ? device : agent.id;
-          if (acts && (use.name === SET.name || use.name === SAVE.name)) {
+          if (acts && [SET.name, SAVE.name, SAVE_RULE.name].includes(use.name)) {
             const p = await proposing(looking, use);
             if (p.ok) {
               open.push({ use, id: newId(), proposal: p.proposal });
@@ -536,6 +598,7 @@ export class Engine {
             continue;
           }
           const found = (await lookDocs(looking, use.name, use.input)) ??
+            (await lookRules(looking, use.name, use.input)) ??
             (await look(looking, use.name, use.input));
           looked.push(found.words);
           note("skillfully.agent.looked", { step, ...found.note }, subject(found.note.device));
