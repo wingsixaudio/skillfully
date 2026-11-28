@@ -241,7 +241,7 @@ export class Automations {
 
   stop(): void {
     this.#stopped = true;
-    for (const live of this.#live.values()) this.#cancel(live, "the hub stopped");
+    for (const live of this.#live.values()) this.#cancel(live, "Hub shut down");
     this.#clock.stop();
   }
 
@@ -496,7 +496,7 @@ export class Automations {
     // Anything in its condition that is being timed keeps its time, whether or not a trigger fires.
     if (live.c.cond) this.#is(live, live.c.cond);
     if (live.c.cancel && live.run && this.#is(live, live.c.cancel) === true) {
-      this.#cancel(live, "its cancel condition became true");
+      this.#cancel(live, "Cancel condition became true");
     }
     if (live.c.during) {
       // The while form acts on the two edges of its condition. While the hub cannot tell, it waits.
@@ -506,9 +506,9 @@ export class Automations {
       live.during = now;
       if (was === undefined || was === now) return;
       const steps = now ? live.c.steps : live.c.otherwise;
-      if (!steps.length) return this.#cancel(live, "its condition stopped being true");
+      if (!steps.length) return this.#cancel(live, "Condition no longer true");
       this.#fire(live, {
-        why: now ? "its condition became true" : "its condition stopped being true",
+        why: now ? "Condition became true" : "Condition no longer true",
         cause: changed?.cause,
         steps,
       });
@@ -652,7 +652,7 @@ export class Automations {
     if (depth > MAX_DEPTH) {
       return this.#halt(
         live,
-        `It was part of a chain of rules setting each other off, more than ${MAX_DEPTH} deep.`,
+        `Loop detected: automations triggered each other more than ${MAX_DEPTH} levels deep.`,
       );
     }
     const traceid = changed.cause?.traceid ?? newId();
@@ -722,9 +722,9 @@ export class Automations {
     if (depth > MAX_DEPTH) {
       this.#halt(
         live,
-        `It was part of a chain of rules setting each other off, more than ${MAX_DEPTH} deep.`,
+        `Loop detected: automations triggered each other more than ${MAX_DEPTH} levels deep.`,
       );
-      return "It was stopped: it was part of a loop.";
+      return "Stopped: loop detected.";
     }
     if (live.c.cond) {
       const holds = this.#is(live, live.c.cond);
@@ -732,28 +732,28 @@ export class Automations {
         const unknown = holds === null ? firstUnknown(live.c.cond, this.#read) : undefined;
         return this.#skip(
           live,
-          unknown ? `It could not tell: ${this.#name(unknown)} is unknown.` : "Its condition was not met.",
+          unknown ? `Condition unknown: ${this.#name(unknown)} has no value.` : "Condition not met.",
         );
       }
     }
     if (live.c.cancel && this.#is(live, live.c.cancel) === true) {
-      return this.#skip(live, "Its cancel condition already held.");
+      return this.#skip(live, "Cancel condition already true.");
     }
     const steps = firing.steps ?? live.c.steps;
     if (live.run) {
-      if (live.c.mode === "single") return this.#skip(live, "It was already running.");
+      if (live.c.mode === "single") return this.#skip(live, "Already running.");
       if (live.c.mode === "queue") {
-        if (live.queue.length >= LIMITS.queue) return this.#skip(live, "Too many runs were already waiting.");
+        if (live.queue.length >= LIMITS.queue) return this.#skip(live, `Run queue full (${LIMITS.queue}).`);
         live.queue.push(firing);
         return null;
       }
-      this.#cancel(live, "it was set off again");
+      this.#cancel(live, "Restarted by a new trigger");
     }
     const now = performance.now();
     live.runs = live.runs.filter((t) => now - t < RATE_WINDOW_MS);
     if (live.runs.length >= live.kept.rate) {
-      this.#halt(live, `It ran ${live.kept.rate} times in 10 seconds.`);
-      return "It was stopped: it ran too often.";
+      this.#halt(live, `Rate limit exceeded: ${live.kept.rate} runs in 10 seconds.`);
+      return "Stopped: rate limit exceeded.";
     }
     live.runs.push(now);
     const run: Run = { steps, traceid: firing.cause?.traceid ?? newId(), depth };
@@ -936,7 +936,7 @@ export class Automations {
 
   /** The hub turns a rule off, with the reason. A person turns it back on. */
   #halt(live: Live, why: string): void {
-    this.#cancel(live, "the hub stopped it");
+    this.#cancel(live, "Stopped by the hub");
     this.deps.store.setState(live.kept.id, "stopped", HUB, why);
   }
 
@@ -965,7 +965,7 @@ export class Automations {
     });
     for (const live of this.#live.values()) {
       if (!this.#isPaused(live)) continue;
-      this.#cancel(live, "automations were paused");
+      this.#cancel(live, "Automations paused");
       // What triggers remember is noted afresh when rules resume, so nothing fires for what happened meanwhile.
     }
     if (!on) {
@@ -982,16 +982,16 @@ export class Automations {
     if (!live) {
       const view = this.#views.get(id);
       return this.#leftAlone
-        ? "This hub was started with its automations left alone."
+        ? "Automations are disabled for this session."
         : !view
         ? "Rule not found."
         : view.state === "waiting"
         ? `${view.name} is waiting for ${view.missing.join(", ")}.`
-        : `${view.name} is ${view.state === "stopped" ? "stopped" : "off"}.`;
+        : `${view.name} is ${view.state === "stopped" ? "stopped" : "disabled"}.`;
     }
     if (live.c.follow) return `${live.c.name} follows a value. There is nothing to run.`;
     const why = this.#fire(live, {
-      why: "it was run",
+      why: "Run manually",
       cause: { actor: ctx.actor, via: ctx.via, traceid: ctx.traceid, depth: ctx.depth ?? 0 },
     });
     return why === null ? null : `${live.c.name} did not run. ${why}`;
@@ -1006,7 +1006,7 @@ export class Automations {
     const who = { actor: ctx.actor ?? "unknown", via: ctx.via };
     if (what === "paused") {
       if (name !== undefined && !(name in this.paused.groups) && !this.#pausedGroups.has(name)) {
-        return { ok: false, code: "unknown_key", message: `No rule is in a group called ${name}` };
+        return { ok: false, code: "unknown_key", message: `Group not found: ${name}` };
       }
       this.pause(value === true, who, name);
       return { ok: true, value };

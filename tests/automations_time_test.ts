@@ -100,7 +100,7 @@ Deno.test("a schedule fires once when the clock reaches its minute, on its days,
   assert((await press(hub, "morning-only")).ok);
   clock.now = sunday(13, 0);
   const late = await press(hub, "morning-only");
-  assert(!late.ok && late.error.message.includes("Its condition was not met"));
+  assert(!late.ok && late.error.message.includes("Condition not met"));
 
   // A window that runs past midnight belongs to the day it started on.
   const night = { from: 22 * 60, to: 2 * 60, days: [6] };
@@ -244,8 +244,8 @@ Deno.test("the while form acts on both edges of a condition, and waits while it 
   );
   await until("it is back, and the other half runs", () => tag(hub, "tag/text/note") === "", 15000);
   assertEquals(ran(hub, "fired", "strip-down").map((e) => e.data.why), [
-    "its condition became true",
-    "its condition stopped being true",
+    "Condition became true",
+    "Condition no longer true",
   ]);
 
   // A condition on a device's own value: while the device is away the hub cannot tell, and does neither half.
@@ -279,7 +279,7 @@ Deno.test("cancel_when stops a run in the middle of its steps", async () => {
     do: [{ key: "tag/number/count", value: 1 }, { wait: 10 }, { key: "tag/number/count", value: 2 }],
   });
   const off = await press(hub, "to-message");
-  assert(!off.ok && off.error.message.includes("cancel condition already held"));
+  assert(!off.ok && off.error.message.includes("Cancel condition already true"));
   await setTag(hub, "tag/flag/live", true);
   assert((await press(hub, "to-message")).ok);
   assertEquals(tag(hub, "tag/number/count"), 1);
@@ -287,7 +287,7 @@ Deno.test("cancel_when stops a run in the middle of its steps", async () => {
   await until("it is cancelled", () => ran(hub, "cancelled", "to-message").length === 1);
   assertEquals([tag(hub, "tag/number/count"), ran(hub, "cancelled")[0].data.why], [
     1,
-    "its cancel condition became true",
+    "Cancel condition became true",
   ]);
   assert(hub.automations.views()[0].sentence.endsWith("It stops if Service live is off."));
   await hub.stop();

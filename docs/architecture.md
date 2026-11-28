@@ -259,7 +259,7 @@ How a rule comes to run:
    sentence and its reach, every value it reads and every value it can set, worked out from the text alone.
 3. **A superuser approves that exact text.** The approval names the text by its hash, so a yes cannot be spent
    on a file that has since changed. The hub runs rules from its database, never from the file.
-4. **It is turned on,** or put in **Test**, where it watches the real hub and logs what it would have sent.
+4. **It is enabled,** or put in **Test mode**, where it watches the real hub and logs what it would have sent.
 
 What keeps it safe:
 

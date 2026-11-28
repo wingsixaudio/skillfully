@@ -119,7 +119,7 @@ Deno.test("the agent drafts a rule, tries it, and proposes it: the yes writes it
   assert(results(model.sent[1])[0].content.includes('"rises_past"'));
   // A draft with a word the hub does not know is said to be wrong, with the word.
   const wrong = results(model.sent[2])[0];
-  assert(wrong.is_error && wrong.content.includes('"become" is not a word'), wrong.content);
+  assert(wrong.is_error && wrong.content.includes('unknown field "become"'), wrong.content);
   // A sound draft comes back as a sentence, with how it stands now and what it would send. Nothing was sent.
   const tried = results(model.sent[3])[0].read;
   assertEquals(
