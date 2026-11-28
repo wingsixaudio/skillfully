@@ -51,7 +51,7 @@ export interface Compiled {
   name: string;
   group?: string;
   /** when: triggers fire it. while: a condition's two edges do. follow: one value is kept equal to another. */
-  form: "when" | "while" | "follow";
+  form: "when" | "while" | "follow" | "link";
   mode: Mode;
   triggers: CTrigger[];
   cond?: CCond;
@@ -63,6 +63,8 @@ export interface Compiled {
   cancel?: CCond;
   /** The follow form: the value followed, the value kept equal to it, and how it is shaped on the way. */
   follow?: { from: At; to: At; scale?: Scale; min?: number; max?: number };
+  /** The link form: the values kept equal to each other. */
+  link?: At[];
   /** Every value it reads, and every value it may set. Each once. */
   reads: At[];
   writes: At[];
@@ -238,7 +240,7 @@ export function compile(
       return { at, does: "set", value: s.value, ...shaping };
     });
 
-  const form: Compiled["form"] = rule.follow ? "follow" : rule.while ? "while" : "when";
+  const form: Compiled["form"] = rule.link ? "link" : rule.follow ? "follow" : rule.while ? "while" : "when";
   const triggers: CTrigger[] = (rule.when ?? []).map((t, i): CTrigger => {
     const where = `when[${i}]`;
     if ("holds" in t) {
@@ -314,7 +316,28 @@ export function compile(
     }
   }
   if (follow) read.push(follow.from);
-  const writes = once([...every.flatMap((s) => ("at" in s ? [s.at] : [])), ...(follow ? [follow.to] : [])]);
+  // Every linked value is read, to know it moved, and set, to match the one that did.
+  let link: At[] | undefined;
+  if (rule.link) {
+    const found = rule.link.map((r, i) => {
+      const where = `link[${i}]`;
+      const got = find(where, r, "write");
+      if (got.kind === "trigger") say(where, `${r.key} is an action and has no value to link`);
+      return got;
+    });
+    const kinds = new Set(found.map((f) => f.kind).filter(Boolean));
+    if (kinds.size > 1) {
+      say("link", `linked values must be the same kind, and these are ${[...kinds].join(" and ")}`);
+    }
+    link = once(found.map((f) => f.at));
+    if (link.length < found.length) say("link", "the same value is listed more than once");
+    read.push(...link);
+  }
+  const writes = once([
+    ...every.flatMap((s) => ("at" in s ? [s.at] : [])),
+    ...(follow ? [follow.to] : []),
+    ...(link ?? []),
+  ]);
 
   if (problems.length) return { problems, missing: [...missing] };
   return {
@@ -331,6 +354,7 @@ export function compile(
       otherwise,
       ...(cancel ? { cancel } : {}),
       ...(follow ? { follow } : {}),
+      ...(link ? { link } : {}),
       reads: once(read),
       writes,
     },

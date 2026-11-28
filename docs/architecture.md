@@ -240,10 +240,17 @@ and it is never a program.
 | `cancel_when` | A condition. A run in the middle of its steps stops the moment it is true                                                                                                                                                   |
 | `group`       | Rules of one group are paused together                                                                                                                                                                                      |
 
-A rule can take two other forms. The **while** form (`while`, `do`, `otherwise`) does one list of steps as
+A rule can take three other forms. The **while** form (`while`, `do`, `otherwise`) does one list of steps as
 soon as a condition is true and another when that ends. The **follow** form (`follow`, `set`, with `scale`,
 `min` and `max`) keeps one value equal to another whenever that one changes. It is not a run, so it is not
 held to the run limit: the device takes what it can and keeps the newest.
+
+The **link** form (`link`, a list of 2 to 64 values) keeps several values equal to each other: when anyone
+changes one of them, the hub sets all the others to match, at once. It is how values are ganged: pans, levels,
+mutes. The rule does not react to its own writes coming back from the device, so one move by a person is one
+set of each other value and nothing goes round. Do not build this out of follow rules. A ring of them is a
+loop: each hop is a round trip to the device, a drag leaves the far end trailing, and the hub's loop limit
+stops one of the rules, after which the ring is broken.
 
 Time is the hub's own clock. A schedule fires once when the clock reaches its minute. One that passes while
 the hub is off is not run late, and is written to the log as missed. A fade is the hub sending steps toward
