@@ -15,10 +15,18 @@
 
 import type { Value } from "../../contract/mod.ts";
 
+/** Which numbers a part of a name in braces stands for: every one from..to, or the ones listed. */
+export type Span = { from: number; to: number } | number[];
 export interface Ref {
   key: string;
   /** A device's ID. Left out when only one device has this kind of value. */
   device?: string;
+  /**
+   * Makes this one name stand for many values: `console/input/{input}/mute` with `{ input: { from: 1, to: 8 } }`
+   * is eight of them. Allowed where many values make sense: what a link holds, what a step sets, what a
+   * trigger watches. See ranges.ts.
+   */
+  range?: Record<string, Span>;
 }
 /** The right-hand side of a compare: a plain value, or another value read at that moment. */
 export type Operand = Value | Ref;
@@ -57,6 +65,8 @@ export type Trigger =
 
 export type Step =
   | { wait: number }
+  /** Steps done at the same moment. The next step waits for all of them. */
+  | { together: Step[] }
   | (Ref & {
     value?: Value;
     from?: Ref;
@@ -110,13 +120,17 @@ export const LIMITS = {
   overSeconds: 600,
   forSeconds: 3600,
   queue: 10,
-  linked: 64,
+  linked: 256,
+  /** The most values one name with a range may stand for, and the most steps done together. */
+  ranged: 256,
 };
 
 export const RULE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 export const GROUP = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const KEY = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}(\/[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}){1,11}$/;
 const DEVICE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** A part of a name that a range fills in. */
+export const PLACE = /\{([a-z][a-z0-9_]{0,23})\}/g;
 const CLOCK = /^([01][0-9]|2[0-3]):[0-5][0-9]$/;
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
@@ -142,18 +156,62 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
       if (!allowed.includes(k)) say(where, `unknown field "${k}"`);
     }
   };
-  const ref = (where: string, o: Record<string, unknown>) => {
-    if (typeof o.key !== "string" || !KEY.test(o.key)) {
+  /**
+   * A name, and the range that goes with it where one is allowed. `places` are names in braces it may use
+   * without a range of its own, because the step it is part of has them.
+   */
+  const ref = (where: string, o: Record<string, unknown>, ranged = false, places: string[] = []) => {
+    const named = typeof o.key === "string" ? [...o.key.matchAll(PLACE)].map((m) => m[1]) : [];
+    if (typeof o.key !== "string" || !KEY.test(o.key.replace(PLACE, "1"))) {
       say(where, "key must be a value's name, such as tag/flag/live");
     }
     if (o.device !== undefined && (typeof o.device !== "string" || !DEVICE.test(o.device))) {
       say(where, "device must be a device's ID");
     }
+    if (o.range === undefined) {
+      const loose = named.filter((n) => !places.includes(n));
+      if (loose.length) {
+        say(
+          where,
+          ranged
+            ? `{${loose[0]}} needs a range`
+            : `a range is not allowed here, so {${loose[0]}} cannot be used`,
+        );
+      }
+      return;
+    }
+    if (!ranged) return say(where, "a range is not allowed here");
+    if (!isObject(o.range)) {
+      return say(`${where}.range`, "must be { name: { from, to } } or { name: [numbers] }");
+    }
+    const whole = (n: unknown) => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 99999;
+    let count = 1;
+    for (const [name, span] of Object.entries(o.range)) {
+      if (!named.includes(name)) say(`${where}.range`, `the key has no {${name}}`);
+      if (Array.isArray(span)) {
+        if (!span.length || !span.every(whole) || new Set(span).size !== span.length) {
+          say(`${where}.range.${name}`, "must list whole numbers from 1, each once");
+        }
+        count *= span.length || 1;
+      } else if (isObject(span)) {
+        only(`${where}.range.${name}`, span, ["from", "to"]);
+        if (!whole(span.from) || !whole(span.to) || (span.from as number) > (span.to as number)) {
+          say(
+            `${where}.range.${name}`,
+            "from and to must be whole numbers from 1, with from no more than to",
+          );
+        } else count *= (span.to as number) - (span.from as number) + 1;
+      } else say(`${where}.range.${name}`, "must be { from, to } or a list of numbers");
+    }
+    for (const n of named) if (!(n in o.range)) say(`${where}.range`, `{${n}} needs a range`);
+    if (count > LIMITS.ranged) {
+      say(`${where}.range`, `stands for ${count} values; the most is ${LIMITS.ranged}`);
+    }
   };
-  const refOnly = (where: string, v: unknown) => {
+  const refOnly = (where: string, v: unknown, ranged = false, places: string[] = []) => {
     if (!isObject(v)) return say(where, "must be a value as { key }");
-    only(where, v, ["key", "device"]);
-    ref(where, v);
+    only(where, v, ranged ? ["key", "device", "range"] : ["key", "device"]);
+    ref(where, v, ranged, places);
   };
   const operand = (where: string, v: unknown) => {
     if (isValue(v)) return;
@@ -243,11 +301,11 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
       return days(`${where}.days`, t.days);
     }
     const kinds = ["rises_past", "falls_past", "becomes", "changes"].filter((k) => k in t);
-    only(where, t, ["key", "device", "within", ...kinds.slice(0, 1)]);
+    only(where, t, ["key", "device", "range", "within", ...kinds.slice(0, 1)]);
     if (kinds.length !== 1) {
       return say(where, "use exactly one of rises_past, falls_past, becomes, changes, holds or at");
     }
-    ref(where, t);
+    ref(where, t, true);
     const kind = kinds[0];
     if ((kind === "rises_past" || kind === "falls_past") && !isNumber(t[kind])) {
       say(`${where}.${kind}`, "must be a number");
@@ -263,18 +321,42 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     }
   };
 
-  const step = (where: string, s: unknown): void => {
+  const step = (where: string, s: unknown, inside = false): void => {
     if (!isObject(s)) return say(where, "must be a step");
     if ("wait" in s) {
       only(where, s, ["wait"]);
+      if (inside) say(where, "a wait cannot be one of the steps done together");
       return seconds(`${where}.wait`, s.wait, LIMITS.waitSeconds);
     }
-    only(where, s, ["key", "device", "value", "from", "scale", "add", "multiply", "min", "max", "over"]);
-    ref(where, s);
+    if ("together" in s) {
+      only(where, s, ["together"]);
+      if (inside) return say(where, "steps done together cannot hold more steps done together");
+      if (!Array.isArray(s.together) || s.together.length < 2 || s.together.length > LIMITS.ranged) {
+        return say(`${where}.together`, `must be a list of 2 to ${LIMITS.ranged} steps`);
+      }
+      return s.together.forEach((x, i) => step(`${where}.together[${i}]`, x, true));
+    }
+    only(where, s, [
+      "key",
+      "device",
+      "range",
+      "value",
+      "from",
+      "scale",
+      "add",
+      "multiply",
+      "min",
+      "max",
+      "over",
+    ]);
+    // A range on a step done together with others would be a list inside a list. It is written out, or the
+    // step stands alone.
+    ref(where, s, !inside);
     const does = ["value", "from", "add", "multiply"].filter((k) => k in s);
     if (does.length > 1) return say(where, "use only one of value, from, add or multiply");
     if ("value" in s && !isValue(s.value)) say(`${where}.value`, "must be a number, text, true or false");
-    if ("from" in s) refOnly(`${where}.from`, s.from);
+    // What it copies from may use the same parts in braces: each value copied from the one that matches it.
+    if ("from" in s) refOnly(`${where}.from`, s.from, false, isObject(s.range) ? Object.keys(s.range) : []);
     for (const k of ["add", "multiply"]) {
       if (k in s && !isNumber(s[k])) say(`${where}.${k}`, "must be a number");
     }
@@ -324,14 +406,16 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
   }
   if (r.if !== undefined) condition("if", r.if, 1);
   if (form === "link") {
-    if (!Array.isArray(r.link) || r.link.length < 2 || r.link.length > LIMITS.linked) {
+    // One name with a range is already several values, so a link may be written as a single one.
+    const several = Array.isArray(r.link) && r.link.some((v) => isObject(v) && v.range !== undefined);
+    if (!Array.isArray(r.link) || r.link.length < (several ? 1 : 2) || r.link.length > LIMITS.linked) {
       say("link", `must be a list of 2 to ${LIMITS.linked} values`);
     } else {
-      r.link.forEach((v, i) => refOnly(`link[${i}]`, v));
+      r.link.forEach((v, i) => refOnly(`link[${i}]`, v, true));
       const seen = new Set<string>();
       for (const v of r.link) {
         if (!isObject(v)) continue;
-        const one = `${v.device ?? ""}\n${v.key}`;
+        const one = `${v.device ?? ""}\n${v.key}\n${JSON.stringify(v.range ?? null)}`;
         if (seen.has(one)) say("link", `${v.key} is listed more than once`);
         seen.add(one);
       }

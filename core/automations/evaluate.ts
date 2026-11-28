@@ -6,6 +6,7 @@
 //
 // Everything here is plain arithmetic on values that were handed in. It reads no device and keeps nothing.
 
+import type { Ranged } from "./ranges.ts";
 import type { Value } from "../../contract/mod.ts";
 import type { Compare } from "./format.ts";
 
@@ -16,6 +17,8 @@ export type Tri = boolean | null;
 export interface At {
   device: string;
   key: string;
+  /** When this value was written out from a name with a range: that name, for saying it to people. */
+  of?: Ranged;
 }
 export type COperand = { value: Value } | { at: At };
 export type CCond =

@@ -171,6 +171,8 @@ do     1 to 32 steps, done in order. A step that fails stops the rest.
      several can move together. Put a "wait" after it when the next step should come once it has landed.
      If anyone else sets that value on the way, the fade ends where they put it
   { "wait": 3 }                             wait 3 seconds, up to 600
+  { "together": [STEP, STEP, ...] }         2 to 256 steps done at the same moment. The next step waits for
+                                            all of them. No "wait" and no "together" inside
 
 cancel_when   an optional condition. A run in the middle of its steps stops the moment it is true.
 
@@ -185,6 +187,17 @@ anyone changes one of them, the hub sets all the others to match at once, and do
 writes. Nothing is set when the hub starts or the rule is turned on. To make several values move together
 (pans, levels, mutes), always write ONE link rule listing them all. Never build this from follow rules, in a
 chain or a ring: a ring is a loop, the hub stops rules that loop, and each hop adds delay.
+
+One name can stand for many values. Put parts in braces in the key and say what they stand for in "range":
+  { "key": "desk/channel/{channel}/send/{send}/pan", "range": { "channel": { "from": 1, "to": 8 }, "send": [1, 2] } }
+is 16 values: channels 1 to 8 on sends 1 and 2. Use the device's real key, with braces where its numbers go. A part is { "from", "to" } or a list of numbers. One name may
+stand for up to 256 values. A range is allowed in three places:
+  in "link"       each of them is one of the linked values. A link may be written as one name with a range
+  on a trigger    any one of them sets the rule off
+  on a step       the step is done to every one of them at the same moment
+A step that copies may use the same parts in braces in "from", and each value is copied from the one that
+matches it. A range is not allowed in a condition, or in "follow" and "set". Use a range whenever a rule
+covers a run of numbered things: never list them by hand or write one rule for each.
 
 A rule may run at most 10 times in 10 seconds, or the hub stops it. To do many things from one trigger, put
 them in one rule's steps, or have one rule set a tag that others react to.

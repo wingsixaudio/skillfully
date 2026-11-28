@@ -22,7 +22,8 @@ import { HUB_DEVICE, type HubDevice } from "../hub_device.ts";
 import type { Kept } from "../kept.ts";
 import { type Log, newId } from "../log.ts";
 import type { Cause, SetContext, Source } from "../source.ts";
-import { compile, type Compiled, type CStep, type CTrigger, type World } from "./compile.ts";
+import { type CAct, compile, type Compiled, type CStep, type CTrigger, type World } from "./compile.ts";
+import type { Ranged } from "./ranges.ts";
 import {
   asksTheTime,
   asNumber,
@@ -295,6 +296,11 @@ export class Automations {
 
   #name = (at: At): string => {
     const source = this.deps.devices.source(at.device);
+    // Written out from a name with a range, it is said as that: "Mute (input 1 to 8)".
+    if (at.of && at.of.count > 1 && source) {
+      const words = this.#described(source, at.key, at.of) || at.of.key;
+      return at.device === HUB_DEVICE ? words : `${words} on ${source.name}`;
+    }
     // Another rule is named by its own name, whichever of its values is meant.
     const other = at.device === HUB_DEVICE ? /^automation\/(run|active)\/([^/]+)$/.exec(at.key) : null;
     if (other) {
@@ -316,13 +322,23 @@ export class Automations {
    * A value with no title of its own, by what kind of value it is and which one: "Send level (input 1,
    * bus 1)" for console/input/1/bus/1/level. Nothing when its kind is not known.
    */
-  #described(source: Source, key: string): string {
+  #described(source: Source, key: string, of?: Ranged): string {
     const found = this.deps.capabilities.resolve(source.capabilities, key);
     if (!found) return "";
     const parts = key.split("/").slice(1), shape = found.def.key.split("/");
-    const which = shape.flatMap((part, i) =>
-      part.startsWith("{") ? [`${part.slice(1, -1)} ${parts[i]}`] : []
-    );
+    // Where the name was written with a range, that part is said as the range and not as this one number.
+    const written = of?.key.split("/").slice(1) ?? [];
+    const span = (i: number): string => {
+      const range = of?.range[(/^\{(.+)\}$/.exec(written[i] ?? "") ?? [])[1] ?? ""];
+      if (!range) return parts[i];
+      if (!Array.isArray(range)) {
+        return range.from === range.to ? String(range.from) : `${range.from} to ${range.to}`;
+      }
+      return range.length > 4
+        ? `${range.slice(0, 3).join(", ")} and ${range.length - 3} more`
+        : range.join(", ");
+    };
+    const which = shape.flatMap((part, i) => part.startsWith("{") ? [`${part.slice(1, -1)} ${span(i)}`] : []);
     return which.length ? `${found.def.title} (${which.join(", ")})` : found.def.title;
   }
 
@@ -1004,7 +1020,7 @@ export class Automations {
   }
 
   /** The value a step would send right now, or why it cannot say. */
-  #valueOf(s: Exclude<CStep, { wait: number }>): { value: Value } | { problem: string } {
+  #valueOf(s: CAct): { value: Value } | { problem: string } {
     let value: Value;
     if (s.does === "press") return { value: true };
     if (s.does === "set") value = s.value;
@@ -1075,8 +1091,7 @@ export class Automations {
 
   /** What a rule in Test would have sent. Waits are not waited for, and nothing is sent. */
   #would(steps: CStep[]): unknown[] {
-    return steps.map((s) => {
-      if ("wait" in s) return { wait: s.wait };
+    const one = (s: CAct) => {
       const v = this.#valueOf(s);
       return {
         device: s.at.device,
@@ -1084,7 +1099,32 @@ export class Automations {
         ..."value" in v ? { value: v.value } : { problem: v.problem },
         ...("over" in s && s.over !== undefined ? { over: s.over } : {}),
       };
+    };
+    // What is done together is listed flat: each is a write of its own.
+    return steps.flatMap((s): unknown[] =>
+      "wait" in s ? [{ wait: s.wait }] : "together" in s ? s.together.map(one) : [one(s)]
+    );
+  }
+
+  /** Do one thing to one value. Says why not when it could not. A fade is started and left to run. */
+  async #act(live: Live, run: Run, s: CAct): Promise<string | undefined> {
+    const v = this.#valueOf(s);
+    const source = this.deps.devices.source(s.at.device);
+    if ("problem" in v) return v.problem;
+    if (!source) return `${s.at.device} is not on this hub`;
+    if ("over" in s && s.over !== undefined && typeof v.value === "number") {
+      const from = asNumber(this.#read(s.at));
+      if (from === null) return `${this.#name(s.at)} is unknown`;
+      this.#fade(live, run, s.at, from, v.value, s.over);
+      return undefined;
+    }
+    const r = await source.set(s.at.key, v.value, {
+      actor: `automation/${live.kept.id}`,
+      via: "automation",
+      traceid: run.traceid,
+      depth: run.depth,
     });
+    return r.ok ? undefined : r.error.message;
   }
 
   async #steps(live: Live, run: Run): Promise<void> {
@@ -1105,32 +1145,13 @@ export class Automations {
         if (!run.cancelled) done++;
         continue;
       }
-      const v = this.#valueOf(s);
-      const source = this.deps.devices.source(s.at.device);
-      if ("problem" in v || !source) {
-        failed = "problem" in v ? v.problem : `${s.at.device} is not on this hub`;
-        break;
-      }
-      if ("over" in s && s.over !== undefined && typeof v.value === "number") {
-        // A fade is started and left to run. The next step does not wait for it.
-        const from = asNumber(this.#read(s.at));
-        if (from === null) {
-          failed = `${this.#name(s.at)} is unknown`;
-          break;
-        }
-        this.#fade(live, run, s.at, from, v.value, s.over);
-        done++;
-        continue;
-      }
-      const ctx: SetContext = {
-        actor: `automation/${live.kept.id}`,
-        via: "automation",
-        traceid: run.traceid,
-        depth: run.depth,
-      };
-      const r = await source.set(s.at.key, v.value, ctx);
-      if (!r.ok) {
-        failed = r.error.message;
+      // Steps done together are all asked for at once, and the next step waits for every one of them.
+      // The first that could not be done is the reason the run stops. The rest were still asked for.
+      const why = "together" in s
+        ? (await Promise.all(s.together.map((x) => this.#act(live, run, x)))).find((w) => w !== undefined)
+        : await this.#act(live, run, s);
+      if (why !== undefined) {
+        failed = why;
         break;
       }
       done++;

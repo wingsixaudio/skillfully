@@ -92,7 +92,9 @@ function notInForm(rule) {
   }
   for (const s of [...(rule.do || []), ...(rule.otherwise || [])]) {
     if (s && "scale" in s) return "a step that scales";
+    if (s && "together" in s) return "steps done together";
   }
+  if (JSON.stringify(rule).includes('"range":')) return "a name that stands for a range of values";
   return "";
 }
 const typeOf = (rule) =>
