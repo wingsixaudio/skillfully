@@ -1,4 +1,9 @@
-/* The bar across the top of every page a signed-in person uses. See bar.js. */
+/* The bar across the top of every page a signed-in person uses. See bar.js. It sizes itself the same on
+   every page, whatever the page's own styles. */
+#bar,
+#bar * {
+  box-sizing: border-box;
+}
 #bar {
   flex: none;
   display: flex;
@@ -259,5 +264,68 @@
   }
   #barExtras a {
     padding: 8px 10px;
+  }
+}
+
+/* A screen opened beside the page, such as Ask. On a screen's page it sits next to the screen (shell.css
+   places it); on any other page it is a panel at the side, or along the bottom of a phone. */
+#beside {
+  flex: none;
+  height: min(62dvh,560px);
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #26262b;
+  background: #000;
+}
+#beside[hidden] {
+  display: none;
+}
+#beside iframe {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  display: block;
+}
+#besideBar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 8px 0;
+}
+#besideClose {
+  font: inherit;
+  font-family: "Montserrat",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size: 13px;
+  color: #a1a1aa;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-height: 36px;
+  cursor: pointer;
+}
+#besideClose:focus-visible {
+  outline: 2px solid #f7941d;
+  outline-offset: 2px;
+}
+#beside.drawer {
+  position: fixed;
+  z-index: 20;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  box-shadow: 0 -12px 32px #000a;
+}
+@media (min-width: 860px) {
+  #beside {
+    height: auto;
+    width: 400px;
+    border-top: 0;
+    border-left: 1px solid #26262b;
+  }
+  #beside.drawer {
+    left: auto;
+    top: 52px;
+    box-shadow: -12px 0 32px #000a;
   }
 }

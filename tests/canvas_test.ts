@@ -631,3 +631,48 @@ Deno.test("a canvas can have a desktop layout of its own: a whole screen of fine
   // An empty desktop layout has a page for each of the canvas's pages.
   assertEquals(C.emptyDesktop(doc), { columns: 48, rows: 27, pages: [{ name: "One", pieces: [] }] });
 });
+
+Deno.test("a button with steps does several things in turn, each a value or an action, or a wait", async () => {
+  const movie = {
+    type: "button",
+    at: [1, 1, 2, 1],
+    title: "Movie night",
+    steps: [
+      { key: "switch/outlet/1/on", value: true },
+      { wait: 2.5 },
+      { key: "console/input/{ears}/bus/1/level", device: "sim-console", value: -10 },
+      { key: "generic/action/launch", value: { app: "youtube" } },
+    ],
+  };
+  const doc = canvas([movie]);
+  assertEquals(C.check(doc), []);
+  assert(valid(doc), "the schema refuses a button with steps");
+  // The guide's own example is a canvas.
+  const guide = await Deno.readTextFile(`${CANVAS}/README.md`);
+  const block = [...guide.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1])
+    .find((b) => b.includes("Movie night"))!;
+  const shown = JSON.parse(block);
+  assertEquals(C.check(canvas([shown])), []);
+  // Names in braces are filled in each step, from the person's slots; a missing one is reported.
+  const [made] = C.layout(doc, 0, { ears: "3" }).pieces;
+  assertEquals(made.steps[2], { key: "console/input/3/bus/1/level", device: "sim-console", value: -10 });
+  assertEquals(made.steps[1], { wait: 2.5 });
+  assertEquals(C.layout(doc, 0, {}).pieces[0].missing, ["ears"]);
+
+  const wrong: [string, unknown][] = [
+    ['a button with "steps" has no "key"', canvas([{ ...movie, key: "switch/outlet/1/on" }])],
+    ['a button with "steps" needs a "title"', canvas([{ ...movie, title: undefined }])],
+    ['"steps" is a list of 1 to 16', canvas([{ ...movie, steps: [] }])],
+    ['"steps" is a list of 1 to 16', canvas([{ ...movie, steps: Array(17).fill({ wait: 1 }) }])],
+    ['"wait" is a number of seconds', canvas([{ ...movie, steps: [{ wait: 60 }] }])],
+    ["a wait has nothing but", canvas([{ ...movie, steps: [{ wait: 1, key: "a/b" }] }])],
+    ['step 1 has "values"', canvas([{ ...movie, steps: [{ key: "a/b", values: 1 }] }])],
+    ["step 1 needs a key such as", canvas([{ ...movie, steps: [{ value: 1 }] }])],
+    ["needs a key such as", canvas([{ type: "button", at: [1, 1] }])],
+  ];
+  for (const [words, bad] of wrong) {
+    const problems: string[] = C.check(JSON.parse(JSON.stringify(bad)));
+    assert(problems.some((p) => p.includes(words)), `${words}: ${JSON.stringify(problems)}`);
+    assert(!valid(JSON.parse(JSON.stringify(bad))), `the schema took: ${words}`);
+  }
+});

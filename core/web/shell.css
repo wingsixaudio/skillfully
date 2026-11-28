@@ -10,10 +10,6 @@ body {
   display: flex;
   flex-direction: column;
 }
-#besideClose:focus-visible {
-  outline: 2px solid #f7941d;
-  outline-offset: 2px;
-}
 /* The screen, and beside it whatever was opened beside it. Neither covers the other: both are whole and
    both can be used. On a phone the panel is below. With room, it is to the right. */
 #stage {
@@ -29,41 +25,9 @@ iframe {
   border: 0;
   display: block;
 }
-#beside {
-  flex: none;
-  height: min(62dvh,560px);
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid #26262b;
-}
-#beside[hidden] {
-  display: none;
-}
-#besideBar {
-  display: flex;
-  justify-content: flex-end;
-  padding: 2px 8px 0;
-}
-#besideClose {
-  font: inherit;
-  font-size: 13px;
-  color: #a1a1aa;
-  background: none;
-  border: 0;
-  border-radius: 8px;
-  padding: 8px 10px;
-  min-height: 36px;
-  cursor: pointer;
-}
 @media (min-width: 860px) {
   #stage {
     flex-direction: row;
-  }
-  #beside {
-    height: auto;
-    width: 400px;
-    border-top: 0;
-    border-left: 1px solid #26262b;
   }
 }
 /* Full screen: the screen and whatever is beside it, with nothing of the browser or this bar around them.

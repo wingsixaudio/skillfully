@@ -112,7 +112,7 @@ Every piece has `type` and `at`. A piece tied to a device has a `key`, and may n
 | ----------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `label`     | Words on the canvas                                                     | `text`, `size` (`small`, `normal`, `large`)                      |
 | `readout`   | A value, shown                                                          | `key`, `device`, `title`                                         |
-| `button`    | Triggers an action, or sets a value to one thing                        | `key`, `device`, `title`, `value`, `lit`, `color`                |
+| `button`    | Triggers an action, or sets a value to one thing. With `steps`, several | `key`, `device`, `title`, `value`, `lit`, `color`, `steps`       |
 | `toggle`    | A switch between two values                                             | `key`, `device`, `title`, `on`, `off`, `color`                   |
 | `slider`    | A value you drag. Taller than wide it stands up, otherwise it lies down | `key`, `device`, `title`, `min`, `max`, `step`, `sends`, `shows` |
 | `stepper`   | A number with a button each side, down and up by a step                 | `key`, `device`, `title`, `min`, `max`, `step`, `sends`, `shows` |
@@ -133,6 +133,26 @@ Every piece has `type` and `at`. A piece tied to a device has a `key`, and may n
 - **`value`** is what a button sends. Left out, the button triggers. An object is the options of an action.
 - **`lit`** lights a button while a value is something: `{ "key": "generic/reading/power", "is": "on" }`. This
   is how a row of sources shows which one is live.
+- A button with **`steps`** does several things with one press, in order: "Movie night" turns the TV on,
+  waits, and opens an app; "Walk-in" sets the house lights and starts the music. Each step is
+  `{ "key": ..., "value": ... }` with an optional `device`, or `{ "wait": seconds }` (30 at most). 16 steps at
+  most. Such a button has no `key`, `device` or `value` of its own, and needs a `title`. A step is sent once
+  the hub has answered the one before, and the button stops at the first that fails and says which. Nothing is
+  sent unless the person may do every step.
+
+  ```json
+  {
+    "type": "button",
+    "at": [1, 6, 2, 1],
+    "title": "Movie night",
+    "steps": [
+      { "key": "generic/action/power", "value": { "power": "power_on" } },
+      { "wait": 3 },
+      { "key": "generic/action/launch_app", "value": { "app": "youtube" } }
+    ]
+  }
+  ```
+
 - **`on`** and **`off`** are the two values of a toggle. Left out, they are `true` and `false`.
 - **`color`** is one of `orange`, `red`, `green`, `blue`, `yellow`, `white`.
 - A slider takes its range from the device. `min`, `max` and `step` are for when the device does not say. A

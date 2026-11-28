@@ -110,10 +110,18 @@
           }
         },
         {
-          "title": "A button: triggers an action, or sets a value to one thing",
+          "title": "A button: triggers an action, or sets a value to one thing. With steps, does several things in turn",
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "at", "key"],
+          "required": ["type", "at"],
+          "anyOf": [
+            { "properties": { "key": true }, "required": ["key"] },
+            { "properties": { "steps": true }, "required": ["steps"] }
+          ],
+          "dependentRequired": { "steps": ["title"] },
+          "dependentSchemas": {
+            "steps": { "properties": { "key": false, "value": false, "device": false } }
+          },
           "properties": {
             "type": { "const": "button" },
             "at": { "$ref": "#/$defs/at" },
@@ -123,6 +131,35 @@
             "value": {
               "description": "What pressing it sends. Left out, it triggers. An object is the options of an action.",
               "type": ["string", "number", "boolean", "object"]
+            },
+            "steps": {
+              "description": "Several things one press does, in order: each sets a value or runs an action, or waits. Stops at the first that fails. The person must be allowed every one, or none is done.",
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["key"],
+                    "properties": {
+                      "key": { "$ref": "#/$defs/key" },
+                      "device": { "$ref": "#/$defs/device" },
+                      "value": {
+                        "description": "What this step sends. Left out, it triggers. An object is the options of an action.",
+                        "type": ["string", "number", "boolean", "object"]
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["wait"],
+                    "properties": { "wait": { "type": "number", "exclusiveMinimum": 0, "maximum": 30 } }
+                  }
+                ]
+              }
             },
             "lit": {
               "description": "The button is lit while this value is what `is` says. Left out, `is` is true.",
