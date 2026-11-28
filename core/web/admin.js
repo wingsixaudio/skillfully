@@ -56,8 +56,16 @@ const PLACES = {
   hub: "Settings",
 };
 function here() {
-  const [first = "", second = ""] = location.pathname.replace(/^\/admin\/?/, "").split("/");
+  const [first = "", second = "", third = ""] = location.pathname.replace(/^\/admin\/?/, "").split("/");
   const place = Object.hasOwn(PLACES, first) ? first : "";
+  // Writing a rule has a page of its own: part of Automations, with an address that says which rule.
+  if (place === "automations" && (second === "new" || (second === "edit" && third))) {
+    let rule = "";
+    try {
+      rule = second === "edit" ? decodeURIComponent(third) : "";
+    } catch { /* an address that is not text names no rule */ }
+    return { place, device: "", page: "automations/edit", rule };
+  }
   // The catalog is the page behind "Add a device": part of Devices, with an address of its own.
   if (place === "devices" && second === "add") return { place, device: "", page: "devices/add" };
   let device = "";
@@ -76,6 +84,7 @@ function showPlace() {
   document.title = PLACES[place] + " | Skillfully";
   if (place === "hub") drawConfig();
   if (page === "devices/add") drawCatalog();
+  if (page === "automations/edit") openRuleEditor(here().rule, automationsKnown);
 }
 // Moving between places changes the address and nothing else: no page is fetched again.
 function go(to) {
@@ -129,6 +138,7 @@ function ask(title, fill, done, okText = "Save") {
   say("dlgMsg", "");
   $("dlgOk").textContent = okText;
   $("dlgOk").disabled = false;
+  $("dlgOk").hidden = false;
   fill($("dlgBody"));
   $("dlgForm").onsubmit = async (e) => {
     if (e.submitter && e.submitter.value === "cancel") return;
@@ -565,35 +575,9 @@ const RULE_STATES = {
   stopped: "Stopped",
   waiting: "Waiting",
 };
-const STARTER = {
-  kind: "automation",
-  name: "",
-  when: [{ key: "tag/flag/example", becomes: true }],
-  do: [{ key: "tag/number/example", add: 1 }],
-};
-// A rule as text, to write or change. Saving proposes it. Nothing runs until it is approved.
-function editRule(id, rule) {
-  ask(id ? "Edit automation" : "New automation", (b) => {
-    input(b, "ruleId", "ID", {
-      value: id || "",
-      maxLength: 64,
-      required: true,
-      pattern: "[a-z0-9][a-z0-9-]*",
-      disabled: !!id,
-    });
-    const text = el("textarea", { id: "ruleText", rows: 14, spellcheck: false, required: true });
-    text.value = JSON.stringify(rule || STARTER, null, 2);
-    b.append(
-      el("label", { htmlFor: "ruleText", textContent: "Rule (JSON)" }),
-      text,
-      el("p", {
-        className: "help",
-        textContent:
-          "Saved rules are not enabled. Each is listed for approval with a description of what it does.",
-      }),
-    );
-  }, () => call("/admin/api/automation/save", { id: $("ruleId").value.trim(), text: $("ruleText").value }));
-}
+/** What the hub last said about its rules, for the page where one is edited. */
+let automationsKnown = null;
+const ruleAt = (id) => "/admin/automations/edit/" + encodeURIComponent(id);
 // How a rule stands right now: each trigger and condition with what it reads. Kept current while open.
 function watchRule(v) {
   let timer;
@@ -635,6 +619,9 @@ function watchRule(v) {
 }
 function drawAutomations(a) {
   if (!a) return;
+  automationsKnown = a;
+  // A page opened at the address of one rule is drawn once the hub has said what that rule is.
+  if (here().page === "automations/edit") openRuleEditor(here().rule, a);
   const done = (r) => {
     say("autoMsg", r && r.ok === false ? r.message : "", "bad");
     load();
@@ -703,7 +690,7 @@ function drawAutomations(a) {
         }, () =>
           sureCall("/admin/api/automation/approve", { id: p.id, hash: p.hash }), "Approve")));
     }
-    if (p.rule) row.append(button("Edit", () => editRule(p.id, p.rule)));
+    if (p.rule) row.append(button("Edit", () => go(ruleAt(p.id))));
     if (!changes) {
       row.append(
         button("Remove", async () => done(await call("/admin/api/automation/remove", { id: p.id }))),
@@ -766,14 +753,14 @@ function drawAutomations(a) {
     }
     row.append(
       button("Watch", () => watchRule(v)),
-      button("Edit", () => editRule(v.id, v.rule)),
+      button("Edit", () => go(ruleAt(v.id))),
       button("Remove", async () => done(await call("/admin/api/automation/remove", { id: v.id }))),
     );
     item.append(row);
     box.append(item);
   }
 }
-$("newAutomation").onclick = () => editRule("", null);
+$("newAutomation").onclick = () => go("/admin/automations/new");
 
 function drawScreens() {
   const box = $("screens");

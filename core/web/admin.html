@@ -63,6 +63,14 @@
           <p class="msg" id="autoMsg" role="status"></p>
         </section>
       </div>
+      <div class="place" data-place="automations/edit" hidden>
+        <section class="card" id="ruleEditor">
+          <p><a href="/admin/automations" data-go="1">All automations</a></p>
+          <h2 id="ruleTitle">New automation</h2>
+          <p class="msg bad" id="ruleGone" hidden>Automation not found.</p>
+          <div id="ruleForm"></div>
+        </section>
+      </div>
       <div class="place" data-place="devices" hidden>
         <section class="card"
           id="secDevices"><div id="devicesIntro"><h2>Devices</h2><p class="dim">New devices are read-only until you enable control.</p></div><p id="oneDevice" hidden><a href="/admin/devices" data-go="1">All devices</a></p><p class="msg bad" id="oneDeviceGone" hidden>Device not found.</p><div id="drivers"></div><button class="small quiet" id="addDevice" style="margin-top:14px" hidden>Add a device</button><p class="msg" id="driversMsg" role="status"></p></section>
@@ -155,5 +163,6 @@
     <script src="/_hub/frames.js"></script>
     <script src="/_hub/hub.js"></script>
     <script src="/_hub/admin.js"></script>
+    <script src="/_hub/rules.js"></script>
   </body>
 </html>

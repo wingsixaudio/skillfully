@@ -124,7 +124,7 @@ Deno.test("the agent drafts a rule, tries it, and proposes it: the yes writes it
   const tried = results(model.sent[3])[0].read;
   assertEquals(
     tried.in_words,
-    "When Service live becomes on: add 2 to console/input/1/bus/1/level on Simulated board (at most 0).",
+    "When Service live becomes on: add 2 to Send level (input 1, bus 1) on Simulated board (at most 0).",
   );
   assertEquals(tried.right_now.triggers, [{
     depth: 0,

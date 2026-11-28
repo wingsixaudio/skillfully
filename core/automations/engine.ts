@@ -171,6 +171,25 @@ export interface RuleView {
   rule: Rule;
 }
 
+/** A value as a page offers it to choose from. */
+export interface ValueAbout {
+  device: string;
+  deviceName: string;
+  key: string;
+  label: string;
+  kind: "number" | "text" | "boolean" | "trigger";
+  writable: boolean;
+  unit?: string;
+  min?: number;
+  max?: number;
+  options?: string[];
+  now?: Value;
+  /** No other device has a value of this name, so a rule can leave the device out. */
+  only: boolean;
+}
+/** How many values one search answers with. */
+const VALUES_SHOWN = 40;
+
 export class Automations {
   #live = new Map<string, Live>();
   /** Device, then value name, to the rules that have to look when it changes. */
@@ -272,15 +291,36 @@ export class Automations {
 
   #name = (at: At): string => {
     const source = this.deps.devices.source(at.device);
+    // Another rule is named by its own name, whichever of its values is meant.
+    const other = at.device === HUB_DEVICE ? /^automation\/(run|active)\/([^/]+)$/.exec(at.key) : null;
+    if (other) {
+      const called = source?.state.get(`automation/enabled/${other[2]}/title`);
+      const rule = typeof called === "string" && called ? called : other[2];
+      return other[1] === "run" ? rule : `${rule} running`;
+    }
     const title = source?.state.get(`${at.key}/title`);
     // How a device is doing is held under the device's id, and reads better under its name.
     const words = typeof title !== "string" || !title
-      ? at.key
+      ? (source && this.#described(source, at.key)) || at.key
       : at.device === HUB_DEVICE && at.key.startsWith("device/connected/")
       ? `the connection to ${title}`
       : title;
     return at.device === HUB_DEVICE || !source ? words : `${words} on ${source.name}`;
   };
+
+  /**
+   * A value with no title of its own, by what kind of value it is and which one: "Send level (input 1,
+   * bus 1)" for console/input/1/bus/1/level. Nothing when its kind is not known.
+   */
+  #described(source: Source, key: string): string {
+    const found = this.deps.capabilities.resolve(source.capabilities, key);
+    if (!found) return "";
+    const parts = key.split("/").slice(1), shape = found.def.key.split("/");
+    const which = shape.flatMap((part, i) =>
+      part.startsWith("{") ? [`${part.slice(1, -1)} ${parts[i]}`] : []
+    );
+    return which.length ? `${found.def.title} (${which.join(", ")})` : found.def.title;
+  }
 
   /** Why a rule cannot be approved as written: what it names that this hub does not have. */
   check = (id: string, rule: Rule): string[] => {
@@ -307,6 +347,127 @@ export class Automations {
       touches: { reads: compiled?.reads ?? [], writes: compiled?.writes ?? [] },
       problems: [...problems, ...missing.map((d) => `there is no device called ${d} on this hub`)],
     };
+  }
+
+  // --- What a rule could name, for someone choosing ---
+
+  /** One value as it is offered to choose: what it is called, what it holds, and what can be done with it. */
+  #about(source: Source, key: string, sources: Source[]): ValueAbout | null {
+    const { capabilities, hubDevice } = this.deps;
+    const found = capabilities.resolve(source.capabilities, key);
+    if (!found) return null;
+    const hub = source.id === HUB_DEVICE;
+    const [kind, what, name] = key.split("/");
+    const titled = (k: string) => {
+      const t = source.state.get(`${k}/title`);
+      return typeof t === "string" && t ? t : "";
+    };
+    let label = titled(key) || this.#described(source, key);
+    if (hub && kind === "automation") {
+      const rule = name ? titled(`automation/enabled/${name}`) || name : "";
+      label = what === "run"
+        ? `Run ${rule}`
+        : what === "enabled"
+        ? `${rule}: enabled`
+        : what === "active"
+        ? `${rule}: running`
+        : name
+        ? `Pause group ${name}`
+        : "Pause all automations";
+    } else if (hub && kind === "device") {
+      label = `${titled(`device/connected/${name}`) || name}: ${
+        what === "connected" ? "connected" : "status"
+      }`;
+    }
+    const options = hub && kind === "tag" && what === "choice" ? hubDevice.tag(name)?.options : undefined;
+    const now = source.state.get(key);
+    return {
+      device: source.id,
+      deviceName: source.name,
+      key,
+      label: label.slice(0, 120),
+      kind: found.def.kind,
+      writable: found.def.writable,
+      ...(found.def.unit ? { unit: found.def.unit } : {}),
+      ...(found.min !== undefined ? { min: found.min } : {}),
+      ...(found.max !== undefined ? { max: found.max } : {}),
+      ...(options ? { options } : {}),
+      ...(now !== undefined ? { now: typeof now === "string" ? now.slice(0, 80) : now } : {}),
+      only: sources.filter((s) => capabilities.resolve(s.capabilities, key)).length === 1,
+    };
+  }
+
+  /**
+   * The values a rule could name, for a page that lets someone choose one: searched by what was typed, a
+   * page of them at a time. `use` narrows them to what can be read, set or run. Given `refs`, it answers
+   * for exactly those, which is how a rule being edited shows its values by name.
+   */
+  values(q: { find?: string; device?: string; use?: string; refs?: { key: string; device?: string }[] }): {
+    values: ValueAbout[];
+    total: number;
+    devices: { id: string; name: string }[];
+  } {
+    const { capabilities } = this.deps;
+    // The hub's own values first: tags, and how devices and rules are doing, are what most rules name.
+    const all = this.deps.devices.sources();
+    const sources = [...all.filter((s) => s.id === HUB_DEVICE), ...all.filter((s) => s.id !== HUB_DEVICE)];
+    const devices = sources.map((s) => ({ id: s.id, name: s.name }));
+    if (q.refs) {
+      const values: ValueAbout[] = [];
+      for (const ref of q.refs.slice(0, 200)) {
+        const having = ref.device
+          ? sources.filter((s) => s.id === ref.device)
+          : sources.filter((s) => capabilities.resolve(s.capabilities, ref.key));
+        const about = having.length === 1 ? this.#about(having[0], ref.key, sources) : null;
+        if (about) values.push(about);
+      }
+      return { values, total: values.length, devices };
+    }
+    const words = (q.find ?? "").slice(0, 80).toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+    const fits = (v: ValueAbout) =>
+      q.use === "run"
+        ? v.kind === "trigger"
+        : q.use === "write"
+        ? v.writable && v.kind !== "trigger"
+        : v.kind !== "trigger";
+    const values: ValueAbout[] = [];
+    let total = 0;
+    for (const source of sources) {
+      if (q.device && source.id !== q.device) continue;
+      const keys = new Set<string>();
+      for (const key of source.state.keys()) {
+        // What only describes another value is not offered by itself: a title, a button's options.
+        const up = key.slice(0, key.lastIndexOf("/"));
+        const upIs = capabilities.resolve(source.capabilities, up);
+        if (/\/(title|options|group)$/.test(key) && (upIs || source.state.has(up))) {
+          // A button holds nothing, so it is found by what is kept beside it.
+          if (upIs?.def.kind === "trigger") keys.add(up);
+          continue;
+        }
+        keys.add(key);
+        if (source.id === HUB_DEVICE && key.startsWith("automation/enabled/")) {
+          keys.add(`automation/run/${key.split("/")[2]}`);
+        }
+      }
+      // A button with nothing beside it and no part of its name that varies.
+      for (const cap of Object.keys(source.capabilities)) {
+        for (const def of capabilities.get(cap)?.def.values ?? []) {
+          if (def.kind === "trigger" && !def.key.includes("{")) keys.add(`${cap}/${def.key}`);
+        }
+      }
+      // Of the hub's own, tags first: they are what a team made to be named.
+      const rank = (key: string) => key.startsWith("tag/") ? 0 : key.startsWith("automation/") ? 1 : 2;
+      const ordered = source.id === HUB_DEVICE ? [...keys].sort((a, b) => rank(a) - rank(b)) : keys;
+      for (const key of ordered) {
+        const about = this.#about(source, key, sources);
+        if (!about || !fits(about)) continue;
+        const text = `${about.label} ${key} ${source.name}`.toLowerCase();
+        if (!words.every((w) => text.includes(w))) continue;
+        total++;
+        if (values.length < VALUES_SHOWN) values.push(about);
+      }
+    }
+    return { values, total, devices };
   }
 
   // --- Which rules are live ---

@@ -591,3 +591,85 @@ Deno.test("five hundred rules cost a change nothing unless one of them reads it"
   assert(unread < 0.05 && read < 0.05, `${unread} ms and ${read} ms a change`);
   await hub.stop();
 });
+
+Deno.test("what a rule could name is offered to choose from, and a rule being written is described before it is kept", async () => {
+  const hub = await hubWithTags();
+  const a = hub.automations;
+  // Searched by what it is called, by its name, or by its device. Each says what can be done with it.
+  const phase = a.values({ find: "phase" }).values;
+  assertEquals(phase.map((v) => [v.device, v.key, v.label, v.kind, v.options, v.only]), [
+    ["hub", "tag/choice/phase", "phase", "text", ["closed", "music", "message"], true],
+  ]);
+  const level = a.values({ find: LEVEL }).values;
+  assertEquals(level.length, 1);
+  assertEquals([level[0].label, level[0].deviceName, level[0].writable, typeof level[0].now], [
+    "Send level (input 1, bus 1)",
+    "Simulated board",
+    true,
+    "number",
+  ]);
+  assert(level[0].min !== undefined && level[0].max !== undefined);
+  // A page of them at a time, with how many there are in all.
+  const everything = a.values({});
+  assert(everything.values.length === 40 && everything.total > 1000, String(everything.total));
+  assertEquals(everything.devices.map((d) => d.name), ["Hub", "Simulated board", "Simulated switch"]);
+  const strip = a.values({ device: "sim-switch" });
+  assert(strip.total > 0 && strip.values.every((v) => v.device === "sim-switch"));
+  // What only describes another value is not offered by itself.
+  assert(!a.values({ find: "tag/flag/live" }).values.some((v) => v.key.endsWith("/title")));
+  // Narrowed by what the row needs: something to read, something to set, something to run.
+  await rule(hub, "go-live", { do: [{ key: "tag/flag/live", value: true }] });
+  const named = (use: string) => a.values({ find: "go-live", use }).values.map((v) => [v.key, v.label]);
+  assertEquals(named("run"), [["automation/run/go-live", "Run go-live"]]);
+  assertEquals(named("write"), [["automation/enabled/go-live", "go-live: enabled"]]);
+  assertEquals(named("read"), [
+    ["automation/enabled/go-live", "go-live: enabled"],
+    ["automation/active/go-live", "go-live: running"],
+  ]);
+  assert(a.values({ use: "write", find: "connected" }).total === 0, "how a device is doing cannot be set");
+  // Asked about the values a rule already names, it answers for exactly those, device or no device.
+  const known = a.values({
+    refs: [{ key: LEVEL }, { key: OUTLET, device: "sim-switch" }, { key: "no/such" }],
+  });
+  assertEquals(known.values.map((v) => v.key), [LEVEL, OUTLET]);
+
+  // The page asks the same things. A rule being written is said in words, with what is wrong, and not kept.
+  const draft = {
+    kind: "automation",
+    name: "Lift",
+    when: [{ key: "tag/flag/live", becomes: true }],
+    do: [{ key: LEVEL, add: 2, max: 0 }],
+  };
+  // deno-lint-ignore no-explicit-any
+  const said: any = (await hub.post("/admin/api/automation/preview", { id: "lift", rule: draft })).body;
+  assertEquals([said.sentence, said.problems], [
+    "When Service live becomes on: add 2 to Send level (input 1, bus 1) on Simulated board (at most 0).",
+    [],
+  ]);
+  // deno-lint-ignore no-explicit-any
+  const wrong: any = (await hub.post("/admin/api/automation/preview", {
+    rule: { ...draft, when: [{ key: "tag/flag/live", become: true }] },
+  })).body;
+  assert(
+    wrong.ok && wrong.sentence === "" && wrong.problems[0].includes('unknown field "become"'),
+    JSON.stringify(wrong),
+  );
+  // deno-lint-ignore no-explicit-any
+  const absent: any = (await hub.post("/admin/api/automation/preview", {
+    rule: { ...draft, do: [{ key: "tag/flag/nope", value: true }] },
+  })).body;
+  assert(
+    absent.problems.length === 1 && absent.problems[0].includes("tag/flag/nope"),
+    JSON.stringify(absent),
+  );
+  assertEquals(hub.rules.get("lift"), undefined);
+  // deno-lint-ignore no-explicit-any
+  const found: any =
+    (await hub.post("/admin/api/automation/values", { find: "service live", use: "write" })).body;
+  assertEquals(found.values.map((v: { key: string }) => v.key), ["tag/flag/live"]);
+  // Only a superuser is told what the hub has to choose from.
+  const sam = await hub.member("Sam");
+  assertEquals((await hub.post("/admin/api/automation/values", {}, sam)).status, 403);
+  assertEquals((await hub.post("/admin/api/automation/preview", { rule: draft }, sam)).status, 403);
+  await hub.stop();
+});

@@ -183,7 +183,8 @@ Deno.test("a change says who caused it, and a change at the device says nobody d
   const other = await hubWith([{
     dir: SIM,
     mode: "listen",
-    settings: { boardChanges: [{ afterMs: 150, key: LEVEL, value: -3 }] },
+    // Long enough after it starts that this test is listening by then, however busy the computer is.
+    settings: { boardChanges: [{ afterMs: 1500, key: LEVEL, value: -3 }] },
   }]);
   const atBoard: (Cause | undefined)[] = [];
   let moved = false;

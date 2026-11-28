@@ -17,6 +17,7 @@ import type { Devices } from "./devices.ts";
 import { newId } from "./log.ts";
 import type { HubDevice } from "./hub_device.ts";
 import type { Automations } from "./automations/engine.ts";
+import { checkRule } from "./automations/format.ts";
 import type { RuleStore } from "./automations/store.ts";
 import { json, notOurPage, outcome, readFile, readJson, refuse, sentence } from "./http.ts";
 import { networkNotes, type Package, readPackage } from "./packages.ts";
@@ -611,7 +612,7 @@ export function adminApi(deps: AdminDeps) {
         try {
           candidate = typeof b.text === "string" ? JSON.parse(b.text.slice(0, 70_000)) : b.rule;
         } catch {
-          return refuse(400, "This is not JSON.");
+          return refuse(400, "Invalid JSON.");
         }
         const saved = await rules.propose(id, candidate, who);
         if (!saved.ok) return refuse(400, saved.message);
@@ -625,7 +626,7 @@ export function adminApi(deps: AdminDeps) {
       }
       case "automation/state": {
         const state = String(b.state);
-        if (!["on", "off", "test"].includes(state)) return refuse(400, "A rule is on, off or in test.");
+        if (!["on", "off", "test"].includes(state)) return refuse(400, "State must be on, off or test.");
         // Turning a rule on lets it act by itself. Turning it off or to test does not.
         const no = state === "on" ? await sure() : null;
         if (no) return no;
@@ -642,6 +643,33 @@ export function adminApi(deps: AdminDeps) {
       case "automation/run": {
         const why = automations.run(id, { ...who, traceid: newId() });
         return why === null ? json({ ok: true }) : refuse(400, why);
+      }
+      // What a rule being written would do, in words, and what is wrong with it. Nothing is kept.
+      case "automation/preview": {
+        const checked = checkRule(b.rule);
+        if (!checked.ok) {
+          return json({ ok: true, sentence: "", problems: checked.problems, writes: [], reads: [] });
+        }
+        const { sentence, problems, writes, reads } = automations.describe(id || "new", checked.rule);
+        return json({ ok: true, sentence, problems, writes, reads });
+      }
+      // The values a rule could name, for the page where one is chosen.
+      case "automation/values": {
+        const text = (v: unknown, long: number) => (typeof v === "string" ? v.slice(0, long) : undefined);
+        const refs = Array.isArray(b.refs)
+          ? b.refs.filter((r: unknown) => !!r && typeof (r as { key?: unknown }).key === "string").map((
+            r: { key: string; device?: unknown },
+          ) => ({ key: r.key.slice(0, 800), device: text(r.device, 80) }))
+          : undefined;
+        return json({
+          ok: true,
+          ...automations.values({
+            find: text(b.find, 80),
+            device: text(b.device, 80),
+            use: text(b.use, 8),
+            refs,
+          }),
+        });
       }
       case "automation/live": {
         const live = automations.live(id);
