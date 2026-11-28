@@ -112,6 +112,11 @@ Deno.test("the agent changes something only after the person's yes, and then exa
     "devices",
     "find_values",
     "read_values",
+    "automations",
+    "read_automation",
+    "automation_format",
+    "test_automation",
+    "save_automation",
     "set_value",
   ]);
   assert(model.sent[0].body.system.includes("You never change anything yourself"));

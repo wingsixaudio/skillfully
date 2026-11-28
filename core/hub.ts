@@ -236,7 +236,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     get: () => kept.get(newest),
     set: (made) => kept.set(newest, made),
   }, opts.storeEverySeconds);
-  const engine = new Engine({ accounts, agent, capabilities, log, screens }, opts.engine);
+  const engine = new Engine({ accounts, agent, automations, capabilities, log, rules, screens }, opts.engine);
   screens.talks = new Talks({ agent, engine });
   const updates = new Updates({
     running: null,

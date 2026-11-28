@@ -100,6 +100,7 @@ export class HubDevice implements Source {
   #changeListeners = new Set<(changed: Values, cause?: Cause) => void>();
   #healthListeners = new Set<() => void>();
   #staleListeners = new Set<() => void>();
+  #tagListeners = new Set<() => void>();
   #writing: Promise<void> = Promise.resolve();
   #parts = new Map<string, Part>();
 
@@ -141,6 +142,11 @@ export class HubDevice implements Source {
   /** Told that something it held is gone. A change cannot say that, so whoever shows its values looks again. */
   onStale(l: () => void): void {
     this.#staleListeners.add(l);
+  }
+
+  /** Told that a tag was made, changed or removed: which tags there are is not what it was. */
+  onTags(l: () => void): void {
+    this.#tagListeners.add(l);
   }
 
   #key(tag: Tag): string {
@@ -289,6 +295,7 @@ export class HubDevice implements Source {
     });
     this.#tell(this.#hold(tag, value), { actor: who.actor, via: who.via, traceid, depth: 0 });
     this.#file();
+    for (const l of this.#tagListeners) l();
     return { ok: true, tag };
   }
 
@@ -309,6 +316,7 @@ export class HubDevice implements Source {
     });
     for (const l of this.#staleListeners) l();
     this.#file();
+    for (const l of this.#tagListeners) l();
     return true;
   }
 

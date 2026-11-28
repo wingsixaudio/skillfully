@@ -93,6 +93,10 @@ Deno.test("the agent answers by looking, and everything it did is on the record 
     "devices",
     "find_values",
     "read_values",
+    "automations",
+    "read_automation",
+    "automation_format",
+    "test_automation",
   ]);
   assert(first.body.system.includes("You are Robin") && first.body.system.includes(hub.owner.id));
   assert(first.body.system.includes("You cannot read the hub's log"));
@@ -284,6 +288,10 @@ Deno.test("what the agent reads is data: a name that gives orders is passed on a
       "devices",
       "find_values",
       "read_values",
+      "automations",
+      "read_automation",
+      "automation_format",
+      "test_automation",
     ]);
     assertEquals(sent.body.messages[0].content, [{ type: "text", text: "What is input 3 called?" }]);
   }
@@ -346,7 +354,7 @@ Deno.test("the agent reads the log only when it has been let, only about what it
   assert(hub.agent.set(hub.owner.id, { readsLog: true }).ok);
   r = await hub.engine.ask(person(hub, hub.owner), "Who moved input 1 in bus 1?");
   assert(r.ok);
-  assertEquals(model.sent[2].body.tools.map((x: { name: string }) => x.name).at(-1), "read_log");
+  assert(model.sent[2].body.tools.some((x: { name: string }) => x.name === "read_log"));
   assert(model.sent[2].body.system.includes("You may read the hub's log"));
   let entries = results(model.sent[3])[0].read.entries;
   assertEquals(

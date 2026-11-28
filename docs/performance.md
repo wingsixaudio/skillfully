@@ -76,6 +76,20 @@ Seven changes did that:
 Saving a document also told every phone on the screen about every document the screen keeps. It now tells them
 about the one that changed (`doc`, see the contract).
 
+## Automations
+
+The rules engine listens to every change on every device, so it must cost a change almost nothing. It looks up
+which rules read the value that changed, and only those rules look at it.
+
+| With 500 rules switched on                                     | Each change takes |
+| -------------------------------------------------------------- | ----------------- |
+| A value no rule reads                                          | 0.3 µs            |
+| A value one rule reads, where the rule looks and does not fire | 0.7 µs            |
+| Approving, switching or removing one rule                      | 3 ms              |
+
+Measured by `tests/automations_test.ts`, which fails if a change costs more than 50 µs. Each rule is settled
+once, when it is approved or when what it could name changes, and never while values are moving.
+
 ## The agent, looking
 
 The agent answers questions by looking through what the hub holds, inside the hub's own process. Measured on a

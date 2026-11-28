@@ -268,8 +268,14 @@ rule and a canvas switch can pause a group. Running a rule that does not run say
 
 The code is in `core/automations/`: `format.ts` (what a rule may say), `compile.ts` (settling names and
 working out reach), `evaluate.ts` (true, false, unknown), `engine.ts` (running them), `store.ts` (proposals
-and approvals) and `words.ts` (a rule as a sentence). Still to come: schedules, fades, the `while` and
-`follow` forms, and tools for the agent to write rules.
+and approvals) and `words.ts` (a rule as a sentence).
+
+The agent has tools for rules (`core/agent_rules.ts`): list and read the ones in reach, read how a rule is
+written, try a draft against how the hub stands right now, and ask for one to be proposed. A proposal needs
+the person's yes to be written down and a superuser's approval to run. A rule may be proposed only if both the
+agent and the person asking could do each of its steps by hand.
+
+Still to come: schedules, fades, and the `while` and `follow` forms.
 
 ## What is deliberately not here
 
