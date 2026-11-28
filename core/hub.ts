@@ -270,6 +270,11 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       const session = await accounts.session(token);
       const me = session?.person;
       const device = (req.headers.get("user-agent") ?? "unknown device").slice(0, 120);
+      // A page with the bar may show a screen beside it, such as Ask, and carry its messages to the hub.
+      const framesPolicy = pagePolicy(
+        origin,
+        `frame-src ${origin}; connect-src ${origin} ${origin.replace(/^http/, "ws")}`,
+      );
       const html = async (body: Promise<string>, policy = pagePolicy(origin)) =>
         new Response(await body, {
           headers: {
@@ -400,11 +405,11 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       if (!accounts.claimed()) return go("/setup");
       if (!me) return path.startsWith("/api/") ? refuse(401, "Sign in required.") : go("/signin");
 
-      if (path === "/account") return html(authPage("account"));
+      if (path === "/account") return html(authPage("account"), framesPolicy);
       if (me.mustChange && !path.startsWith("/api/")) return go("/account");
       // One page, with a place at each address under it: Home, Devices, Screens, People, Hub.
       if (path === "/admin" || path.startsWith("/admin/")) {
-        return accounts.isSuperuser(me) ? html(adminPage()) : go("/");
+        return accounts.isSuperuser(me) ? html(adminPage(), framesPolicy) : go("/");
       }
       if (path === "/") {
         const to = screens.homeFor(me);
@@ -426,7 +431,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
         // The frame may also hold the screen, and may open the one connection the screen speaks through.
         return html(
           shellPage(screen),
-          pagePolicy(origin, `frame-src ${origin}; connect-src ${origin} ${origin.replace(/^http/, "ws")}`),
+          framesPolicy,
         );
       }
 

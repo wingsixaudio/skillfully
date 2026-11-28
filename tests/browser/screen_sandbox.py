@@ -1037,6 +1037,11 @@ async def main():
         await owner.reload()
         await owner.locator("#besides a", has_text="Ask").wait_for()
         check("closed, it stays closed", await owner.locator("#beside").is_hidden())
+        await owner.goto(base + "/admin/people"); await owner.locator("#besides a", has_text="Ask").click()
+        await owner.frame_locator("#besideFrame").locator("#q").wait_for()
+        check("Ask opens beside the admin pages too, from the same word in the bar", await owner.locator("#beside").is_visible())
+        await owner.locator("#besideClose").click()
+        await owner.goto(base + "/s/one-fader"); await owner.locator("#besides a", has_text="Ask").wait_for()
         await owner.set_viewport_size({"width": 390, "height": 844})
         sam_bar = await (await sam_ctx.new_page()).goto(base + "/s/one-fader")
         sam_page = sam_ctx.pages[-1]
