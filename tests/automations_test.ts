@@ -119,7 +119,7 @@ Deno.test("a rule is checked word by word: what the hub does not know is refused
   bad({ if: { key: "a/b", is: 1, for: 0 } }, "seconds above 0");
   bad({ if: { key: "no-slash", is: 1 } }, "must be a value's name");
   bad({ do: [] }, "1 to 32 steps");
-  bad({ do: [{ key: "a/b", value: 1, add: 2 }] }, "one of value, from, add or multiply");
+  bad({ do: [{ key: "a/b", value: 1, add: 2 }] }, "one of value, from, add, multiply or toggle");
   bad({ do: [{ key: "a/b", value: "x", over: 4 }] }, "over goes with a number");
   bad({ do: [{ key: "a/b", value: 1, over: 601 }] }, "up to 600");
   bad({ do: [{ key: "a/b", value: 1, scale: { in: [0, 1], out: [0, 1] } }] }, "scale goes with from");
