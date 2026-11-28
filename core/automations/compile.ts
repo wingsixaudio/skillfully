@@ -130,7 +130,7 @@ export function compile(
     }
     if (world.exists?.(at) === false) say(where, `there is no ${ref.key} on ${source.name}`);
     if (use === "read" && found.def.kind === "trigger") {
-      say(where, `${ref.key} is something to do, so there is nothing in it to read`);
+      say(where, `${ref.key} is an action and has no value to read`);
     }
     if (use === "write" && !found.def.writable) say(where, `${found.def.title} (${ref.key}) cannot be set`);
     return { at, kind: found.def.kind };
@@ -140,8 +140,9 @@ export function compile(
     const choices = world.choices?.(at);
     if (choices && typeof value === "string" && !choices.includes(value)) {
       say(where, `"${value}" is not one of its options: ${choices.join(", ")}`);
-    } else if (kind === "boolean" && typeof value !== "boolean") say(where, `${at.key} is true or false`);
-    else if (kind === "number" && typeof value !== "number") say(where, `${at.key} is a number`);
+    } else if (kind === "boolean" && typeof value !== "boolean") {
+      say(where, `${at.key} must be true or false`);
+    } else if (kind === "number" && typeof value !== "number") say(where, `${at.key} must be a number`);
   };
   const operand = (where: string, at: At, kind: string | undefined, o: Operand, exact: boolean): COperand => {
     if (typeof o === "object") return { at: find(where, o, "read").at };
@@ -250,7 +251,9 @@ export function compile(
     if ("at" in t) return { how: "at", minute: minuteOf(t.at), ...dayNumbers(t.days) };
     const { at, kind } = find(where, t, "read");
     if ("rises_past" in t || "falls_past" in t) {
-      if (kind === "boolean") say(where, `${at.key} is true or false, so it has no mark to pass`);
+      if (kind === "boolean") {
+        say(where, `${at.key} is true or false, so rises_past and falls_past do not apply`);
+      }
       const rises = "rises_past" in t;
       return {
         how: rises ? "rises" : "falls",

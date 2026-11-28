@@ -105,7 +105,7 @@ Deno.test("a rule is checked word by word: what the hub does not know is refused
       `${JSON.stringify(more)} → ${JSON.stringify(r)}`,
     );
   };
-  bad({ when: [{ key: "a/b", rise_past: 24 }] }, '"rise_past" is not a word');
+  bad({ when: [{ key: "a/b", rise_past: 24 }] }, 'unknown field "rise_past"');
   bad({ when: [{ key: "a/b", rises_past: "24" }] }, "must be a number");
   bad({ when: [{ key: "a/b", rises_past: 1, becomes: 2 }] }, "exactly one of");
   bad({ when: [{ at: "8:45" }] }, "must be a time of day");
@@ -125,13 +125,13 @@ Deno.test("a rule is checked word by word: what the hub does not know is refused
   bad({ do: [{ key: "a/b", value: 1, scale: { in: [0, 1], out: [0, 1] } }] }, "scale goes with from");
   bad({ do: [{ key: "a/b", from: { key: "c/d" }, scale: { in: [5, 5], out: [0, 1] } }] }, "must differ");
   // The three forms do not mix.
-  bad({ while: { key: "a/b", is: 1 }, when: [{ key: "a/b", changes: true }] }, '"when" is not a word');
-  bad({ while: { key: "a/b", is: 1 }, if: { key: "a/b", is: 1 } }, '"if" is not a word');
-  bad({ follow: { key: "a/b" }, set: { key: "c/d" } }, '"do" is not a word');
+  bad({ while: { key: "a/b", is: 1 }, when: [{ key: "a/b", changes: true }] }, 'unknown field "when"');
+  bad({ while: { key: "a/b", is: 1 }, if: { key: "a/b", is: 1 } }, 'unknown field "if"');
+  bad({ follow: { key: "a/b" }, set: { key: "c/d" } }, 'unknown field "do"');
   bad({ do: [{ wait: 601 }] }, "up to 600");
   bad({ do: [{ key: "a/b", value: "x", max: 3 }] }, "min and max go with a number");
   bad({ mode: "parallel" }, "single, restart or queue");
-  bad({ script: "rm -rf" }, '"script" is not a word');
+  bad({ script: "rm -rf" }, 'unknown field "script"');
   bad({ name: "" }, "1 to 60 characters");
   let deep: unknown = { key: "a/b", is: 1 };
   for (let i = 0; i < 7; i++) deep = { not: deep };
@@ -184,11 +184,11 @@ Deno.test("a rule runs only once a superuser approved its exact text, and names 
     { when: [{ key: "tag/choice/phase", becomes: "mesage" }] },
     '"mesage" is not one of its options',
   );
-  await naming({ do: [{ key: "tag/flag/live", value: "yes" }] }, "is true or false");
+  await naming({ do: [{ key: "tag/flag/live", value: "yes" }] }, "must be true or false");
   await naming({ do: [{ key: "tag/flag/live", add: 1 }] }, "is not a number");
   await naming({ do: [{ key: "device/connected/sim-console", value: true }] }, "cannot be set");
   await naming({ do: [{ key: LEVEL, device: "desk-9", value: 0 }] }, "no device called desk-9");
-  await naming({ if: { key: "automation/run/go-live", is: true } }, "nothing in it to read");
+  await naming({ if: { key: "automation/run/go-live", is: true } }, "is an action and has no value to read");
   assert((await hub.rules.remove("named", who)).ok);
 
   // Approved: it is the hub's, and off. On: it runs.
@@ -261,7 +261,7 @@ Deno.test("a rule runs only once a superuser approved its exact text, and names 
   await safe.hubDevice.set("tag/choice/phase", "closed", who);
   await safe.hubDevice.set("tag/choice/phase", "music", who);
   const pressed = await safe.hubDevice.set("automation/run/go-live", true, who);
-  assert(!pressed.ok && pressed.error.message.includes("left alone"));
+  assert(!pressed.ok && pressed.error.message.includes("Automations are disabled for this session"));
   assertEquals(safe.hubDevice.state.get("tag/flag/live"), false);
   await safe.stop();
   await Deno.remove(dir, { recursive: true });
@@ -284,7 +284,7 @@ Deno.test("triggers fire on false to true only: marks, changes, interlocks and l
   await level(-18);
   await sleep(60);
   assertEquals(lifts(), 0, "the interlock is off: it is set off and does not run");
-  assertEquals(ran(hub, "skipped", "lift")[0].data.why, "Its condition was not met.");
+  assertEquals(ran(hub, "skipped", "lift")[0].data.why, "Condition not met.");
 
   await setTag(hub, "tag/flag/live", true);
   await level(-30);
@@ -353,7 +353,7 @@ Deno.test("steps run in order, wait between, and stop at the first that fails", 
   assertEquals([tag(hub, "tag/text/note"), tag(hub, "automation/active/sequence")], ["one", true]);
   const again = await press("sequence");
   assert(
-    !again.ok && again.error.message === "sequence did not run. It was already running.",
+    !again.ok && again.error.message === "sequence did not run. Already running.",
     JSON.stringify(again),
   );
   await until("it finishes", () => tag(hub, "automation/active/sequence") === false);
@@ -397,7 +397,7 @@ Deno.test("steps run in order, wait between, and stop at the first that fails", 
   // A press of a rule that is off, or is not there, says so.
   hub.rules.setState("lined", "off", who);
   const off = await press("lined");
-  assert(!off.ok && off.error.message === "lined is off.");
+  assert(!off.ok && off.error.message === "lined is disabled.");
   assert(!(await press("nobody")).ok);
   await hub.stop();
 });
@@ -467,7 +467,7 @@ Deno.test("the hub stops what runs away: a loop, a rule that runs too often, and
   await setTag(hub, "tag/number/count", 1);
   await until("the chain is stopped", () => hub.automations.views().some((v) => v.state === "stopped"));
   const stopped = hub.automations.views().find((v) => v.state === "stopped")!;
-  assert(stopped.stopped!.includes("more than 8 deep"), stopped.stopped);
+  assert(stopped.stopped!.includes("more than 8 levels deep"), stopped.stopped);
   assert((tag(hub, "tag/number/count") as number) <= 6, "it did not run on");
   assertEquals(tag(hub, `automation/enabled/${stopped.id}`), false);
   const [entry] = ofType(hub, "skillfully.automation.stopped");
@@ -479,10 +479,10 @@ Deno.test("the hub stops what runs away: a loop, a rule that runs too often, and
   await rule(hub, "busy", { do: [{ key: "tag/text/note", value: "x" }] });
   let last;
   for (let i = 0; i < 11; i++) last = await hub.hubDevice.set("automation/run/busy", true, who);
-  assert(last && !last.ok && last.error.message.includes("ran too often"), JSON.stringify(last));
+  assert(last && !last.ok && last.error.message.includes("rate limit exceeded"), JSON.stringify(last));
   assertEquals(
     hub.automations.views().find((v) => v.id === "busy")!.stopped,
-    "It ran 10 times in 10 seconds.",
+    "Rate limit exceeded: 10 runs in 10 seconds.",
   );
   assert(hub.rules.setState("busy", "on", who).ok);
 

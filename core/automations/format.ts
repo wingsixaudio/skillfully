@@ -135,7 +135,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
   /** Refuse any word that is not one of these. */
   const only = (where: string, o: Record<string, unknown>, allowed: string[]) => {
     for (const k of Object.keys(o)) {
-      if (!allowed.includes(k)) say(where, `"${k}" is not a word a rule uses here`);
+      if (!allowed.includes(k)) say(where, `unknown field "${k}"`);
     }
   };
   const ref = (where: string, o: Record<string, unknown>) => {
@@ -178,7 +178,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
   };
   const limits = (where: string, o: Record<string, unknown>) => {
     for (const k of ["min", "max"]) if (k in o && !isNumber(o[k])) say(`${where}.${k}`, "must be a number");
-    if (isNumber(o.min) && isNumber(o.max) && o.min > o.max) say(where, "min is above max");
+    if (isNumber(o.min) && isNumber(o.max) && o.min > o.max) say(where, "min must not be greater than max");
   };
 
   let count = 0;
@@ -201,7 +201,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     if (c.for !== undefined) seconds(`${where}.for`, c.for, LIMITS.forSeconds);
     const group = ["all", "any", "not"].filter((k) => k in c);
     if (group.length) {
-      if (group.length > 1) return say(where, "names one of all, any or not");
+      if (group.length > 1) return say(where, "use only one of all, any or not");
       only(where, c, [group[0], "for"]);
       if (group[0] === "not") return condition(`${where}.not`, c.not, depth + 1);
       const list = c[group[0]];
@@ -211,7 +211,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     only(where, c, ["key", "device", "for", ...COMPARES]);
     ref(where, c);
     const compares = COMPARES.filter((k) => k in c);
-    if (compares.length !== 1) return say(where, `names exactly one of ${COMPARES.join(", ")}`);
+    if (compares.length !== 1) return say(where, `use exactly one of ${COMPARES.join(", ")}`);
     const how = compares[0];
     if (how === "between") {
       const pair = c.between;
@@ -241,7 +241,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     const kinds = ["rises_past", "falls_past", "becomes", "changes"].filter((k) => k in t);
     only(where, t, ["key", "device", "within", ...kinds.slice(0, 1)]);
     if (kinds.length !== 1) {
-      return say(where, "names exactly one of rises_past, falls_past, becomes, changes, holds or at");
+      return say(where, "use exactly one of rises_past, falls_past, becomes, changes, holds or at");
     }
     ref(where, t);
     const kind = kinds[0];
@@ -268,7 +268,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     only(where, s, ["key", "device", "value", "from", "scale", "add", "multiply", "min", "max", "over"]);
     ref(where, s);
     const does = ["value", "from", "add", "multiply"].filter((k) => k in s);
-    if (does.length > 1) return say(where, "names one of value, from, add or multiply");
+    if (does.length > 1) return say(where, "use only one of value, from, add or multiply");
     if ("value" in s && !isValue(s.value)) say(`${where}.value`, "must be a number, text, true or false");
     if ("from" in s) refOnly(`${where}.from`, s.from);
     for (const k of ["add", "multiply"]) {

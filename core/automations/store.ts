@@ -179,16 +179,16 @@ export class RuleStore {
   /** Write a rule as a proposal. It runs nothing until a superuser approves it. */
   async propose(id: unknown, candidate: unknown, who: Who): Promise<Outcome<{ id: string; hash: string }>> {
     if (typeof id !== "string" || !RULE_ID.test(id)) {
-      return { ok: false, message: "A rule's ID is lower-case letters, numbers and dashes, up to 64." };
+      return { ok: false, message: "Invalid ID: use lowercase letters, numbers and dashes (max 64)." };
     }
     const checked = checkRule(candidate);
     if (!checked.ok) return { ok: false, message: checked.problems.join("\n") };
     const text = stable(checked.rule);
     if (text.length > LIMITS.bytes) {
-      return { ok: false, message: `A rule is up to ${LIMITS.bytes / 1024} KB.` };
+      return { ok: false, message: `Rule too large (max ${LIMITS.bytes / 1024} KB).` };
     }
     if (!this.get(id) && this.kept().length >= MAX_RULES) {
-      return { ok: false, message: `A hub holds up to ${MAX_RULES} rules.` };
+      return { ok: false, message: `Rule limit reached (${MAX_RULES}).` };
     }
     await this.#write(id, text);
     const hash = hashOf(checked.rule);
@@ -213,7 +213,7 @@ export class RuleStore {
     if (p.hash !== hash) {
       return {
         ok: false,
-        message: "This rule changed since you opened it. Look at it again before approving.",
+        message: "This rule changed since you opened it. Review it again before approving.",
       };
     }
     const problems = check(id, p.rule);
@@ -244,7 +244,9 @@ export class RuleStore {
   /** Switch an approved rule on, off, or to test. Or, for the hub alone, stop it with a reason. */
   setState(id: string, state: RuleState, who: Who, why?: string): Outcome {
     const before = this.get(id);
-    if (!before) return { ok: false, message: "Rule not found. Only an approved rule can be switched." };
+    if (!before) {
+      return { ok: false, message: "Rule not found. Only approved rules can be enabled or disabled." };
+    }
     if (before.state === state && !why) return { ok: true };
     this.#db.prepare("UPDATE automations SET state = ?, stopped = ? WHERE id = ?").run(
       state,

@@ -558,7 +558,13 @@ function drawTags() {
 $("newTag").onclick = () => editTag({});
 
 // --- Automations: rules the hub runs by itself ---
-const RULE_STATES = { on: "On", off: "Off", test: "Test", stopped: "Stopped", waiting: "Waiting" };
+const RULE_STATES = {
+  on: "Enabled",
+  off: "Disabled",
+  test: "Test mode",
+  stopped: "Stopped",
+  waiting: "Waiting",
+};
 const STARTER = {
   kind: "automation",
   name: "",
@@ -582,7 +588,8 @@ function editRule(id, rule) {
       text,
       el("p", {
         className: "help",
-        textContent: "Saving does not turn it on. It is listed for approval, with what it would do in words.",
+        textContent:
+          "Saved rules are not enabled. Each is listed for approval with a description of what it does.",
       }),
     );
   }, () => call("/admin/api/automation/save", { id: $("ruleId").value.trim(), text: $("ruleText").value }));
@@ -647,9 +654,7 @@ function drawAutomations(a) {
   ];
   const status = $("autoStatus");
   status.className = "status" + (a.paused.all ? " bad" : a.rules.some((r) => r.state === "on") ? " ok" : "");
-  status.textContent = a.paused.all
-    ? "Paused. No automation runs."
-    : a.rules.filter((r) => r.state === "on").length + " on";
+  status.textContent = a.paused.all ? "Paused" : a.rules.filter((r) => r.state === "on").length + " enabled";
   const pauses = $("autoPauses");
   pauses.innerHTML = "";
   const pause = button(
@@ -669,7 +674,7 @@ function drawAutomations(a) {
 
   const waiting = $("autoProposed");
   waiting.innerHTML = "";
-  if (a.proposed.length) waiting.append(el("h3", { textContent: "Waiting for approval" }));
+  if (a.proposed.length) waiting.append(el("h3", { textContent: "Pending approval" }));
   for (const p of a.proposed) {
     const changes = a.rules.some((r) => r.id === p.id);
     const item = el(
@@ -690,8 +695,8 @@ function drawAutomations(a) {
             el("p", {
               className: "help",
               textContent: changes
-                ? "This replaces the version running now."
-                : "It starts off. Turn it on, or try it in Test first.",
+                ? "Replaces the current version."
+                : "Approved rules start disabled. Enable it, or use Test mode first.",
             }),
           );
           confirmField(b);
@@ -742,18 +747,18 @@ function drawAutomations(a) {
         if (!r.locked) return done(r);
       }
       ask(
-        "Turn on " + v.name,
+        "Enable " + v.name,
         (x) => {
           x.append(el("p", { className: "dim", textContent: v.sentence }));
           confirmField(x);
         },
         go,
-        "Turn on",
+        "Enable",
       );
     };
-    if (v.state !== "on" && v.state !== "waiting") row.append(button("Turn on", state("on")));
+    if (v.state !== "on" && v.state !== "waiting") row.append(button("Enable", state("on")));
     if (v.state === "on" || v.state === "waiting" || v.state === "test") {
-      row.append(button("Turn off", state("off")));
+      row.append(button("Disable", state("off")));
     }
     if (v.state !== "test") row.append(button("Test", state("test")));
     if (v.state === "on" || v.state === "test") {

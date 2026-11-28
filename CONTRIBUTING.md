@@ -206,6 +206,9 @@ names, "driver", "sandbox", "payload", "capability".
 | Approve · Approve all · Confirm             | Say yes to all · Yes, do it                           |
 | Tested with hardware · Tested in simulation | Used with the real device · Tested against a stand-in |
 | Restart · Update · Check for updates        | Release it · Look now                                 |
+| Enable · Disable · Enabled · Disabled       | Turn on · Turn off · On · Off                         |
+| Pending approval · Condition not met        | Waiting for a yes · It could not tell                 |
+| Max steps · Max output tokens · Rate limit  | Steps per question · Room to answer · Ran too often   |
 
 Errors say what failed, then why, then what to do: "Connection failed: check the IP address. Error: connect
 ECONNREFUSED 192.168.1.20:6467". They do not apologize and are never vague.
