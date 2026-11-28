@@ -16,6 +16,7 @@ import {
   type Condition,
   type Day,
   DAYS,
+  LIMITS,
   minuteOf,
   type Mode,
   type Operand,
@@ -24,6 +25,7 @@ import {
   type Scale,
   type Step,
 } from "./format.ts";
+import { type Ranged, writeOut } from "./ranges.ts";
 
 export type CTrigger =
   | { how: "rises" | "falls"; at: At; mark: number; within?: number }
@@ -39,12 +41,20 @@ interface Shaping {
   max?: number;
   over?: number;
 }
-export type CStep =
-  | { wait: number }
+/** One thing done to one value. */
+export type CAct =
   | ({ at: At; does: "set"; value: Value } & Shaping)
   | { at: At; does: "press" }
   | ({ at: At; does: "from"; from: At; scale?: Scale } & Shaping)
   | ({ at: At; does: "add" | "multiply"; by: number } & Shaping);
+export type CStep =
+  | { wait: number }
+  /** Done at the same moment. `of` is the name with a range they were written out from, when they were. */
+  | { together: CAct[]; of?: Ranged }
+  | CAct;
+/** Every single thing a list of steps does, with what is done together laid flat. */
+export const acts = (steps: CStep[]): CAct[] =>
+  steps.flatMap((s) => ("wait" in s ? [] : "together" in s ? s.together : [s]));
 
 export interface Compiled {
   id: string;
@@ -92,9 +102,11 @@ const dayNumbers = (days?: Day[]) => (days ? { days: days.map((d) => DAYS.indexO
  */
 export function compile(
   id: string,
-  rule: Rule,
+  written: Rule,
   world: World,
 ): { compiled?: Compiled; problems: string[]; missing: string[] } {
+  // Names with a range are written out first. From here on the rule has none.
+  const { rule, origins } = writeOut(written);
   const problems: string[] = [], missing = new Set<string>();
   const sources = world.sources();
   const say = (where: string, what: string) =>
@@ -124,7 +136,8 @@ export function compile(
       }
       source = having[0];
     }
-    const at = { device: source.id, key: ref.key };
+    const of = origins.get(ref);
+    const at: At = { device: source.id, key: ref.key, ...(of ? { of } : {}) };
     const found = world.vocabulary.resolve(source.capabilities, ref.key);
     if (!found) {
       say(where, `${source.name} has no value called ${ref.key}`);
@@ -192,6 +205,18 @@ export function compile(
     list.map((s, i): CStep => {
       const here = `${where}[${i}]`;
       if ("wait" in s) return { wait: s.wait };
+      if ("together" in s) {
+        const of = origins.get(s);
+        // Written out from a range, what is wrong with one of them is wrong with the name they came from.
+        const each = s.together.flatMap((x, j) =>
+          "wait" in x || "together" in x ? [] : [act(of ? here : `${here}.together[${j}]`, x)]
+        );
+        return { together: each, ...(of ? { of } : {}) };
+      }
+      return act(here, s);
+    });
+  const act = (here: string, s: Exclude<Step, { wait: number } | { together: Step[] }>): CAct => {
+    {
       const { at, kind } = find(here, s, "write");
       const shaping: Shaping = {
         ...(s.min !== undefined ? { min: s.min } : {}),
@@ -238,7 +263,8 @@ export function compile(
         if (bad) say(here, bad.message);
       } else fits(`${here}.value`, at, kind, s.value);
       return { at, does: "set", value: s.value, ...shaping };
-    });
+    }
+  };
 
   const form: Compiled["form"] = rule.link ? "link" : rule.follow ? "follow" : rule.while ? "while" : "when";
   const triggers: CTrigger[] = (rule.when ?? []).map((t, i): CTrigger => {
@@ -307,13 +333,11 @@ export function compile(
     else if (t.how !== "at") read.push(t.at);
   }
   for (const c of [cond, during, cancel]) if (c) reads(c, read);
-  const every = [...doing, ...otherwise];
-  for (const s of every) if ("does" in s && s.does === "from") read.push(s.from);
+  const every = acts([...doing, ...otherwise]);
+  for (const s of every) if (s.does === "from") read.push(s.from);
   // What it adds to, multiplies or moves over time, it reads first.
   for (const s of every) {
-    if ("does" in s && (s.does === "add" || s.does === "multiply" || ("over" in s && s.over !== undefined))) {
-      read.push(s.at);
-    }
+    if (s.does === "add" || s.does === "multiply" || ("over" in s && s.over !== undefined)) read.push(s.at);
   }
   if (follow) read.push(follow.from);
   // Every linked value is read, to know it moved, and set, to match the one that did.
@@ -331,10 +355,13 @@ export function compile(
     }
     link = once(found.map((f) => f.at));
     if (link.length < found.length) say("link", "the same value is listed more than once");
+    if (link.length < 2 || link.length > LIMITS.linked) {
+      say("link", `stands for ${link.length} values; a link is 2 to ${LIMITS.linked}`);
+    }
     read.push(...link);
   }
   const writes = once([
-    ...every.flatMap((s) => ("at" in s ? [s.at] : [])),
+    ...every.map((s) => s.at),
     ...(follow ? [follow.to] : []),
     ...(link ?? []),
   ]);

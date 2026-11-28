@@ -64,6 +64,12 @@ export function triggerWords(t: CTrigger, name: Namer): string {
 
 export function stepWords(s: CStep, name: Namer): string {
   if ("wait" in s) return `wait ${seconds(s.wait)}`;
+  if ("together" in s) {
+    // Written out from one name with a range, they are said once, by that name. Otherwise each is said.
+    if (s.of) return stepWords(s.together[0], name);
+    const each = s.together.map((x) => stepWords(x, name));
+    return `at once: ${each.slice(0, -1).join(", ")} and ${each.at(-1)}`;
+  }
   if (s.does === "press") return `press ${name(s.at)}`;
   const limits = [
     ...(s.min !== undefined ? [`at least ${s.min}`] : []),
@@ -88,8 +94,14 @@ export function sentence(c: Compiled, name: Namer): string {
   const list = (steps: CStep[]) => steps.map((s) => stepWords(s, name)).join(", then ");
   if (c.link) {
     // Every one of them is in what the rule can set, listed beside this. Here, enough to know the rule by.
-    const shown = c.link.slice(0, 3).map(name);
-    const more = c.link.length - shown.length;
+    // Values written out from one name with a range are said once, by that name.
+    const names = [...new Set(c.link.map(name))];
+    if (names.length === 1) {
+      return `${names[0]} are linked (${c.link.length} values): changing any one sets the others to match` +
+        (c.cond ? `, while ${conditionWords(c.cond, name)}` : "") + ".";
+    }
+    const shown = names.slice(0, 3);
+    const more = names.length - shown.length;
     const all = more > 0
       ? `${shown.join(", ")} and ${more} more`
       : `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}`;
@@ -112,9 +124,11 @@ export function sentence(c: Compiled, name: Namer): string {
     return `As soon as ${conditionWords(c.during, name)}: ${list(c.steps)}.` +
       (c.otherwise.length ? ` When that ends: ${list(c.otherwise)}.` : "") + stops;
   }
-  const when = c.triggers.length
-    ? "When " + c.triggers.map((t) => triggerWords(t, name)).join(", or when ")
-    : "When it is run";
+  // Triggers written out from one name with a range read the same, and are said once, as any of them.
+  const said = [
+    ...new Set(c.triggers.map((t) => ("at" in t && t.at.of ? "any of " : "") + triggerWords(t, name))),
+  ];
+  const when = said.length ? "When " + said.join(", or when ") : "When it is run";
   const cond = c.cond ? `, if ${conditionWords(c.cond, name)}` : "";
   return `${when}${cond}: ${list(c.steps)}.${stops}`;
 }

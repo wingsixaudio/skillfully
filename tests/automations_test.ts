@@ -476,7 +476,8 @@ Deno.test("the hub stops what runs away: a loop, a rule that runs too often, and
   // A rule set off more often than it is allowed is stopped until a person turns it back on.
   await hub.rules.remove("ping", who);
   await hub.rules.remove("pong", who);
-  await rule(hub, "busy", { do: [{ key: "tag/text/note", value: "x" }] });
+  // Set off again, it starts again, so every press is a run however quickly one follows another.
+  await rule(hub, "busy", { mode: "restart", do: [{ key: "tag/text/note", value: "x" }] });
   let last;
   for (let i = 0; i < 11; i++) last = await hub.hubDevice.set("automation/run/busy", true, who);
   assert(last && !last.ok && last.error.message.includes("rate limit exceeded"), JSON.stringify(last));

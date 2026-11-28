@@ -41,7 +41,7 @@ Deno.test("a link is checked like any rule: two or more values, each once, all a
       if: { key: "e/f", is: 1 },
     }).ok,
   );
-  bad({ link: [{ key: "a/b" }] }, "must be a list of 2 to 64 values");
+  bad({ link: [{ key: "a/b" }] }, "must be a list of 2 to 256 values");
   bad({ link: [{ key: "a/b" }, { key: "a/b" }] }, "listed more than once");
   bad({ link: [{ key: "a/b" }, { key: "c/d" }], do: [{ wait: 1 }] }, 'unknown field "do"');
   bad({ link: [{ key: "a/b" }, { key: "c/d", value: 1 }] }, 'unknown field "value"');

@@ -252,6 +252,15 @@ set of each other value and nothing goes round. Do not build this out of follow 
 loop: each hop is a round trip to the device, a drag leaves the far end trailing, and the hub's loop limit
 stops one of the rules, after which the ring is broken.
 
+One name can stand for many values. A key with parts in braces and a `range` saying what they stand for,
+`console/input/{input}/bus/{bus}/pan` with inputs 1 to 8 and buses 1 and 2, is sixteen values. Before anything
+else reads the rule, `core/automations/ranges.ts` writes every such name out, so what is checked, approved and
+run is exactly the rule someone would have typed by hand, and the reach shown at approval is still every
+single value. In a link, each is one of the linked values. On a trigger, any one of them fires the rule. On a
+step, the step is done to all of them at the same moment: it becomes one `together` step, which can also be
+written directly to do unrelated things at once. The next step waits for all of them. A range is said back to
+people as one name, "Send pan (input 1 to 8, bus 1, 2)", and never as sixteen lines.
+
 Time is the hub's own clock. A schedule fires once when the clock reaches its minute. One that passes while
 the hub is off is not run late, and is written to the log as missed. A fade is the hub sending steps toward
 the target thirty times a second. Anyone else setting that value, or already asking to, ends the fade where
