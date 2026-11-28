@@ -618,7 +618,8 @@ async def main():
 
         # --- Every other kind of piece, on a canvas of two pages ---
         import datetime
-        soon = (datetime.datetime.now() + datetime.timedelta(minutes=3)).strftime("%H:%M")
+        # Four minutes on, to the minute: between three and four are left now, and still over one when it is read.
+        soon = (datetime.datetime.now() + datetime.timedelta(minutes=4)).strftime("%H:%M")
         with open(os.path.join(canvas_dir, "every-piece.json"), "w") as f:
             json.dump({"kind": "canvas", "name": "Every piece", "pages": [
                 {"name": "Main", "pieces": [
@@ -660,7 +661,7 @@ async def main():
             await owner.wait_for_timeout(100)
         check("a choice tied to a value sets it, and the one the device now holds is lit", (await state("sim-switch"))["switch/outlet/4/on"] == (not was_on) and await outlet.get_by_role("radio", name="Off" if was_on else "On").get_attribute("aria-checked") == "true")
         left = (await cv.locator("#board .countdown .num").inner_text()).strip()
-        check("a countdown counts down to its time, marked as close in the last five minutes", left[0] in "234" and ":" in left and "soon" in await cv.locator("#board .countdown").get_attribute("class"), left)
+        check("a countdown counts down to its time, marked as close in the last five minutes", left[0] in "1234" and ":" in left and "soon" in await cv.locator("#board .countdown").get_attribute("class"), left)
         if shots: await owner.screenshot(path=f"{shots}/14-canvas-every-piece.png")
         await cv.locator("#board button.goto", has_text="Lights").click()
         await cv.locator("#board button.goto", has_text="Back").wait_for(timeout=5000)
