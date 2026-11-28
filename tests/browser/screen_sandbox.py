@@ -54,6 +54,11 @@ ASK = """([plugin, key, value]) => new Promise((res) => {
   setTimeout(() => res({ timeout: true }), 1500);
 })"""
 
+async def choose(frame, canvas_id):
+    """Open the list of canvases and choose one, as a person would."""
+    await frame.locator("#switchName").click()
+    await frame.locator(f'#switchList [data-id="{canvas_id}"]').click()
+
 async def main():
     async with async_playwright() as p:
         engine = os.environ.get("BROWSER", "chromium")
@@ -96,7 +101,7 @@ async def main():
             await owner.wait_for_timeout(250)
             if await owner.locator("#dlg[open]").count():
                 await confirm(); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
-        check("there are five places", await owner.locator("#places a").all_inner_texts() == ["Home", "Devices", "Screens", "People", "Hub"])
+        check("there are five places", await owner.locator("#places a").all_inner_texts() == ["Home", "Devices", "Screens", "People", "Settings"])
         check("a new owner starts at Home, which says how the hub is", await places_shown() == [""] and "All systems normal" in await owner.locator("#homeStatus").inner_text(), await owner.locator("#home").inner_text())
         check("Home lists each device and how it is", await owner.locator("#homeDeviceList a.line").count() == 2 and "Connected" in await owner.locator("#homeDeviceList").inner_text(), await owner.locator("#homeDeviceList").inner_text())
         check("with nothing waiting, nothing claims to need you", not await owner.locator("#needs").is_visible())
@@ -113,7 +118,7 @@ async def main():
         await owner.goto(base + "/admin/devices/no-such-thing"); await owner.wait_for_selector("#drivers .item")
         check("an address for a device that is not there says so and shows the ones that are", await owner.locator("#oneDeviceGone").is_visible() and await owner.locator("#drivers .item").count() == 2)
         # --- What is decided about each device is also a text file, and the Hub place says what the files hold ---
-        await place("Hub"); await owner.wait_for_selector("#secConfig:not([hidden]) #configList p")
+        await place("Settings"); await owner.wait_for_selector("#secConfig:not([hidden]) #configList p")
         told = await owner.locator("#secConfig").inner_text()
         check("the Hub place says where each device's decisions are kept as text", "/config/devices" in told and "Secrets are never written" in told, told)
         check("and that the files say what the hub says, when nobody has edited one", "In sync. No pending changes." in told, told)
@@ -208,9 +213,11 @@ async def main():
         await linked_when_late("the frame's own script", "**/_hub/shell.js")
         await linked_when_late("the screen's page", "**/screens/one-fader/index.html")
         check("it knows which ear mix is Sam's", "bus 1" in await fr.inner_text("#inputName"), await fr.inner_text("#inputName"))
-        check("the shell shows who is signed in", await pg.inner_text("#who") == "Sam")
-        links = await pg.locator("#links a").all_text_contents()
-        check("Sam's menu has the ear mix and the account, and no superuser tools", links == ["One fader", "Account"], str(links))
+        await pg.locator("#barWho", has_text="S").wait_for()
+        check("the bar shows who is signed in, as initials", await pg.inner_text("#barWho") == "S" and await pg.get_attribute("#barWho", "aria-label") == "Account: Sam")
+        tabs = await pg.locator("#barList a").all_text_contents()
+        await pg.click("#barWho"); menu = await pg.locator("#barMenu").inner_text(); await pg.click("#barWho")
+        check("Sam's screens are the ear mix alone; the account menu has the account and no admin", tabs == ["One fader"] and "Account" in menu and "Sign out" in menu and "Admin" not in menu and await pg.locator("#barAdmin").is_hidden(), f"{tabs} {menu}")
 
         # Drag the fader. Pointer moves from a mouse reach the page the same way a finger's do, in every engine.
         box = await (await fr.query_selector("#fader")).bounding_box()
@@ -504,18 +511,18 @@ async def main():
             json.dump({"kind": "canvas", "name": "<img src=x onerror=parent.postMessage({type:'set'},'*')>", "pages": [{"name": "<b>One</b>", "pieces": [{"type": "label", "at": [1, 1, 4, 1], "text": "<script>document.title='run'</script><img src=x>"}, {"type": "label", "at": [1, 2, 4, 1], "text": "second"}]}]}, f)
         await owner.goto(base + "/s/canvas")
         cv = owner.frame_locator("#screen")
-        await cv.locator("#pick option").nth(4).wait_for(state="attached", timeout=8000)
-        names = await cv.locator("#pick option").all_inner_texts()
+        await cv.locator("#switchList [data-id]").nth(4).wait_for(state="attached", timeout=8000)
+        names = await cv.locator("#switchList [data-id]").all_text_contents()
         check("canvases written as files are there beside the one made on the page", names == ["<img src=x onerror=parent.postMessage({type:'set'},'*')>", "Half written", "Run sheet", "Stage lamp", "Switcher"], str(names))
-        await cv.locator("#pick").select_option("words"); await cv.locator("#board .label").first.wait_for()
-        check("every word of a canvas is shown as words and never run", await cv.locator("#board img, #board script, #pick img").count() == 0 and "<script>" in await cv.locator("#board .label").first.inner_text() and await next(f for f in owner.frames if "/screens/canvas/" in f.url).title() == "Skillfully: canvas")
-        await cv.locator("#pick").select_option("broken"); await cv.locator("#blank li").first.wait_for()
+        await choose(cv, "words"); await cv.locator("#board .label").first.wait_for()
+        check("every word of a canvas is shown as words and never run", await cv.locator("#board img, #board script, #switchList img").count() == 0 and "<script>" in await cv.locator("#board .label").first.inner_text() and await next(f for f in owner.frames if "/screens/canvas/" in f.url).title() == "Skillfully: canvas")
+        await choose(cv, "broken"); await cv.locator("#blank li").first.wait_for()
         told = await cv.locator("#blank").inner_text()
         check("a canvas that cannot be drawn says which file and what is wrong with it", "Canvas has errors" in told and "broken.json" in told and "Page 1, piece 1 (slider)" in told and "needs a key such as" in told, told)
         # From here, note every value the hub sends this screen.
         canvas_frame = next(f for f in owner.frames if "/screens/canvas/" in f.url)
         await canvas_frame.evaluate("() => { window.heard = []; addEventListener('message', (e) => { if (e.data && e.data.type === 'state') window.heard.push(...Object.keys(e.data.values)); }); }")
-        await cv.locator("#pick").select_option("switcher"); await cv.locator("#board button.piece", has_text="Outlet 3").wait_for(timeout=8000)
+        await choose(cv, "switcher"); await cv.locator("#board button.piece", has_text="Outlet 3").wait_for(timeout=8000)
         await owner.wait_for_timeout(300)
         heard = await canvas_frame.evaluate("() => window.heard")
         check("a canvas tells the hub which values it is showing, and is sent those and no others", 8 <= len(set(heard)) <= 16 and all(k.startswith(("switch/outlet/", "generic/")) for k in heard), f"{len(set(heard))} values: {sorted(set(heard))[:6]}")
@@ -527,8 +534,8 @@ async def main():
                 {"type": "slider", "at": [1, 2, 4, 1], "key": "generic/action/level", "device": lamp_id, "sends": "level", "min": 0, "max": 100, "shows": {"key": "generic/reading/level"}, "title": "Level"}]}]}, f)
         await owner.goto(base + "/s/canvas")
         cv = owner.frame_locator("#screen")
-        await cv.locator("#pick option", has_text="Lamp level").wait_for(state="attached", timeout=8000)
-        await cv.locator("#pick").select_option("lamp-level")
+        await cv.locator("#switchList [data-id]", has_text="Lamp level").wait_for(state="attached", timeout=8000)
+        await choose(cv, "lamp-level")
         knob = cv.locator("#board .slider")
         await knob.wait_for()
         now = cv.locator("#board .readout .num")
@@ -567,8 +574,8 @@ async def main():
                 {"name": "Lights", "pieces": [{"type": "goto", "at": [1, 1, 2, 1], "page": "Main", "title": "Back"}]}]}, f)
         await owner.goto(base + "/s/canvas")
         cv = owner.frame_locator("#screen")
-        await cv.locator("#pick option", has_text="Every piece").wait_for(state="attached", timeout=8000)
-        await cv.locator("#pick").select_option("every-piece")
+        await cv.locator("#switchList [data-id]", has_text="Every piece").wait_for(state="attached", timeout=8000)
+        await choose(cv, "every-piece")
         await cv.locator("#board .updown").wait_for()
         await owner.wait_for_timeout(600)
         check("every new kind of piece is drawn, and none says it cannot be used", await cv.locator("#board .piece").count() == 7 and await cv.locator("#board .piece.off").count() == 0, f"{await cv.locator('#board .piece').count()} drawn, {await cv.locator('#board .piece.off').count()} off")
@@ -601,7 +608,7 @@ async def main():
         await cv.locator("#board button.goto", has_text="Back").click()
         await cv.locator("#board .updown").wait_for(timeout=5000)
         check("a page button goes to its page, and one there comes back", True)
-        await cv.locator("#pick").select_option("lamp-level")
+        await choose(cv, "lamp-level")
         knob = cv.locator("#board .slider"); now = cv.locator("#board .readout .num")
         await knob.wait_for()
 
@@ -622,7 +629,7 @@ async def main():
             if (await now.inner_text()).strip() == "50": break
             await owner.wait_for_timeout(100)
         check("and drawn larger, a slider still lands where the pointer let it go", (await now.inner_text()).strip() == "50", await now.inner_text())
-        await cv.locator("#pick").select_option("every-piece"); await cv.locator("#board .updown").wait_for()
+        await choose(cv, "every-piece"); await cv.locator("#board .updown").wait_for()
         await owner.wait_for_timeout(300)
         fits = await next(f for f in owner.frames if "/screens/canvas/" in f.url).evaluate("() => { const b = document.querySelector('#board').getBoundingClientRect(); return [Math.round(b.width), Math.round(b.bottom), innerHeight]; }")
         check("a taller canvas is drawn as large as fits on the screen, with nothing to scroll", fits[0] > 700 and fits[1] <= fits[2], str(fits))
@@ -637,7 +644,7 @@ async def main():
             filled = await canvas_frame.evaluate("() => { const b = document.querySelector('#board').getBoundingClientRect(); return [Math.round(b.width), Math.round(b.bottom), innerWidth, innerHeight]; }")
             check("full screen hides the bar, offers the way out, and the canvas still fills the screen", await owner.locator("#bar").is_hidden() and await owner.locator("#unfull").is_visible() and filled[0] > filled[2] - 60 and filled[1] <= filled[3], str(filled))
             if shots: await owner.screenshot(path=f"{shots}/13c-canvas-full-screen.png")
-            check("in full screen a canvas is controls only: no name, no Arrange, no Canvases", await cv.locator("#arrange").is_hidden() and await cv.locator("#more").is_hidden() and await cv.locator("h1").is_hidden() and await cv.locator("#pick").is_hidden())
+            check("in full screen a canvas is controls only: no name, no Edit, no list of canvases", await cv.locator("#arrange").is_hidden() and await cv.locator("h1").is_hidden() and await cv.locator("#switcher").is_hidden())
             await owner.mouse.move(700, 4)
             await owner.locator("#unfull").click()
             await owner.locator("#bar").wait_for(timeout=5000)
@@ -669,8 +676,8 @@ async def main():
         await owner.set_viewport_size({"width": 390, "height": 844})
         await owner.goto(base + "/s/canvas")
         cv = owner.frame_locator("#screen")
-        await cv.locator("#pick option").nth(4).wait_for(state="attached", timeout=8000)
-        await cv.locator("#pick").select_option("switcher"); await cv.locator("#board button.piece", has_text="Outlet 3").wait_for(timeout=8000)
+        await cv.locator("#switchList [data-id]").nth(4).wait_for(state="attached", timeout=8000)
+        await choose(cv, "switcher"); await cv.locator("#board button.piece", has_text="Outlet 3").wait_for(timeout=8000)
         canvas_frame = next(f for f in owner.frames if "/screens/canvas/" in f.url)
         lamp_on = cv.locator("#board button.piece", has_text="Lamp on")
         check("a button is lit by a reading of its device", "lit" in await lamp_on.get_attribute("class") and "lit" not in await cv.locator("#board button.piece", has_text="Lamp off").get_attribute("class"), await lamp_on.get_attribute("class"))
@@ -680,7 +687,7 @@ async def main():
         await cv.locator("#board button.piece.lit", has_text="Outlet 3").wait_for(timeout=5000)
         check("a repeated row of buttons: the one pressed turns the outlet on and lights up", not was and (await state("sim-switch"))["switch/outlet/3/on"] is True)
         if shots: await owner.screenshot(path=f"{shots}/10b-canvas-switcher.png")
-        await cv.locator("#pick").select_option("run-sheet"); await cv.locator("#board .clock .num").wait_for()
+        await choose(cv, "run-sheet"); await cv.locator("#board .clock .num").wait_for()
         check("one canvas holds pieces of several devices, and a clock", re.match(r"^\d{1,2}:\d\d:\d\d", await cv.locator("#board .clock .num").inner_text()) is not None and await cv.locator("#board .readout .num").inner_text() == "on" and await cv.locator("#board button.piece[aria-pressed]").count() == 2, await cv.locator("#board").inner_text())
         house = cv.locator("#board .slider", has_text="House lights")
         box = await house.locator(".track").bounding_box()
@@ -693,7 +700,7 @@ async def main():
         check("a slider lying down sets the brightness it is dragged to", abs(dim - 30) <= 3 and await house.locator(".num").inner_text() == f"{round(dim)}%", f"{dim} {await house.locator('.num').inner_text()}")
         if shots: await owner.screenshot(path=f"{shots}/10c-canvas-run-sheet.png")
         # The owner adds the ear-mix canvas. Nobody has set the owner's own ears, and it says so.
-        await cv.locator("#more").click()
+        await cv.locator("#switchName").click(); await cv.locator("#newCanvas").click()
         await cv.locator("#shelf .item", has_text="My monitor mix").get_by_role("button", name="Add").click()
         await cv.locator("#board .slider").first.wait_for(timeout=8000)
         check("a piece that needs something nobody has set for you says so, and sends nothing", await cv.locator("#board .slider.off").count() == 8 and "Not assigned" in await cv.locator("#board .slider").first.inner_text(), await cv.locator("#board .slider").first.inner_text())
@@ -711,7 +718,7 @@ async def main():
         await pg.goto(base + "/s/canvas")
         sv = pg.frame_locator("#screen")
         await sv.locator("#board .slider").first.wait_for(timeout=10000)
-        check("Sam is shown the one canvas with anything of Sam's on it, and no way to add, arrange or remove one", await sv.locator("#name").inner_text() == "My monitor mix" and not await sv.locator("#pick").is_visible() and not await sv.locator("#more").is_visible() and not await sv.locator("#arrange").is_visible(), await sv.locator("header").inner_text())
+        check("Sam is shown the one canvas with anything of Sam's on it, and no way to add, arrange or remove one", await sv.locator("#name").inner_text() == "My monitor mix" and not await sv.locator("#switcher").is_visible() and not await sv.locator("#arrange").is_visible(), await sv.locator("header").inner_text())
         strips = await sv.locator("#board .slider .name").all_inner_texts()
         check("each strip takes its name from the board", len(strips) == 8 and strips[1] == (await state("sim-console"))["console/input/2/name"], str(strips))
         two = sv.locator("#board .slider").nth(1)
@@ -746,7 +753,7 @@ async def main():
             with open(os.path.join(canvas_dir, name + ".json")) as f: return json.load(f)
         async def cells(locator):
             return await locator.evaluate("(e) => [e.style.gridColumn, e.style.gridRow].join(' | ')")
-        await cv.locator("#pick").select_option("run-sheet"); await cv.locator("#board .clock .num").wait_for()
+        await choose(cv, "run-sheet"); await cv.locator("#board .clock .num").wait_for()
         before = on_disk("run-sheet")
         await cv.locator("#arrange").click(); await cv.locator("#board .cell").first.wait_for()
         check("arranging shows the grid, and a bar with what can be done", await cv.locator("#bar #done").is_visible() and await cv.locator("#bar #undo").is_disabled() and not await cv.locator("#pick").is_visible())
@@ -796,7 +803,7 @@ async def main():
         await cv.locator("#cancel").click(); await cv.locator("#arrange").wait_for()
         check("and then nothing is kept", on_disk("run-sheet")["pages"][0]["pieces"] == after and await cv.locator("#board button.piece", has_text="Band back").count() == 1)
         # A canvas from nothing: named, a group that repeats, and a second page.
-        await cv.locator("#more").click(); await cv.locator("#startEmpty").click(); await cv.locator("#setName").wait_for()
+        await cv.locator("#switchName").click(); await cv.locator("#newCanvas").click(); await cv.locator("#startEmpty").click(); await cv.locator("#setName").wait_for()
         await cv.locator("#setName").fill("Video desk"); await cv.locator("#setName").blur()
         await cv.locator("#addPiece").select_option("button"); await cv.locator("#pickFind").fill("outlet 1 on")
         await cv.locator("#pickList .pick").first.click(); await cv.locator("#groupPiece").click()
@@ -821,7 +828,15 @@ async def main():
         check("a new canvas is kept under a file name made from its name", made["name"] == "Video desk" and [p["name"] for p in made["pages"]] == ["Page 1", "Lamp"] and made["pages"][1]["pieces"][0]["type"] == "clock", json.dumps(made)[:300])
         check("a piece put in a group and repeated is written once, with the item's name in its key", row["type"] == "group" and row["repeat"] == {"as": "n", "from": 1, "to": 4} and row["pieces"][0]["key"] == "switch/outlet/{n}/on", json.dumps(row))
         await cv.locator("#board button.piece").nth(3).wait_for(timeout=8000)
-        check("and it is drawn four times, opened as soon as it is kept", await cv.locator("#board button.piece").count() == 4 and await cv.locator("#pick").input_value() == "video-desk", str(await cv.locator("#board button.piece").all_inner_texts()))
+        check("and it is drawn four times, opened as soon as it is kept", await cv.locator("#board button.piece").count() == 4 and await cv.locator("#switchList [aria-current]").get_attribute("data-id") == "video-desk", str(await cv.locator("#board button.piece").all_inner_texts()))
+
+        # Deleting a canvas is in Edit, under Settings, and asks twice.
+        await cv.locator("#arrange").click(); await cv.locator("#canvasSheet").click()
+        await cv.locator("#deleteCanvas").click()
+        check("Delete canvas asks to be confirmed", await cv.locator("#deleteCanvas").inner_text() == "Confirm delete" and await cv.locator("#switchList [data-id='video-desk']").count() == 1)
+        await cv.locator("#deleteCanvas").click(); await cv.locator("#arrange").wait_for()
+        await cv.locator("#switchList [data-id='video-desk']").wait_for(state="detached", timeout=8000)
+        check("confirmed, the canvas is gone, and another one is shown", await cv.locator("#switchList [aria-current]").get_attribute("data-id") != "video-desk")
 
         # --- Someone who can only write files proposes a change. The hub does what is safe, and asks about the rest ---
         await owner.goto(base + "/admin/hub"); await owner.wait_for_selector("#secConfig:not([hidden]) #configTrust")
@@ -888,7 +903,7 @@ async def main():
         # --- Asking it something. It thinks with a pretend model on this computer. ---
         model = f"http://127.0.0.1:{os.environ.get('MODEL_PORT', '7009')}"
         heard = lambda: json.loads(urllib.request.build_opener(urllib.request.ProxyHandler({})).open(model + "/heard").read())
-        await place("Hub"); await owner.wait_for_selector("#agentStatus")
+        await place("Settings"); await owner.wait_for_selector("#agentStatus")
         told = await owner.locator("#secAgent").inner_text()
         check("on, it can be asked something, and the card says it can see no devices yet and how to change that", await owner.locator("#agentAsk").is_visible() and "No devices. Assign a role" in told, told)
         await owner.click("#agentModelSet"); await owner.fill("#agentAddress", model); await ok_dialog()
@@ -901,7 +916,7 @@ async def main():
         await robin.get_by_role("button", name="Roles").click()
         await owner.locator("#dlgBody label.check", has_text="Musician").locator("input").check()
         await ok_dialog()
-        await place("Hub"); await owner.locator("#secAgent", has_text="Access").wait_for()
+        await place("Settings"); await owner.locator("#secAgent", has_text="Access").wait_for()
         await owner.wait_for_function("() => /Access\\s+Simulated board\\./.test(document.querySelector('#secAgent').innerText)")
         check("given a role, the card names the devices it can now see", True)
         await owner.fill("#agentQuestion", "Is anything not working?"); await owner.press("#agentQuestion", "Enter")
@@ -916,11 +931,11 @@ async def main():
         if shots: await owner.screenshot(path=f"{shots}/13-agent-asked.png", full_page=True)
 
         # --- Which version this is ---
-        await place("Hub"); await owner.wait_for_selector("#version .item")
+        await place("Settings"); await owner.wait_for_selector("#version .item")
         check("the Hub place says which version is running, and a hub run from its source says it is not updated by a button", "Running from source" in await owner.locator("#secVersion").inner_text() and await owner.locator("#versionGo").count() == 0)
 
         # --- Choosing its model from what its key can use ---
-        await place("Hub"); await owner.wait_for_selector("#agentModelSet")
+        await place("Settings"); await owner.wait_for_selector("#agentModelSet")
         await owner.click("#agentModelSet")
         await owner.locator("#agentModel option", has_text="Pretend Large 2 (pretend-large-2)").wait_for(state="attached", timeout=8000)
         options = await owner.locator("#agentModel option").all_inner_texts()
@@ -992,10 +1007,11 @@ async def main():
         await owner.goto(base + "/s/one-fader")
         link = owner.locator("#besides a", has_text="Ask")
         await link.wait_for()
-        await owner.click("#who")
-        places = await owner.locator("#links a").all_inner_texts()
-        await owner.click("#who")
-        check("Ask is a word in the bar and not one of the places to go, and the way to the settings is called Skillfully Config", "Ask" not in places and "Skillfully Config" in places and await owner.locator("#beside").is_hidden(), str(places))
+        await owner.click("#barHere")
+        places = await owner.locator("#barList a").all_inner_texts()
+        current = await owner.locator("#barList a[aria-current]").inner_text()
+        await owner.click("#barHere")
+        check("on a phone the screen you are on opens the list of screens; Ask is a word in the bar, not one of them; the admin pages are the gear", "Ask" not in places and current == "One fader" and await owner.locator("#barHere").inner_text() == "One fader" and await owner.locator("#barAdmin").is_visible() and await owner.locator("#beside").is_hidden(), str(places))
         await link.click()
         beside = owner.frame_locator("#besideFrame")
         await beside.locator("#name", has_text="Ask Robin").wait_for(timeout=8000)
@@ -1024,7 +1040,7 @@ async def main():
         await owner.set_viewport_size({"width": 390, "height": 844})
         sam_bar = await (await sam_ctx.new_page()).goto(base + "/s/one-fader")
         sam_page = sam_ctx.pages[-1]
-        await sam_page.wait_for_function("document.getElementById('who').textContent !== 'Menu'")
+        await sam_page.locator("#barWho", has_text="S").wait_for()
         check("someone who was not given Ask has no such word in their bar", await sam_page.locator("#besides a").count() == 0)
         await sam_page.close()
 
@@ -1050,7 +1066,7 @@ async def main():
         await beside.locator(".theirs", has_text="it was kept").wait_for(timeout=15000)
         await canvas_f.locator("#proposedNote").wait_for(state="hidden")
         await canvas_f.locator("#arrange").wait_for()
-        check("after the yes it is a canvas like any other: shown, live, and theirs to arrange", (await canvas_f.locator("#pick").is_visible() or await canvas_f.locator("#name").is_visible()) and await beside.locator(".waiting.done").inner_text() == "Approved" and "Drawn by Robin" in await canvas_f.locator("#board").inner_text() and await canvas_f.locator("#board").get_attribute("inert") is None and "Saved “drawn-by-robin” in Canvas" in await beside.locator("#talk").inner_text())
+        check("after the yes it is a canvas like any other: shown, live, and theirs to arrange", (await canvas_f.locator("#switcher").is_visible() or await canvas_f.locator("#name").is_visible()) and await beside.locator(".waiting.done").inner_text() == "Approved" and "Drawn by Robin" in await canvas_f.locator("#board").inner_text() and await canvas_f.locator("#board").get_attribute("inert") is None and "Saved “drawn-by-robin” in Canvas" in await beside.locator("#talk").inner_text())
         if shots: await owner.screenshot(path=f"{shots}/21-canvas-kept.png")
         await owner.click("#besideClose")
         await owner.set_viewport_size({"width": 390, "height": 844})

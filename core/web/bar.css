@@ -1,0 +1,263 @@
+/* The bar across the top of every page a signed-in person uses. See bar.js. */
+#bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px;
+  padding: 6px max(12px,env(safe-area-inset-right)) 6px max(12px,env(safe-area-inset-left));
+  background: #000;
+  color: #f4f4f5;
+  font-family: "Montserrat",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size: 14px;
+}
+#bar[hidden] {
+  display: none;
+}
+#bar a,
+#bar button,
+#bar summary {
+  color: inherit;
+  text-decoration: none;
+  font: inherit;
+}
+#bar :focus-visible {
+  outline: 2px solid #f7941d;
+  outline-offset: 2px;
+}
+#barHome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 2px;
+  margin-right: 6px;
+  border-radius: 8px;
+  flex: none;
+}
+#barHome svg {
+  width: 26px;
+  height: 26px;
+}
+#barHome svg .core {
+  stroke: #f4f4f5;
+}
+#barHome svg .mod {
+  fill: #f7941d;
+}
+#barHome b {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+#barHome b span {
+  color: #f7941d;
+}
+
+/* The screens, as tabs. */
+#barTabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+/* The screen you are on is marked the way a tab is: brighter, with a line under it. */
+#barTabs a,
+#barExtras a {
+  position: relative;
+  color: #a1a1aa;
+  font-weight: 600;
+  padding: 8px 12px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+#barTabs a:hover,
+#barExtras a:hover {
+  color: #f4f4f5;
+}
+#barTabs a[aria-current],
+#barExtras a[aria-expanded="true"] {
+  color: #f4f4f5;
+}
+#barTabs a[aria-current]::after,
+#barExtras a[aria-expanded="true"]::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: #f7941d;
+}
+#besides {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+#barExtras {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* On a phone: the screen you are on, which lists the others. */
+#barSwitch {
+  display: none;
+  position: relative;
+  min-width: 0;
+}
+#barHere {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 8px 10px;
+  min-height: 40px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+#barHere::-webkit-details-marker {
+  display: none;
+}
+#barHere svg {
+  transition: transform .15s ease;
+}
+#barSwitch[open] #barHere svg {
+  transform: rotate(180deg);
+}
+
+/* The admin pages, and the account. */
+#barAdmin,
+#barWho {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+#barAdmin {
+  color: #a1a1aa;
+}
+#barAdmin:hover,
+#barAdmin[aria-current] {
+  color: #f4f4f5;
+}
+#barAdmin[aria-current] {
+  color: #f7941d;
+}
+#barAdmin[hidden] {
+  display: none;
+}
+#barAdmin svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#barAccount {
+  position: relative;
+  flex: none;
+}
+#barWho {
+  list-style: none;
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  height: 34px;
+  margin-left: 4px;
+  background: #3a2a14;
+  color: #f7c27a;
+  font-size: 13px;
+  font-weight: 700;
+}
+#barWho::-webkit-details-marker {
+  display: none;
+}
+#barAccount[open] #barWho,
+#barWho.here {
+  box-shadow: 0 0 0 2px #f7941d;
+}
+
+/* The lists those open. */
+#barList,
+#barMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 10;
+  background: #121214;
+  border: 1px solid #26262b;
+  border-radius: 12px;
+  padding: 6px;
+  min-width: 200px;
+  display: grid;
+  box-shadow: 0 12px 32px #000a;
+}
+#barList {
+  left: 0;
+}
+#barMenu {
+  right: 0;
+}
+#barList a,
+#barMenu a,
+#barMenu button {
+  display: block;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 15px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+#barList a:hover,
+#barMenu a:hover,
+#barMenu button:hover {
+  background: #26262b;
+}
+#barList a[aria-current],
+#barMenu a[aria-current] {
+  color: #f7941d;
+}
+#barMenu p {
+  margin: 0;
+  padding: 8px 12px 10px;
+  color: #a1a1aa;
+  font-size: 13px;
+  border-bottom: 1px solid #26262b;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 759px) {
+  #barHome b,
+  #barTabs {
+    display: none;
+  }
+  #barHome {
+    margin-right: 0;
+  }
+  #barSwitch {
+    display: block;
+  }
+  #barExtras a {
+    padding: 8px 10px;
+  }
+}

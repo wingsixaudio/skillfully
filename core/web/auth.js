@@ -68,8 +68,6 @@ async function start() {
     });
     $("lead").textContent += secretFields(rule, "New %", "Confirm new %");
     $("go").textContent = "Change " + what;
-    $("nav").append(el("a", { href: "/", textContent: "Home" }));
-    if (me.person.superuser) $("nav").append(el("a", { href: "/admin", textContent: "Skillfully Config" }));
     $("extra").hidden = false;
     const out = el("button", { className: "quiet", type: "button", textContent: "Sign out" });
     out.onclick = async () => {

@@ -60,18 +60,91 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    #pick {
+    .shelfHead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .shelfHead h2 {
+      margin: 0;
+    }
+    /* The canvas shown, which opens the list of the others and a way to start a new one. */
+    #switcher {
       flex: 1;
       min-width: 0;
-      font-size: 17px;
-      font-weight: 600;
+      position: relative;
     }
-    /* On a wide screen the list of canvases is as wide as a name needs, not the whole screen. */
-    @media (min-width: 900px) {
-      #pick {
-        flex: 0 1 360px;
-        margin-right: auto;
-      }
+    #switchName {
+      list-style: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 100%;
+      font-size: 19px;
+      font-weight: 600;
+      padding: 6px 10px;
+      margin-left: -10px;
+      border-radius: 10px;
+    }
+    #switchName::-webkit-details-marker {
+      display: none;
+    }
+    #switchName span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #switchName svg {
+      flex: none;
+    }
+    #switchName:hover {
+      background: var(--panel);
+    }
+    #switchName svg {
+      transition: transform .15s ease;
+    }
+    #switcher[open] #switchName svg {
+      transform: rotate(180deg);
+    }
+    #switchList {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: -10px;
+      z-index: 8;
+      min-width: 240px;
+      max-width: min(360px, calc(100vw - 24px));
+      max-height: 60vh;
+      overflow: auto;
+      background: var(--panel);
+      border: 1px solid var(--rail);
+      border-radius: 12px;
+      padding: 6px;
+      display: grid;
+      box-shadow: 0 12px 32px #000a;
+    }
+    #switchList button {
+      background: none;
+      text-align: left;
+      font-weight: 500;
+      padding: 10px 12px;
+      min-height: 0;
+      border-radius: 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #switchList button:hover {
+      background: var(--rail);
+    }
+    #switchList button[aria-current] {
+      color: var(--accent);
+    }
+    #switchList .new {
+      border-top: 1px solid var(--rail);
+      border-radius: 0 0 8px 8px;
+      margin-top: 4px;
     }
     .link {
       display: flex;
@@ -161,7 +234,7 @@
         row-gap: 8px;
       }
       h1,
-      #pick {
+      #switcher {
         order: 1;
         flex: 1 1 calc(100% - 60px);
       }
@@ -169,8 +242,7 @@
         order: 2;
       }
       #layouts,
-      #arrange,
-      #more {
+      #arrange {
         order: 3;
       }
       #layouts {
@@ -1112,11 +1184,14 @@
     <main>
       <header>
         <h1 id="name"></h1>
-        <select id="pick" aria-label="Canvas" hidden></select>
+        <details id="switcher" hidden>
+          <summary id="switchName" aria-label="Canvas"></summary>
+          <div
+            id="switchList"></div>
+        </details>
         <div id="layouts" role="group" aria-label="Layout" hidden><button type="button"
             data-which="desktop">Desktop</button><button type="button" data-which="mobile">Mobile</button></div>
-        <button id="arrange" class="quiet" type="button" hidden>Arrange</button>
-        <button id="more" class="quiet" type="button" aria-expanded="false" hidden>Canvases</button>
+        <button id="arrange" class="quiet" type="button" hidden>Edit</button>
         <div class="link"
           aria-live="polite"><i class="led" id="led"></i><span id="linkText">Connecting</span></div>
       </header>
@@ -1929,22 +2004,50 @@
       function drawHead() {
         const c = current();
         const showing = !arr && !!proposed;
-        const many = canvases.length > 1 && !arr && !showing;
+        // The name of the canvas shown. With others to go to, or a new one to start, it opens a list of them.
+        const many = (canvases.length > 1 || (mayCreate && canvases.length > 0)) && !arr && !showing;
         $("proposedNote").hidden = !showing;
         $("board").inert = showing;
         $("name").hidden = many;
-        $("pick").hidden = !many;
-        $("name").textContent = arr ? arr.doc.name : c ? c.doc.name || c.id : "Canvas";
-        const pick = $("pick");
-        pick.innerHTML = "";
+        $("switcher").hidden = !many;
+        const named = arr ? arr.doc.name : c ? c.doc.name || c.id : "Canvas";
+        $("name").textContent = named;
+        const label = $("switchName");
+        label.innerHTML = "";
+        label.append(
+          el("span", { textContent: shelf ? "New canvas" : named }),
+          chevron(),
+        );
+        const menu = $("switchList");
+        menu.innerHTML = "";
         for (const x of canvases) {
-          pick.append(
-            el("option", { value: x.id, textContent: String(x.doc.name || x.id), selected: x.id === chosen }),
-          );
+          const b = el("button", { type: "button", textContent: String(x.doc.name || x.id) });
+          b.dataset.id = x.id;
+          if (x.id === chosen && !shelf) b.setAttribute("aria-current", "true");
+          b.onclick = () => {
+            $("switcher").open = false;
+            chosen = x.id;
+            page = 0;
+            shelf = false;
+            draw();
+          };
+          menu.append(b);
         }
-        const more = $("more");
-        more.hidden = !(mayCreate || canvases.some((x) => x.write)) || !canvases.length || !!arr || showing;
-        more.setAttribute("aria-expanded", String(shelf));
+        if (mayCreate) {
+          const b = el("button", {
+            type: "button",
+            className: "new",
+            id: "newCanvas",
+            textContent: "+ New canvas",
+          });
+          b.onclick = () => {
+            $("switcher").open = false;
+            shelf = true;
+            toHub({ type: "docs", ref: ++ref }); // a file someone wrote a moment ago is picked up here
+            draw();
+          };
+          menu.append(b);
+        }
         $("arrange").hidden = !!arr || shelf || !c || !c.write || !!c.problems.length;
         // The two layouts, for a canvas that has both, and for anyone who may arrange one.
         const layouts = $("layouts");
@@ -2191,6 +2294,15 @@
           defs: () => defs,
           slots: () => me.slots || {},
           draw,
+          remove: (done) => {
+            asked.set(++ref, {
+              doc: (m) => {
+                if (m.ok) say(`Deleted ${doc.name || id}.`);
+                done(m);
+              },
+            });
+            toHub({ type: "doc-remove", id, ref });
+          },
           save: (_, made, done) => {
             // A new canvas takes its file name from the name it was given.
             const as = fresh ? unused(slug(made.name)) : id;
@@ -2244,7 +2356,27 @@
           });
         }
         if (mayCreate) {
-          box.append(el("h2", { textContent: canvases.length ? "New canvas" : "Create a canvas" }));
+          const head = el(
+            "div",
+            { className: "shelfHead" },
+            el("h2", {
+              textContent: canvases.length ? "New canvas" : "Create a canvas",
+            }),
+          );
+          if (canvases.length) {
+            const back = el("button", {
+              type: "button",
+              className: "quiet",
+              id: "shelfCancel",
+              textContent: "Cancel",
+            });
+            back.onclick = () => {
+              shelf = false;
+              draw();
+            };
+            head.append(back);
+          }
+          box.append(head);
           if (!starts.length) {
             box.append(el("p", {
               textContent:
@@ -2280,36 +2412,6 @@
                 { className: "item" },
                 el("div", {}, el("b", { textContent: s.name }), el("span", { textContent: s.about })),
                 add,
-              ),
-            );
-          }
-        }
-        const theirs = canvases.filter((c) => c.write);
-        if (theirs.length) {
-          box.append(el("h2", { textContent: "Canvases", style: mayCreate ? "margin-top:18px" : "" }));
-          for (const c of theirs) {
-            const remove = el("button", { type: "button", textContent: "Remove" });
-            remove.onclick = () => {
-              if (remove.textContent === "Remove") {
-                remove.textContent = "Confirm remove";
-                return setTimeout(() => (remove.textContent = "Remove"), 4000);
-              }
-              asked.set(++ref, {
-                doc: (m) => m.ok ? say(`Removed ${c.doc.name || c.id}.`) : say(m.message, true),
-              });
-              toHub({ type: "doc-remove", id: c.id, ref });
-            };
-            box.append(
-              el(
-                "div",
-                { className: "item" },
-                el(
-                  "div",
-                  {},
-                  el("b", { textContent: String(c.doc.name || c.id) }),
-                  el("span", { textContent: c.id + ".json" }),
-                ),
-                remove,
               ),
             );
           }
@@ -2368,17 +2470,31 @@
         toHub({ type: "watch", keys });
       }
 
-      $("pick").onchange = () => {
-        chosen = $("pick").value;
-        page = 0;
-        shelf = false;
-        draw();
-      };
-      $("more").onclick = () => {
-        shelf = !shelf;
-        if (shelf) toHub({ type: "docs", ref: ++ref }); // a file someone wrote a moment ago is picked up here
-        draw();
-      };
+      // The list of canvases closes when something else is chosen, or on Esc.
+      addEventListener("click", (e) => {
+        if ($("switcher").open && !$("switcher").contains(e.target)) $("switcher").open = false;
+      });
+      addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && $("switcher").open) {
+          $("switcher").open = false;
+          $("switchName").focus();
+        }
+      });
+      function chevron() {
+        const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        s.setAttribute("viewBox", "0 0 24 24");
+        s.setAttribute("width", "18");
+        s.setAttribute("height", "18");
+        s.setAttribute("aria-hidden", "true");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", "M6 9l6 6 6-6");
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", "currentColor");
+        path.setAttribute("stroke-width", "2");
+        path.setAttribute("stroke-linecap", "round");
+        s.append(path);
+        return s;
+      }
       document.addEventListener("visibilitychange", () => {
         if (!document.hidden && linked) toHub({ type: "docs", ref: ++ref });
       });

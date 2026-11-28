@@ -6,13 +6,13 @@
     <title>Home | Skillfully</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/_hub/hub.css">
+    <link rel="stylesheet" href="/_hub/bar.css">
   </head>
   <body class="admin">
+    {{ bar }}
     <main class="wide">
-      <header
-        class="brand"><svg viewBox="0 0 48 48" aria-hidden="true"><rect class="core" x="16" y="16" width="16" height="16" rx="4.5" fill="none" stroke-width="3.6"/><g class="mod"><rect x="19" y="3.5" width="10" height="7" rx="2.5"/><rect x="19" y="37.5" width="10" height="7" rx="2.5"/><rect x="3.5" y="19" width="7" height="10" rx="2.5"/><rect x="37.5" y="19" width="7" height="10" rx="2.5"/></g></svg><b>skillfully<span>.live</span></b><nav><a href="/">Your screens</a><a href="/account">Account</a></nav></header>
       <nav id="places"
-        aria-label="Places"><a href="/admin" data-go="1" data-place="">Home</a><a href="/admin/devices" data-go="1" data-place="devices">Devices</a><a href="/admin/screens" data-go="1" data-place="screens">Screens</a><a href="/admin/people" data-go="1" data-place="people">People</a><a href="/admin/hub" data-go="1" data-place="hub">Hub</a></nav>
+        aria-label="Places"><a href="/admin" data-go="1" data-place="">Home</a><a href="/admin/devices" data-go="1" data-place="devices">Devices</a><a href="/admin/screens" data-go="1" data-place="screens">Screens</a><a href="/admin/people" data-go="1" data-place="people">People</a><a href="/admin/hub" data-go="1" data-place="hub">Settings</a></nav>
       <p class="lockbar" id="lockbar"
         hidden><span id="lockLeft"></span> <button type="button" class="small quiet" id="lockNow">Lock now</button></p>
       <div class="place" data-place="">
@@ -132,6 +132,7 @@
         </form>
       </dialog>
     </main>
+    <script src="/_hub/bar.js"></script>
     <script src="/_hub/hub.js"></script>
     <script src="/_hub/admin.js"></script>
   </body>

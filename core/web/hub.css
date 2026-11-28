@@ -67,6 +67,17 @@ header.brand nav {
 a {
   color: var(--accent);
 }
+/* The bar across the top (bar.css), the width of the page whatever the page's own margins. */
+body > #bar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  margin: -16px calc(-1 * max(16px,env(safe-area-inset-right))) 12px calc(-1 *
+    max(16px,env(safe-area-inset-left)));
+}
+body > #bar ~ main header.brand {
+  display: none;
+}
 .card {
   background: var(--panel);
   border-radius: 16px;
@@ -386,6 +397,9 @@ body.admin {
   body.admin {
     padding-bottom: 40px;
     padding-left: 184px;
+  }
+  body.admin > #bar {
+    margin-left: -184px;
   }
 }
 .lockbar {

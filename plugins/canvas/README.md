@@ -11,7 +11,7 @@ A canvas is a JSON document. A person can write one, an agent can write one, and
 ```
 
 The name of the file is the canvas's id: lower-case letters, digits and dashes. The screen picks up a new file
-the next time someone opens it or taps Canvases.
+the next time someone opens it or opens the list of canvases.
 
 To a canvas, everything in the file is data. Every word is shown as text and nothing is run. What the person
 in front of a canvas may see and change is decided by the hub from their roles, whatever the canvas has on it.
@@ -210,9 +210,10 @@ needs a slot nobody has set for that person says so, and sends nothing.
 
 ## Arranging on the screen
 
-Someone who may arrange canvases has an Arrange button on each one, and "Blank canvas" to start from. Arrange
-works on the layout being shown; Desktop and Mobile switch between them while arranging too. Choosing Desktop
-for a canvas with no desktop layout offers to create one.
+The canvas's name at the top opens the list of canvases, and "New canvas" at the end of it for someone who may
+add them, with "Blank canvas" and ready-made ones to start from. Someone who may arrange canvases has an Edit
+button on each one; Edit works on the layout being shown; Desktop and Mobile switch between them while
+arranging too. Choosing Desktop for a canvas with no desktop layout offers to create one.
 
 - **Choose, then drag.** A first touch chooses a piece. Dragging a chosen piece moves it by whole cells, and
   dragging its corner sizes it. The arrow keys move it, and with Shift they size it.
@@ -221,6 +222,7 @@ for a canvas with no desktop layout offers to create one.
 - **The sheet** for a chosen piece holds everything the file can say about it. A number in its key can be
   switched to "each item of the group" or "each person's own" without typing braces.
 - **Put in a group**, then set the group to repeat, to turn one strip into eight.
+- **Settings** holds the canvas's name, columns, pages, and Delete canvas, which asks twice.
 - **Nothing is kept until Done.** Undo steps back one change at a time, and Cancel loses them all after
   asking. What Done keeps is checked first, and is the same file a person or an agent could have written.
 

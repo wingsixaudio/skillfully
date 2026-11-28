@@ -186,7 +186,7 @@
         type: "button",
         className: "quiet",
         id: "canvasSheet",
-        textContent: "Canvas",
+        textContent: "Settings",
       });
       canvas.setAttribute("aria-expanded", String(session.sheet === "canvas"));
       canvas.onclick = () => {
@@ -936,7 +936,7 @@
         })
         : null;
       box.append(
-        el("div", { className: "pickHead" }, el("h2", { textContent: "Canvas" }), close),
+        el("div", { className: "pickHead" }, el("h2", { textContent: "Canvas settings" }), close),
         field(
           "Name",
           text(doc.name, (v) => v.trim() && whole((x) => (x.name = v.trim().slice(0, 60))), {
@@ -988,6 +988,28 @@
       };
       tools.append(shift(-1, "Move page left"), shift(1, "Move page right"), drop);
       box.append(tools);
+      // The whole canvas, for one that has been kept. Asked twice, since it cannot be undone.
+      if (!host.fresh) {
+        const gone = el("button", {
+          type: "button",
+          className: "quiet bad",
+          id: "deleteCanvas",
+          textContent: "Delete canvas",
+        });
+        gone.onclick = () => {
+          if (gone.textContent === "Delete canvas") {
+            gone.textContent = "Confirm delete";
+            return setTimeout(() => (gone.textContent = "Delete canvas"), 4000);
+          }
+          gone.disabled = true;
+          host.remove((m) => {
+            gone.disabled = false;
+            if (!m.ok) return say(m.message, true);
+            host.done(false);
+          });
+        };
+        box.append(el("div", { className: "tools" }, gone));
+      }
     }
 
     // --- Touching the board ---

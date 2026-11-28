@@ -1,6 +1,6 @@
-// The frame a screen is shown in. It carries messages between the screen and the hub, and offers the few
-// things every screen needs around it: who you are, your other screens, your account. A screen that opens
-// beside others, such as the one for talking to the agent, is shown here too, in a panel next to this one.
+// The frame a screen is shown in. It carries messages between the screen and the hub. Around it is the bar
+// every page has (bar.js), with this page's own few things in it: full screen, and a screen that opens
+// beside others, such as the one for talking to the agent, shown here in a panel next to this one.
 (() => {
   const ID = document.body.dataset.screen;
   const $ = (id) => document.getElementById(id);
@@ -162,27 +162,16 @@
     document.addEventListener("webkitfullscreenchange", changed);
   }
 
-  fetch("/auth/me").then((r) => r.json()).then((me) => {
-    if (!me.person) return;
-    $("who").textContent = me.person.name;
-    const links = $("links");
-    const add = (href, text, current) => {
-      const a = document.createElement("a");
-      a.href = href;
-      a.textContent = text;
-      if (current) a.setAttribute("aria-current", "page");
-      links.append(a);
-    };
+  // The bar (bar.js) has the screens and the account. What is this page's own is a screen that opens
+  // beside the others, such as the one for talking to the agent: a word of its own in the bar.
+  globalThis.SkillfullyBar.me.then((me) => {
+    if (!me || !me.person) return;
     let wanted = null;
     try {
       wanted = sessionStorage.getItem("skillfully.beside");
     } catch { /* not remembered */ }
     for (const s of me.screens) {
-      // A screen that opens beside others has a word of its own in the bar, and is not one of the places to go.
-      if (!s.beside || s.id === ID) {
-        add("/s/" + s.id, s.name, s.id === ID);
-        continue;
-      }
+      if (!s.beside || s.id === ID) continue;
       const link = document.createElement("a");
       // Still a real link: without this page's help it opens the screen on its own.
       link.href = "/s/" + s.id;
@@ -198,7 +187,5 @@
       // Left open on the last screen, it is open on this one: the conversation is the hub's to keep.
       if (wanted === s.id) openBeside(s, link);
     }
-    if (me.person.superuser) add("/admin", "Skillfully Config");
-    add("/account", "Account");
-  }).catch(() => {/* the hub is away: the screen itself says so */});
+  });
 })();
