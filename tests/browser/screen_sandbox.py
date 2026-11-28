@@ -689,7 +689,8 @@ async def main():
         await linked.locator("button.rule-add").click()
         await owner.fill("#pickFind", "console/input/3/bus/1/pan"); await owner.locator("#pickList button", has_text="console/input/3/bus/1/pan").first.click()
         await owner.wait_for_selector("#dlg:not([open])", state="attached")
-        await owner.locator("#ruleSentence", has_text="are linked").wait_for(timeout=8000)
+        # The summary is asked for again after each change: wait for the one that has all three in it.
+        await owner.locator("#ruleSentence", has_text="input 3").wait_for(timeout=8000)
         said = await owner.locator("#ruleSentence").inner_text()
         await owner.click("#ruleFlip"); await owner.wait_for_selector("#ruleText")
         made = json.loads(await owner.input_value("#ruleText"))

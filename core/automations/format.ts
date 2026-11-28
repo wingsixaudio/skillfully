@@ -71,6 +71,10 @@ export type Step =
   | { wait_until: Condition; timeout: number }
   /** One list of steps or the other, by what is true at that moment. */
   | { if: Condition; then: Step[]; else?: Step[] }
+  /** Remember what these values hold now, under a name. Kept by the hub, across a restart. */
+  | { save: Ref[]; as: string }
+  /** Put back what was saved under that name, for those of these values that were saved. */
+  | { restore: Ref[]; saved_as: string; over?: number }
   | (Ref & {
     value?: Value;
     from?: Ref;
@@ -341,6 +345,23 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
       if (inside) say(where, "a wait cannot be one of the steps done together");
       seconds(`${where}.timeout`, s.timeout, LIMITS.waitSeconds);
       return condition(`${where}.wait_until`, s.wait_until, 1);
+    }
+    if ("save" in s || "restore" in s) {
+      const saving = "save" in s;
+      only(where, s, saving ? ["save", "as"] : ["restore", "saved_as", "over"]);
+      if (inside) return say(where, "save and restore cannot be among the steps done together");
+      const list = saving ? s.save : s.restore, name = saving ? s.as : s.saved_as;
+      if (!Array.isArray(list) || !list.length || list.length > LIMITS.ranged) {
+        say(`${where}.${saving ? "save" : "restore"}`, `must be a list of 1 to ${LIMITS.ranged} values`);
+      } else list.forEach((v, i) => refOnly(`${where}.${saving ? "save" : "restore"}[${i}]`, v, true));
+      if (typeof name !== "string" || !GROUP.test(name)) {
+        say(
+          `${where}.${saving ? "as" : "saved_as"}`,
+          "must be a name in lowercase letters, numbers and dashes, up to 40",
+        );
+      }
+      if (!saving && s.over !== undefined) seconds(`${where}.over`, s.over, LIMITS.overSeconds);
+      return;
     }
     if ("then" in s || "else" in s) {
       only(where, s, ["if", "then", "else"]);

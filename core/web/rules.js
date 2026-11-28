@@ -93,6 +93,7 @@ function notInForm(rule) {
   for (const s of [...(rule.do || []), ...(rule.otherwise || [])]) {
     if (s && "scale" in s) return "a step that scales";
     if (s && "together" in s) return "steps done together";
+    if (s && ("save" in s || "restore" in s)) return "a step that saves or restores values";
     if (s && "wait_until" in s) return "a step that waits for a condition";
     if (s && "then" in s) return "a step with if and else";
   }

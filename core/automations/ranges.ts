@@ -67,6 +67,10 @@ export function writeOut(rule: Rule): { rule: Rule; origins: Origins } {
     if ("then" in s) {
       return { ...s, then: s.then.map(step), ...(s.else ? { else: s.else.map(step) } : {}) };
     }
+    if ("save" in s) return { ...s, save: s.save.flatMap((m) => spread(m, origins).map((x) => x.ref)) };
+    if ("restore" in s) {
+      return { ...s, restore: s.restore.flatMap((m) => spread(m, origins).map((x) => x.ref)) };
+    }
     if ("wait" in s || "wait_until" in s || "together" in s || !s.range) return s;
     const each = spread(s, origins).map(({ ref, filling }) => {
       if (!ref.from) return ref;
