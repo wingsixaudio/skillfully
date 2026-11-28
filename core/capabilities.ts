@@ -1,6 +1,7 @@
 // Capabilities are data. The hub learns what a soundboard or a switch is by
 // reading a definition file, and holds every driver and screen to it. Nothing
-// in the hub's own code names a capability.
+// in the hub's own code names a capability a driver implements. The two the
+// hub implements itself, tags and device status, are named in hub_device.ts.
 
 import { RESERVED } from "./access.ts";
 import { here } from "./paths.ts";

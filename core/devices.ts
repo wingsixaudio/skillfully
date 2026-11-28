@@ -7,6 +7,7 @@
 import type { DriverManifest, Mode, Values } from "../contract/mod.ts";
 import type { Capabilities } from "./capabilities.ts";
 import { PluginHost, type Tuning } from "./host.ts";
+import type { Cause, Source } from "./source.ts";
 import type { Log } from "./log.ts";
 import { type Package, writePackage, writePackageTo } from "./packages.ts";
 import { inspectPlugin } from "./plugins.ts";
@@ -46,8 +47,10 @@ export class Devices {
   /** Drivers, by id. */
   readonly hosts = new Map<string, PluginHost>();
   #tuning = new Map<string, Tuning>();
-  #onChange = new Set<(host: PluginHost, values: Values) => void>();
-  #onHealth = new Set<(host: PluginHost) => void>();
+  /** What holds values and is not a driver: the hub's own device. */
+  #others = new Map<string, Source>();
+  #onChange = new Set<(source: Source, values: Values, cause?: Cause) => void>();
+  #onHealth = new Set<(source: Source) => void>();
   #onReplaced = new Set<(id: string) => void>();
 
   constructor(
@@ -65,13 +68,34 @@ export class Devices {
     },
   ) {}
 
-  /** A driver said something changed. */
-  onChange(l: (host: PluginHost, values: Values) => void): void {
+  /** Something changed, on a driver or on the hub's own device. With why, when the hub knows. */
+  onChange(l: (source: Source, values: Values, cause?: Cause) => void): void {
     this.#onChange.add(l);
   }
-  /** A driver's health changed, or what it is asking for did. */
-  onHealth(l: (host: PluginHost) => void): void {
+  /** A driver's status or health changed, or what it is asking for did. */
+  onHealth(l: (source: Source) => void): void {
     this.#onHealth.add(l);
+  }
+
+  /** Everything that holds values: every driver, and the hub's own device. */
+  sources(): Source[] {
+    return [...this.hosts.values(), ...this.#others.values()];
+  }
+  source(id: string): Source | undefined {
+    return this.hosts.get(id) ?? this.#others.get(id);
+  }
+  /** Take in something that holds values and is not a driver. */
+  attach(source: Source & { onStale?(l: () => void): void }): void {
+    this.#others.set(source.id, source);
+    source.onChange((values, cause) => {
+      for (const l of this.#onChange) l(source, values, cause);
+    });
+    source.onHealth(() => {
+      for (const l of this.#onHealth) l(source);
+    });
+    source.onStale?.(() => {
+      for (const l of this.#onReplaced) l(source.id);
+    });
   }
   /** A driver was stopped and started again as a new one, or added, or removed. */
   onReplaced(l: (id: string) => void): void {
@@ -135,8 +159,8 @@ export class Devices {
       filled: (settings) =>
         void (this.deps.registry.get(manifest.id) && this.deps.registry.change(manifest.id, { settings })),
     });
-    host.onChange((values) => {
-      for (const l of this.#onChange) l(host, values);
+    host.onChange((values, cause) => {
+      for (const l of this.#onChange) l(host, values, cause);
     });
     host.onHealth(() => {
       for (const l of this.#onHealth) l(host);

@@ -11,7 +11,7 @@
 
 import type { Value } from "../contract/mod.ts";
 import type { Looking } from "./agent_tools.ts";
-import type { PluginHost } from "./host.ts";
+import type { Source } from "./source.ts";
 import type { Tool } from "./model.ts";
 
 export const SET: Tool = {
@@ -91,24 +91,24 @@ export function propose(l: Looking, input: Record<string, unknown>): Proposed {
   if (!through) {
     return no(
       "That is not something you may change for this person. Either it is not yours to change, or not theirs, or there is no such value.",
-      `Asked to change something on ${host.manifest.name} that is not its to change`,
+      `Asked to change something on ${host.name} that is not its to change`,
     );
   }
   if (!["number", "boolean", "string"].includes(typeof to)) {
     return no("Say what it should become, as `to`.", "Asked for a change without saying to what");
   }
-  const bad = l.capabilities.writeProblem(host.manifest.capabilities, key, to);
+  const bad = l.capabilities.writeProblem(host.capabilities, key, to);
   if (bad) {
-    return no(`That cannot be done: ${bad.message}.`, `Asked for a change ${host.manifest.name} cannot make`);
+    return no(`That cannot be done: ${bad.message}.`, `Asked for a change ${host.name} cannot make`);
   }
   if (host.mode !== "act") {
     return no(
-      `The hub is only watching ${host.manifest.name}, so nothing can be changed on it. Whoever runs the hub can let it make changes.`,
-      `Asked to change ${host.manifest.name}, which the hub is only watching`,
+      `The hub is only watching ${host.name}, so nothing can be changed on it. Whoever runs the hub can let it make changes.`,
+      `Asked to change ${host.name}, which the hub is only watching`,
     );
   }
-  const def = l.capabilities.resolve(host.manifest.capabilities, key)!.def;
-  const name = host.manifest.name;
+  const def = l.capabilities.resolve(host.capabilities, key)!.def;
+  const name = host.name;
   if (def.kind === "trigger") {
     // A button may have a label of its own beside it, in the device's words.
     const label = host.state.get(`${key}/title`);
@@ -130,7 +130,7 @@ export function propose(l: Looking, input: Record<string, unknown>): Proposed {
 }
 
 function change(
-  host: PluginHost,
+  host: Source,
   key: string,
   to: Value,
   from: Value | undefined,
@@ -140,7 +140,7 @@ function change(
   return {
     message,
     subject: `${host.id}:${key}`,
-    where: host.manifest.name,
+    where: host.name,
     data: { to, through },
     same: JSON.stringify([host.id, key, to]),
     carry: (who) => carryOut({ host, key, to, from, through }, who),
@@ -149,7 +149,7 @@ function change(
 
 /** Do what a person said yes to, as the agent, and say how it went. */
 async function carryOut(
-  p: { host: PluginHost; key: string; to: Value; from?: Value; through: string },
+  p: { host: Source; key: string; to: Value; from?: Value; through: string },
   who: { agent: string; traceid: string },
 ): Promise<{ content: string; words: string; done: boolean }> {
   const r = await p.host.set(p.key, p.to, {

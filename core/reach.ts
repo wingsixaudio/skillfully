@@ -10,7 +10,7 @@
 import type { ScreenManifest } from "../contract/mod.ts";
 import type { Access } from "./access.ts";
 import type { Approvals } from "./approvals.ts";
-import type { PluginHost } from "./host.ts";
+import type { Source } from "./source.ts";
 import type { LogEntry } from "./log.ts";
 
 interface Part {
@@ -21,9 +21,9 @@ interface Part {
 export class Reach {
   #parts: Part[];
   #approvals: Approvals;
-  #hosts: () => Iterable<PluginHost>;
+  #hosts: () => Iterable<Source>;
 
-  constructor(parts: Part[], approvals: Approvals, hosts: () => Iterable<PluginHost>) {
+  constructor(parts: Part[], approvals: Approvals, hosts: () => Iterable<Source>) {
     this.#parts = parts.filter((p) => !p.access.empty);
     this.#approvals = approvals;
     this.#hosts = hosts;
@@ -35,11 +35,11 @@ export class Reach {
   }
 
   /** The devices this person can see anything of. */
-  hosts(): PluginHost[] {
+  hosts(): Source[] {
     return [...this.#hosts()].filter((h) =>
       this.#parts.some((p) =>
         this.#approvals.allowed(p.screen.id, h.id) &&
-        Object.keys(h.manifest.capabilities).some((cap) => p.access.sees(cap))
+        Object.keys(h.capabilities).some((cap) => p.access.sees(cap))
       )
     );
   }
@@ -100,7 +100,7 @@ export class Reach {
       if (key !== null) return p.access.canRead(key);
       return e.type.startsWith("skillfully.plugin.") &&
         [...this.#hosts()].some((h) =>
-          h.id === host && Object.keys(h.manifest.capabilities).some((cap) => p.access.sees(cap))
+          h.id === host && Object.keys(h.capabilities).some((cap) => p.access.sees(cap))
         );
     });
   }

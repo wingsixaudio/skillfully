@@ -75,21 +75,23 @@ log says `command.done`, never `command.confirmed`, and two presses in a row are
 
 ## The hub's own code
 
-| File               | What it holds                                                              |
-| ------------------ | -------------------------------------------------------------------------- |
-| `core/hub.ts`      | Puts the parts together and answers the door                               |
-| `core/devices.ts`  | The drivers a hub runs, each started from its record                       |
-| `core/registry.ts` | The one record per driver                                                  |
-| `core/host.ts`     | One running driver: its state, its writes, its limits, what it asks for    |
-| `core/process.ts`  | The command line a driver runs under, and the one door it connects through |
-| `core/runtimes.ts` | What a runtime may say about its plugins                                   |
-| `core/packages.ts` | Reading and unpacking a package. Runs none of it                           |
-| `core/screens.ts`  | Screens, who may use each, and the phones connected through them           |
-| `core/admin.ts`    | A superuser's tools                                                        |
-| `core/accounts.ts` | People, roles and signing in                                               |
-| `core/store.ts`    | Reading the store's list and checking what it downloads                    |
-| `core/web/`        | The hub's own pages, as ordinary HTML, CSS and JavaScript files            |
-| `mod.ts`           | The only file a tool outside this repository may import                    |
+| File                 | What it holds                                                              |
+| -------------------- | -------------------------------------------------------------------------- |
+| `core/hub.ts`        | Puts the parts together and answers the door                               |
+| `core/devices.ts`    | The drivers a hub runs, each started from its record                       |
+| `core/registry.ts`   | The one record per driver                                                  |
+| `core/host.ts`       | One running driver: its state, its writes, its limits, what it asks for    |
+| `core/source.ts`     | The one door for anything that holds values: a driver, or the hub's device |
+| `core/hub_device.ts` | The hub's own device: tags, and how each driver is doing                   |
+| `core/process.ts`    | The command line a driver runs under, and the one door it connects through |
+| `core/runtimes.ts`   | What a runtime may say about its plugins                                   |
+| `core/packages.ts`   | Reading and unpacking a package. Runs none of it                           |
+| `core/screens.ts`    | Screens, who may use each, and the phones connected through them           |
+| `core/admin.ts`      | A superuser's tools                                                        |
+| `core/accounts.ts`   | People, roles and signing in                                               |
+| `core/store.ts`      | Reading the store's list and checking what it downloads                    |
+| `core/web/`          | The hub's own pages, as ordinary HTML, CSS and JavaScript files            |
+| `mod.ts`             | The only file a tool outside this repository may import                    |
 
 The hub's own pages load their scripts from `core/web/` and run nothing else: a script written into a page
 does not run, whoever wrote it there. A page is read from its file each time it is asked for, so a change
@@ -157,8 +159,29 @@ A screen is never more than all three. A screen may ask to work with `any` kind 
 screen can show devices nobody wrote a screen for. It still reaches only the connections it was given, and
 `any` never includes the hub's log.
 
-The **Controls** screen is that screen: every reading, value and action of its connections as one plain list,
-drawn from the definitions the hub hands it. It is for setting equipment up, not for running a service.
+### The hub's own device
+
+Some values belong to no driver: a flag that says the service is live, which part of the show is running,
+whether the console is still connected. The hub holds these itself, as a connection called **Hub** with the id
+`hub`. It is given to a screen like any other connection and limited by roles in the same way.
+
+| Kind     | Values                                                                                  | Set by                       |
+| -------- | --------------------------------------------------------------------------------------- | ---------------------------- |
+| `tag`    | `tag/flag/<name>`, `tag/number/<name>`, `tag/text/<name>`, `tag/choice/<name>`          | Anyone a role allows         |
+| `device` | `device/connected/<id>` (true or false) and `device/status/<id>` (one word), per driver | Nobody. The hub works it out |
+
+A superuser makes tags under **Settings**. A tag keeps its value across a restart. A choice takes only the
+options it was given, so a misspelled value is refused instead of quietly never matching. The tags are also
+written to `config/tags.json` for people and agents to read. That file is not read back.
+
+A driver's host and the hub's device are both a `Source` (`core/source.ts`): the same `state`, `set` and
+`onChange`. Screens and the agent are written against that, so neither knows which one it is talking to. Every
+change a source reports carries its **cause** when the hub knows it: who asked, through what, under which
+trace, and how many reactions deep. A change with no cause happened at the device itself.
+
+The **Controls** screen is the screen that works with `any` kind of device: every reading, value and action of
+its connections as one plain list, drawn from the definitions the hub hands it. It is for setting equipment
+up, not for running a service.
 
 ## People, roles and abilities
 
@@ -200,7 +223,7 @@ their open screens are disconnected and come back under the new rules or not at 
 | Piece                                    | What it would be                                                                                                                                                                                                    |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Service**                              | A background program that uses capabilities the way a screen does: automation, scheduling, an agent's own process. Same `uses` rule, same driver-style sandbox                                                      |
-| **Rule**                                 | "When this, do that" as data, switched on by a person                                                                                                                                                               |
+| **Rule**                                 | "When this, do that" as data, switched on by a person. The groundwork is in: tags, device status, and a cause on every change                                                                                       |
 | **An agent from outside**                | The hub has an agent of its own, which looks and answers (`core/engine.ts`). Still planned: a way in for an agent that runs somewhere else, such as an MCP server, held to an account and its roles in the same way |
 | **Install, update, rollback, uninstall** | Today plugins are folders the hub scans at start                                                                                                                                                                    |
 | **A place for plugins to keep data**     | The team roster and saved mixes need somewhere to live. Screens cannot store anything yet                                                                                                                           |

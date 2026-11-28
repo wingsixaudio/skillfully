@@ -14,6 +14,7 @@ import type { Approvals } from "./approvals.ts";
 import { aboutWords, advised, attemptWords, classify, grantWords } from "./asks.ts";
 import type { Config } from "./config.ts";
 import type { Devices } from "./devices.ts";
+import type { HubDevice } from "./hub_device.ts";
 import { json, notOurPage, outcome, readFile, readJson, refuse, sentence } from "./http.ts";
 import { networkNotes, type Package, readPackage } from "./packages.ts";
 import type { Origin } from "./registry.ts";
@@ -60,6 +61,8 @@ export interface AdminDeps {
   approvals: Approvals;
   config: Config;
   devices: Devices;
+  /** The hub's own device, for its tags. */
+  hubDevice: HubDevice;
   screens: Screens;
   store: Store;
   /** Whether any plugin, of any kind, already has this id. */
@@ -67,7 +70,7 @@ export interface AdminDeps {
 }
 
 export function adminApi(deps: AdminDeps) {
-  const { accounts, agent, approvals, config, devices, engine, screens, store, updates } = deps;
+  const { accounts, agent, approvals, config, devices, engine, hubDevice, screens, store, updates } = deps;
   /** The package each superuser is looking at, checked but not yet added. One each, for a few minutes. */
   const looking = new Map<string, { pkg: Package; at: number; from?: StoreModule }>();
   const kinds = (pkg: Package) => Object.keys((pkg.manifest.capabilities ?? {}) as Record<string, unknown>);
@@ -200,7 +203,7 @@ export function adminApi(deps: AdminDeps) {
       agent: {
         ...agent.about(),
         // The devices it can see anything of, by what its roles give it. Not what the person looking can.
-        sees: agent.person() ? screens.reachOf(agent.person()!).hosts().map((h) => h.manifest.name) : [],
+        sees: agent.person() ? screens.reachOf(agent.person()!).hosts().map((h) => h.name) : [],
       },
       people: accounts.people().map((p) => ({ ...p, devices: accounts.sessions(p.id).length })),
       roles: accounts.roles(),
@@ -257,6 +260,8 @@ export function adminApi(deps: AdminDeps) {
           usedBy: screens.using(h.id).map((m) => m.name),
         };
       }),
+      // The tags the hub holds, with what each holds now.
+      tags: hubDevice.tags().map((t) => ({ ...t, value: hubDevice.state.get(`tag/${t.kind}/${t.name}`) })),
       // What each screen offers a role, and which per-person slots its abilities refer to.
       offered: screens.manifests().map((m) => ({
         plugin: m.id,
@@ -271,7 +276,7 @@ export function adminApi(deps: AdminDeps) {
         // Which connections this screen could use, and which it has been given.
         // The kinds of device it works with. What is the hub's own, such as its log or its agent, is not one.
         works: Object.keys(m.uses).filter((u) => !OWN.includes(u)),
-        eligible: screens.eligible(m).map((h) => ({ id: h.id, name: h.manifest.name })),
+        eligible: screens.eligible(m).map((h) => ({ id: h.id, name: h.name })),
         connections: approvals.of(m.id),
         slots: [
           ...new Set(
@@ -557,6 +562,13 @@ export function adminApi(deps: AdminDeps) {
       }
       case "policy":
         return (await sure()) ?? outcome(accounts.setPolicy(me.id, b.policy));
+
+      case "tag": {
+        const made = hubDevice.define(b.tag, who);
+        return made.ok ? json({ ok: true, tag: made.tag }) : refuse(400, made.message);
+      }
+      case "tag/remove":
+        return hubDevice.remove(id, who) ? json({ ok: true }) : refuse(400, "Tag not found.");
 
       case "screen/connections": {
         // Handing a plugin a connection is handing out power.
