@@ -99,7 +99,24 @@ Deno.test("a plugin that says hello as someone else is refused", async () => {
   await until("the impostor is refused", () => ofType(hub, "skillfully.plugin.failed").length >= 1);
   const failed = ofType(hub, "skillfully.plugin.failed")[0];
   assert(String(failed.data.message).includes("said hello as misbehave"), String(failed.data.message));
-  assertEquals(hub.hosts.get("someone-else")!.status, "down");
+  // The hub tries a plugin that failed again after a moment, so at any instant the impostor is down or
+  // being started. It is refused every time, and is never running.
+  const impostor = hub.hosts.get("someone-else")!;
+  assert(impostor.status === "down" || impostor.status === "starting", impostor.status);
+  await until(
+    "it is tried again and refused again",
+    () => ofType(hub, "skillfully.plugin.failed").length >= 2,
+  );
+  assert(
+    ofType(hub, "skillfully.plugin.failed").every((e) =>
+      String(e.data.message).includes("said hello as misbehave")
+    ),
+  );
+  assert(impostor.status === "down" || impostor.status === "starting", impostor.status);
+  assertEquals(
+    ofType(hub, "skillfully.plugin.started").filter((e) => e.subject === "someone-else").length,
+    0,
+  );
   assertEquals(board(hub).status, "running");
   await hub.stop();
   await Deno.remove(dir, { recursive: true });
