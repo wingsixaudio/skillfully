@@ -303,7 +303,7 @@
         waiting?.remove();
         waiting = null;
         if (running) {
-          waiting = el("div", "waiting", looked ? "Reading…" : "Thinking…");
+          waiting = el("div", "waiting", looked ? "Working…" : "Thinking…");
           talk.append(waiting);
         }
         if (stick) talk.scrollTop = talk.scrollHeight;

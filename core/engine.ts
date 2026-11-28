@@ -427,7 +427,9 @@ export class Engine {
     // whoever is listening then. So who is listening, and what stops it, belong to each stretch of it.
     let talk = first;
     let runId = talk.runId ?? traceid;
-    let ended = AbortSignal.timeout(this.tuning.runMs ?? 90_000);
+    // One request may take this long. Time spent waiting for the person's yes or no is not counted.
+    const runMs = this.tuning.runMs ?? about.maxSeconds * 1000;
+    let ended = AbortSignal.timeout(runMs);
     let stop = AbortSignal.any([this.#stop.signal, ended, ...(talk.stop ? [talk.stop] : [])]);
     const threadId = talk.threadId ?? traceid;
     const hear = (event: Record<string, unknown>) => {
@@ -501,7 +503,8 @@ export class Engine {
             { address: about.address, key, model: about.model, speaks: about.speaks },
             { system, tools, messages, maxTokens: about.maxTokens },
             stop,
-            this.tuning,
+            // One model response may take as long as the whole request may: a long document is one response.
+            { ...this.tuning, timeoutMs: this.tuning.timeoutMs ?? runMs },
             talk.hear ? (words) => say(names.take(words)) : undefined,
           );
         } catch (err) {
@@ -509,7 +512,12 @@ export class Engine {
           if (err instanceof ModelError) {
             if (err.code !== "stopped") return failed(err.code, err.message, step);
             return ended.aborted
-              ? failed("too_slow", "It took too long to answer.", step)
+              ? failed(
+                "too_slow",
+                `Stopped: reached the time limit (${Math.round(runMs / 1000)} s) before finishing. Ask for ` +
+                  "less in one request, or raise Time limit in the agent's settings.",
+                step,
+              )
               : failed("stopped", "Stopped.", step);
           }
           return failed("broken", "Something went wrong inside the hub while it was answering.", step);
@@ -701,7 +709,7 @@ export class Engine {
           resume: async (answers, next) => {
             talk = next;
             runId = next.runId ?? newId();
-            ended = AbortSignal.timeout(this.tuning.runMs ?? 90_000);
+            ended = AbortSignal.timeout(runMs);
             stop = AbortSignal.any([this.#stop.signal, ended, ...(next.stop ? [next.stop] : [])]);
             hear({ type: "RUN_STARTED", threadId, runId });
             // What they may each do is worked out again now. It may have changed while this waited.

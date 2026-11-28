@@ -644,21 +644,30 @@ Deno.test("max steps and max output tokens are each agent's own settings, and re
   );
   const { hub, model } = t;
   const by = hub.owner.id, owner = person(hub, hub.owner);
-  assertEquals([hub.agent.about().maxSteps, hub.agent.about().maxTokens], [12, 8192]);
+  const limits = (id?: string) => {
+    const a = hub.agent.about(id);
+    return [a.maxSteps, a.maxTokens, a.maxSeconds];
+  };
+  assertEquals(limits(), [12, 8192, 300]);
   for (
-    const bad of [{ maxSteps: 1 }, { maxSteps: 41 }, { maxSteps: 2.5 }, { maxTokens: 500 }, {
-      maxTokens: "lots",
-    }]
+    const bad of [
+      { maxSteps: 1 },
+      { maxSteps: 41 },
+      { maxSteps: 2.5 },
+      { maxTokens: 500 },
+      {
+        maxTokens: "lots",
+      },
+      { maxSeconds: 10 },
+      { maxSeconds: 4000 },
+    ]
   ) {
     assertEquals(hub.agent.set(by, bad).ok, false, JSON.stringify(bad));
   }
-  assert(hub.agent.set(by, { maxSteps: 3, maxTokens: 2000 }).ok);
+  assert(hub.agent.set(by, { maxSteps: 3, maxTokens: 2000, maxSeconds: 60 }).ok);
   const kit = hub.agent.make(by, "Kit");
   assert(kit.ok);
-  assertEquals([hub.agent.about(kit.person.id).maxSteps, hub.agent.about(kit.person.id).maxTokens], [
-    3,
-    2000,
-  ]);
+  assertEquals(limits(kit.person.id), [3, 2000, 60]);
 
   // Nothing came back and it had run out of room: that is said, with the limit and where to change it.
   const empty = await hub.engine.ask(owner, "Build me a canvas.");
@@ -701,9 +710,29 @@ Deno.test("max steps and max output tokens are each agent's own settings, and re
     PRAGMA user_version = 3;
   `);
   assertEquals(bringToShape(db), { from: 3, to: SHAPE });
-  assertEquals({ ...db.prepare("SELECT max_steps, max_tokens FROM agents").get() }, {
+  assertEquals({ ...db.prepare("SELECT max_steps, max_tokens, max_seconds FROM agents").get() }, {
     max_steps: null,
     max_tokens: null,
+    max_seconds: null,
   });
   db.close();
+});
+
+Deno.test("a request that runs past its time limit is stopped, and says which limit and where to change it", async () => {
+  // Each answer comes quickly enough. It is the whole request, look after look, that takes too long.
+  const t = await withAgent(
+    () => new Promise((r) => setTimeout(() => r([uses("devices")]), 120)),
+    { engine: { runMs: 300 } },
+  );
+  const { hub, model } = t;
+  const r = await hub.engine.ask(person(hub, hub.owner), "Build everything.");
+  assert(!r.ok && r.code === "too_slow", JSON.stringify(r));
+  assert(
+    r.message.startsWith("Stopped: reached the time limit (") &&
+      r.message.endsWith("raise Time limit in the agent's settings."),
+    r.message,
+  );
+  // What it had done by then goes with the failure, for the conversation to carry on from.
+  assert(model.sent.length >= 2 && r.looked?.[0] === "Listed devices: Simulated board, Simulated switch");
+  await t.done();
 });

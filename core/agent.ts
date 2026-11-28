@@ -51,6 +51,8 @@ export interface AboutAgent {
   /** How many times it may go back to its model for one question, and how much its model may write each time. */
   maxSteps: number;
   maxTokens: number;
+  /** How long one request may take, in seconds. Waiting for a person's yes or no is not counted. */
+  maxSeconds: number;
 }
 
 type Outcome<T = Record<never, never>> = ({ ok: true } & T) | { ok: false; code: string; message: string };
@@ -59,6 +61,7 @@ const no = (code: string, message: string) => ({ ok: false as const, code, messa
 export const LIMITS = {
   steps: { usual: 12, least: 2, most: 40 },
   tokens: { usual: 8192, least: 1024, most: 32000 },
+  seconds: { usual: 300, least: 30, most: 1800 },
 };
 
 /** A hub's agents are a handful: one for most, another for someone with a key of their own. */
@@ -73,6 +76,7 @@ interface Row {
   speaks: string | null;
   max_steps: number | null;
   max_tokens: number | null;
+  max_seconds: number | null;
 }
 
 export class Agent {
@@ -89,7 +93,8 @@ export class Agent {
     db.exec(`
       CREATE TABLE IF NOT EXISTS agents (
         person TEXT PRIMARY KEY, is_on INTEGER NOT NULL DEFAULT 0, model TEXT, address TEXT,
-        reads_log INTEGER NOT NULL DEFAULT 0, speaks TEXT, max_steps INTEGER, max_tokens INTEGER
+        reads_log INTEGER NOT NULL DEFAULT 0, speaks TEXT, max_steps INTEGER, max_tokens INTEGER,
+        max_seconds INTEGER
       );
       CREATE TABLE IF NOT EXISTS agent_keys (person TEXT PRIMARY KEY, key TEXT NOT NULL, set_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS agent_given (person TEXT PRIMARY KEY, agent TEXT NOT NULL);
@@ -176,6 +181,7 @@ export class Agent {
       readsLog: !!row?.reads_log,
       maxSteps: row?.max_steps || LIMITS.steps.usual,
       maxTokens: row?.max_tokens || LIMITS.tokens.usual,
+      maxSeconds: row?.max_seconds || LIMITS.seconds.usual,
     };
   }
 
@@ -231,7 +237,7 @@ export class Agent {
     const made = this.accounts.addAgent(by, name);
     if (!made.ok) return made;
     this.#db.prepare(
-      "INSERT INTO agents (person, model, address, reads_log, speaks, max_steps, max_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO agents (person, model, address, reads_log, speaks, max_steps, max_tokens, max_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     ).run(
       made.person.id,
       like ? like.model : null,
@@ -240,6 +246,7 @@ export class Agent {
       like ? like.speaks : null,
       like ? like.maxSteps : null,
       like ? like.maxTokens : null,
+      like ? like.maxSeconds : null,
     );
     if (!like) this.kept.set("agent.person", made.person.id);
     else if (like.person!.roles.length) this.accounts.setRoles(by, made.person.id, like.person!.roles);
@@ -291,6 +298,7 @@ export class Agent {
       speaks?: unknown;
       maxSteps?: unknown;
       maxTokens?: unknown;
+      maxSeconds?: unknown;
     },
     id?: string,
   ): Outcome {
@@ -331,11 +339,20 @@ export class Agent {
       }
       if (wanted.speaks !== before.speaks) changed.speaks = wanted.speaks;
     }
-    for (const [name, limit] of [["maxSteps", LIMITS.steps], ["maxTokens", LIMITS.tokens]] as const) {
+    for (
+      const [name, limit] of [["maxSteps", LIMITS.steps], ["maxTokens", LIMITS.tokens], [
+        "maxSeconds",
+        LIMITS.seconds,
+      ]] as const
+    ) {
       const n = wanted[name];
       if (n === undefined) continue;
       if (typeof n !== "number" || !Number.isInteger(n) || n < limit.least || n > limit.most) {
-        const label = name === "maxSteps" ? "Max steps" : "Max output tokens";
+        const label = name === "maxSteps"
+          ? "Max steps"
+          : name === "maxTokens"
+          ? "Max output tokens"
+          : "Time limit (seconds)";
         return no("bad_limit", `${label} must be a whole number from ${limit.least} to ${limit.most}.`);
       }
       if (n !== before[name]) changed[name] = n;
@@ -351,6 +368,7 @@ export class Agent {
     if ("speaks" in changed) put("speaks", changed.speaks as string);
     if ("maxSteps" in changed) put("max_steps", changed.maxSteps as number);
     if ("maxTokens" in changed) put("max_tokens", changed.maxTokens as number);
+    if ("maxSeconds" in changed) put("max_seconds", changed.maxSeconds as number);
     if (Object.keys(changed).length) this.#note("skillfully.agent.changed", by, which, changed);
     return { ok: true };
   }
