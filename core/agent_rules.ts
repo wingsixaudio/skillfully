@@ -112,10 +112,16 @@ export const SAVE_RULE: Tool = {
 };
 
 /** How a rule is written, in words. Kept here so the words and the checker in format.ts are read together. */
-export const RULE_FORMAT =
-  `A rule is one JSON object: when something happens, if conditions hold, do a list of steps.
+export const RULE_FORMAT = `A rule is one JSON object. It takes one of three forms.
 
-{ "kind": "automation", "name": "...", "note": "...", "group": "...", "when": [...], "if": {...}, "do": [...], "mode": "single" }
+1. When something happens, if conditions hold, do a list of steps:
+{ "kind": "automation", "name": "...", "note": "...", "group": "...", "when": [...], "if": {...}, "do": [...], "mode": "single", "cancel_when": {...} }
+
+2. Do one list of steps as soon as a condition is true, and another when that ends:
+{ "kind": "automation", "name": "...", "while": {...}, "do": [...], "otherwise": [...] }
+
+3. Keep one value equal to another, whenever that one changes:
+{ "kind": "automation", "name": "...", "follow": { "key": K }, "set": { "key": K2 }, "scale": {...}, "min": n, "max": n, "if": {...} }
 
 kind   always "automation".
 name   1 to 60 characters, shown to people.
@@ -136,28 +142,43 @@ when   up to 8 triggers. Any one fires the rule. Leave "when" out for a rule tha
   { "key": K, "changes": true }             changes at all
   { "holds": CONDITION, "for": 5 }          the condition has been true for 5 seconds. Without "for", the
                                             moment it becomes true
+  { "at": "08:45", "days": ["sun"] }        the hub's clock reaches that minute. Days are sun, mon, tue,
+                                            wed, thu, fri, sat. Without "days", every day
   A trigger fires only when it goes from false to true. Starting the hub, turning the rule on, or a device
-  coming back fires nothing.
+  coming back fires nothing. A schedule that passes while the hub is off is not run late.
 
 if     one optional condition, checked when a trigger fires.
   { "key": K, "is": V }   also "is_not", ">", ">=", "<", "<=", and "between": [low, high]
   { "all": [ ... ] }      every one is true
   { "any": [ ... ] }      at least one is true
   { "not": CONDITION }
-  Any of these may add "for": seconds, meaning true for that long without a break.
+  { "time": { "from": "08:00", "to": "12:30", "days": ["sun"] } }   the clock is inside that span
+  Any but "time" may add "for": seconds, meaning true for that long without a break.
   The right-hand side may be another value: { "key": K, ">": { "key": K2 } }.
   A value the hub cannot vouch for is unknown, and a rule whose condition is unknown does not run.
 
 do     1 to 32 steps, done in order. A step that fails stops the rest.
   { "key": K, "value": V }                  set it. Without "value", press a button
   { "key": K, "from": { "key": K2 } }       copy another value into it
+     with "scale": { "in": [0, 127], "out": [-60, 0] } the copy is moved from one range onto the other
   { "key": K, "add": 2 }                    change a number by this much. Negative takes away
   { "key": K, "multiply": 1.02 }
      a number step may add "min" and "max" to keep the result in range
+     a number step may add "over": 4 to get there over 4 seconds. The next step does not wait for it, so
+     several can move together. Put a "wait" after it when the next step should come once it has landed.
+     If anyone else sets that value on the way, the fade ends where they put it
   { "wait": 3 }                             wait 3 seconds, up to 600
 
-Not available yet, and refused: schedules ("at"), time windows ("time"), fades ("over"), "scale", and the
-"while", "otherwise", "cancel_when" and "follow" forms.
+cancel_when   an optional condition. A run in the middle of its steps stops the moment it is true.
+
+The while form acts on the two edges of its condition: "do" as soon as it is true, "otherwise" when that
+ends. It does not hold anything in place in between. While the hub cannot tell, it does neither.
+
+The follow form sets nothing when the hub starts. Each time the followed value changes, the other is set to
+it. It is not a run, so it may happen as often as the value moves.
+
+A rule may run at most 10 times in 10 seconds, or the hub stops it. To do many things from one trigger, put
+them in one rule's steps, or have one rule set a tag that others react to.
 
 Example: lift a level by 2 when a playhead passes 24 seconds, only while the service is live. The names in
 angle brackets stand for whole names from find_values.
@@ -166,13 +187,17 @@ angle brackets stand for whole names from find_values.
   "if": { "key": "tag/flag/service-live", "is": true },
   "do": [{ "key": "<the level to lift>", "add": 2, "max": 0 }] }
 
-Example: a flag that follows a device's connection once it has been gone 5 seconds takes two rules.
+Example: a flag that follows a device's connection once it has been gone 5 seconds.
 { "kind": "automation", "name": "Desk dropped",
-  "when": [{ "holds": { "key": "device/connected/desk", "is": false }, "for": 5 }],
-  "do": [{ "key": "tag/flag/desk-down", "value": true }] }
-{ "kind": "automation", "name": "Desk back",
-  "when": [{ "key": "device/connected/desk", "becomes": true }],
-  "do": [{ "key": "tag/flag/desk-down", "value": false }] }`;
+  "while": { "key": "device/connected/desk", "is": false, "for": 5 },
+  "do": [{ "key": "tag/flag/desk-down", "value": true }],
+  "otherwise": [{ "key": "tag/flag/desk-down", "value": false }] }
+
+Example: walk-in music on Sunday morning, faded in.
+{ "kind": "automation", "name": "Sunday walk-in",
+  "when": [{ "at": "08:45", "days": ["sun"] }],
+  "if": { "key": "tag/flag/service-live", "is": false },
+  "do": [{ "key": "<the music channel's level>", "value": -20, "over": 8 }] }`;
 
 /** The rule tools on offer in a run. */
 export function ruleTools(l: Looking, acts: boolean): Tool[] {
@@ -278,7 +303,7 @@ export async function lookRules(
   const standing = l.rules.standing("draft", checked.rule);
   return {
     content: JSON.stringify({ in_words: said.sentence, right_now: standing }).slice(0, 12_000),
-    note: { tool: name, triggers: checked.rule.when?.length ?? 0, steps: checked.rule.do.length },
+    note: { tool: name, triggers: checked.rule.when?.length ?? 0, steps: checked.rule.do?.length ?? 0 },
     words: `Tried the automation “${checked.rule.name.slice(0, 60)}”: nothing was sent`,
   };
 }

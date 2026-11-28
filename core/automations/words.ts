@@ -22,7 +22,16 @@ const HOW: Record<string, string> = {
   "<=": "is at most",
 };
 
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const clock = (minute: number) =>
+  `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
+const onDays = (days?: number[]) =>
+  !days || days.length === 7 ? "" : ` on ${days.map((d) => DAY_NAMES[d]).join(", ")}`;
+const scaled = (x?: { in: [number, number]; out: [number, number] }) =>
+  x ? `, scaled from ${x.in[0]} to ${x.in[1]} onto ${x.out[0]} to ${x.out[1]}` : "";
+
 export function conditionWords(c: CCond, name: Namer): string {
+  if (c.how === "time") return `the time is from ${clock(c.from)} to ${clock(c.to)}${onDays(c.days)}`;
   const held = c.for !== undefined ? ` for ${seconds(c.for)}` : "";
   if (c.how === "all" || c.how === "any") {
     const parts = c.of.map((inner) => conditionWords(inner, name));
@@ -46,6 +55,8 @@ export function triggerWords(t: CTrigger, name: Namer): string {
       return `${name(t.at)} becomes ${shown(t.value)}`;
     case "changes":
       return `${name(t.at)} changes`;
+    case "at":
+      return `the clock reaches ${clock(t.minute)}${onDays(t.days)}`;
     default:
       return conditionWords(t.cond, name) + (t.for !== undefined ? ` for ${seconds(t.for)}` : "");
   }
@@ -53,30 +64,45 @@ export function triggerWords(t: CTrigger, name: Namer): string {
 
 export function stepWords(s: CStep, name: Namer): string {
   if ("wait" in s) return `wait ${seconds(s.wait)}`;
+  if (s.does === "press") return `press ${name(s.at)}`;
   const limits = [
-    ...("min" in s && s.min !== undefined ? [`at least ${s.min}`] : []),
-    ...("max" in s && s.max !== undefined ? [`at most ${s.max}`] : []),
+    ...(s.min !== undefined ? [`at least ${s.min}`] : []),
+    ...(s.max !== undefined ? [`at most ${s.max}`] : []),
   ];
   const limit = limits.length ? ` (${limits.join(", ")})` : "";
+  const over = s.over !== undefined ? ` over ${seconds(s.over)}` : "";
   switch (s.does) {
-    case "press":
-      return `press ${name(s.at)}`;
     case "set":
-      return `set ${name(s.at)} to ${shown(s.value)}${limit}`;
+      return `${over ? "fade" : "set"} ${name(s.at)} to ${shown(s.value)}${limit}${over}`;
     case "from":
-      return `copy ${name(s.from)} into ${name(s.at)}${limit}`;
+      return `copy ${name(s.from)} into ${name(s.at)}${scaled(s.scale)}${limit}${over}`;
     case "add":
-      return s.by < 0 ? `take ${-s.by} from ${name(s.at)}${limit}` : `add ${s.by} to ${name(s.at)}${limit}`;
+      return (s.by < 0 ? `take ${-s.by} from ${name(s.at)}` : `add ${s.by} to ${name(s.at)}`) + limit + over;
     default:
-      return `multiply ${name(s.at)} by ${s.by}${limit}`;
+      return `multiply ${name(s.at)} by ${s.by}${limit}${over}`;
   }
 }
 
-/** The whole rule: "When …, if …: …, then …." */
+/** The whole rule as a sentence, in whichever of its three forms it is written. */
 export function sentence(c: Compiled, name: Namer): string {
+  const list = (steps: CStep[]) => steps.map((s) => stepWords(s, name)).join(", then ");
+  if (c.follow) {
+    const limits = [
+      ...(c.follow.min !== undefined ? [`at least ${c.follow.min}`] : []),
+      ...(c.follow.max !== undefined ? [`at most ${c.follow.max}`] : []),
+    ];
+    return `${name(c.follow.to)} follows ${name(c.follow.from)}${scaled(c.follow.scale)}` +
+      (limits.length ? ` (${limits.join(", ")})` : "") +
+      (c.cond ? `, while ${conditionWords(c.cond, name)}` : "") + ".";
+  }
+  const stops = c.cancel ? ` It stops if ${conditionWords(c.cancel, name)}.` : "";
+  if (c.during) {
+    return `As soon as ${conditionWords(c.during, name)}: ${list(c.steps)}.` +
+      (c.otherwise.length ? ` When that ends: ${list(c.otherwise)}.` : "") + stops;
+  }
   const when = c.triggers.length
     ? "When " + c.triggers.map((t) => triggerWords(t, name)).join(", or when ")
     : "When it is run";
   const cond = c.cond ? `, if ${conditionWords(c.cond, name)}` : "";
-  return `${when}${cond}: ${c.steps.map((s) => stepWords(s, name)).join(", then ")}.`;
+  return `${when}${cond}: ${list(c.steps)}.${stops}`;
 }

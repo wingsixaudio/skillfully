@@ -11,29 +11,58 @@ import type { Value } from "../../contract/mod.ts";
 import type { Capabilities } from "../capabilities.ts";
 import type { Source } from "../source.ts";
 import { type At, type CCond, type COperand, reads } from "./evaluate.ts";
-import { COMPARES, type Condition, type Mode, type Operand, type Ref, type Rule } from "./format.ts";
+import {
+  COMPARES,
+  type Condition,
+  type Day,
+  DAYS,
+  minuteOf,
+  type Mode,
+  type Operand,
+  type Ref,
+  type Rule,
+  type Scale,
+  type Step,
+} from "./format.ts";
 
 export type CTrigger =
   | { how: "rises" | "falls"; at: At; mark: number; within?: number }
   | { how: "becomes"; at: At; value: Value }
   | { how: "changes"; at: At }
-  | { how: "holds"; cond: CCond; for?: number };
+  | { how: "holds"; cond: CCond; for?: number }
+  /** A minute of the day, in minutes after midnight, on these days of the week (0 is Sunday). */
+  | { how: "at"; minute: number; days?: number[] };
 
+/** What a number step may add: limits on the result, and a time to get there over. */
+interface Shaping {
+  min?: number;
+  max?: number;
+  over?: number;
+}
 export type CStep =
   | { wait: number }
-  | { at: At; does: "set"; value: Value; min?: number; max?: number }
+  | ({ at: At; does: "set"; value: Value } & Shaping)
   | { at: At; does: "press" }
-  | { at: At; does: "from"; from: At; min?: number; max?: number }
-  | { at: At; does: "add" | "multiply"; by: number; min?: number; max?: number };
+  | ({ at: At; does: "from"; from: At; scale?: Scale } & Shaping)
+  | ({ at: At; does: "add" | "multiply"; by: number } & Shaping);
 
 export interface Compiled {
   id: string;
   name: string;
   group?: string;
+  /** when: triggers fire it. while: a condition's two edges do. follow: one value is kept equal to another. */
+  form: "when" | "while" | "follow";
   mode: Mode;
   triggers: CTrigger[];
   cond?: CCond;
   steps: CStep[];
+  /** The while form: the condition, and what is done when it stops. */
+  during?: CCond;
+  otherwise: CStep[];
+  /** A run stops the moment this is true. */
+  cancel?: CCond;
+  /** The follow form: the value followed, the value kept equal to it, and how it is shaped on the way. */
+  follow?: { from: At; to: At; scale?: Scale; min?: number; max?: number };
   /** Every value it reads, and every value it may set. Each once. */
   reads: At[];
   writes: At[];
@@ -53,6 +82,7 @@ const once = (list: At[]): At[] => {
   const seen = new Set<string>();
   return list.filter((a) => !seen.has(`${a.device}\n${a.key}`) && !!seen.add(`${a.device}\n${a.key}`));
 };
+const dayNumbers = (days?: Day[]) => (days ? { days: days.map((d) => DAYS.indexOf(d)).sort() } : {});
 
 /**
  * Settle every name in a rule. `problems` are reasons it can never work as written. `missing` are devices
@@ -120,6 +150,14 @@ export function compile(
   };
 
   const condition = (where: string, c: Condition): CCond => {
+    if ("time" in c) {
+      return {
+        how: "time",
+        from: minuteOf(c.time.from),
+        to: minuteOf(c.time.to),
+        ...dayNumbers(c.time.days),
+      };
+    }
     const timed = c.for !== undefined ? { for: c.for } : {};
     if ("all" in c) {
       return {
@@ -147,6 +185,59 @@ export function compile(
     return { how, at, with: given.map((o) => operand(`${where}.${how}`, at, kind, o, exact)), ...timed };
   };
 
+  const steps = (where: string, list: Step[]): CStep[] =>
+    list.map((s, i): CStep => {
+      const here = `${where}[${i}]`;
+      if ("wait" in s) return { wait: s.wait };
+      const { at, kind } = find(here, s, "write");
+      const shaping: Shaping = {
+        ...(s.min !== undefined ? { min: s.min } : {}),
+        ...(s.max !== undefined ? { max: s.max } : {}),
+        ...(s.over !== undefined ? { over: s.over } : {}),
+      };
+      if (s.over !== undefined && kind && kind !== "number") {
+        say(here, `${at.key} is not a number, so it cannot be moved over time`);
+      }
+      if ("from" in s && s.from) {
+        const from = find(`${here}.from`, s.from, "read");
+        if (kind && from.kind && kind !== from.kind && !(kind === "number" && from.kind === "text")) {
+          say(
+            here,
+            `${from.at.key} is ${from.kind} and ${at.key} is ${kind}, so one cannot be copied into the other`,
+          );
+        }
+        if (s.scale && kind && kind !== "number") {
+          say(here, `${at.key} is not a number, so it cannot be scaled`);
+        }
+        return { at, does: "from", from: from.at, ...(s.scale ? { scale: s.scale } : {}), ...shaping };
+      }
+      if ("add" in s || "multiply" in s) {
+        if (kind && kind !== "number") {
+          say(here, `${at.key} is not a number, so it cannot be added to or multiplied`);
+        }
+        return {
+          at,
+          does: "add" in s ? "add" : "multiply",
+          by: ("add" in s ? s.add : s.multiply)!,
+          ...shaping,
+        };
+      }
+      if (s.value === undefined) {
+        if (kind && kind !== "trigger") {
+          say(here, `${at.key} needs a value to be set to`);
+        }
+        return { at, does: "press" };
+      }
+      if (kind === "trigger") {
+        const source = sources.find((x) => x.id === at.device);
+        const found = source && world.vocabulary.resolve(source.capabilities, at.key);
+        const bad = found && world.vocabulary.kindProblem(found, s.value);
+        if (bad) say(here, bad.message);
+      } else fits(`${here}.value`, at, kind, s.value);
+      return { at, does: "set", value: s.value, ...shaping };
+    });
+
+  const form: Compiled["form"] = rule.follow ? "follow" : rule.while ? "while" : "when";
   const triggers: CTrigger[] = (rule.when ?? []).map((t, i): CTrigger => {
     const where = `when[${i}]`;
     if ("holds" in t) {
@@ -156,6 +247,7 @@ export function compile(
         ...(t.for !== undefined ? { for: t.for } : {}),
       };
     }
+    if ("at" in t) return { how: "at", minute: minuteOf(t.at), ...dayNumbers(t.days) };
     const { at, kind } = find(where, t, "read");
     if ("rises_past" in t || "falls_past" in t) {
       if (kind === "boolean") say(where, `${at.key} is true or false, so it has no mark to pass`);
@@ -175,51 +267,51 @@ export function compile(
   });
 
   const cond = rule.if ? condition("if", rule.if) : undefined;
-
-  const steps: CStep[] = rule.do.map((s, i): CStep => {
-    const where = `do[${i}]`;
-    if ("wait" in s) return { wait: s.wait };
-    const { at, kind } = find(where, s, "write");
-    const clamp = {
-      ...(s.min !== undefined ? { min: s.min } : {}),
-      ...(s.max !== undefined ? { max: s.max } : {}),
+  const during = rule.while ? condition("while", rule.while) : undefined;
+  const cancel = rule.cancel_when ? condition("cancel_when", rule.cancel_when) : undefined;
+  const doing = steps("do", rule.do ?? []);
+  const otherwise = steps("otherwise", rule.otherwise ?? []);
+  let follow: Compiled["follow"];
+  if (rule.follow && rule.set) {
+    const from = find("follow", rule.follow, "read"), to = find("set", rule.set, "write");
+    if (from.kind && to.kind && from.kind !== to.kind && !(to.kind === "number" && from.kind === "text")) {
+      say(
+        "set",
+        `${from.at.key} is ${from.kind} and ${to.at.key} is ${to.kind}, so one cannot follow the other`,
+      );
+    }
+    const shaped = rule.scale || rule.min !== undefined || rule.max !== undefined;
+    if (shaped && to.kind && to.kind !== "number") {
+      say("set", `${to.at.key} is not a number, so it cannot be scaled or limited`);
+    }
+    if (from.at.device === to.at.device && from.at.key === to.at.key) {
+      say("set", "a value cannot follow itself");
+    }
+    follow = {
+      from: from.at,
+      to: to.at,
+      ...(rule.scale ? { scale: rule.scale } : {}),
+      ...(rule.min !== undefined ? { min: rule.min } : {}),
+      ...(rule.max !== undefined ? { max: rule.max } : {}),
     };
-    if ("from" in s && s.from) {
-      const from = find(`${where}.from`, s.from, "read");
-      if (kind && from.kind && kind !== from.kind && !(kind === "number" && from.kind === "text")) {
-        say(
-          where,
-          `${from.at.key} is ${from.kind} and ${at.key} is ${kind}, so one cannot be copied into the other`,
-        );
-      }
-      return { at, does: "from", from: from.at, ...clamp };
-    }
-    if ("add" in s || "multiply" in s) {
-      if (kind && kind !== "number") {
-        say(where, `${at.key} is not a number, so it cannot be added to or multiplied`);
-      }
-      return { at, does: "add" in s ? "add" : "multiply", by: ("add" in s ? s.add : s.multiply)!, ...clamp };
-    }
-    if (s.value === undefined) {
-      if (kind && kind !== "trigger") say(where, `${at.key} needs a value to be set to`);
-      return { at, does: "press" };
-    }
-    if (kind === "trigger") {
-      const source = sources.find((x) => x.id === at.device);
-      const found = source && world.vocabulary.resolve(source.capabilities, at.key);
-      const bad = found && world.vocabulary.kindProblem(found, s.value);
-      if (bad) say(where, bad.message);
-    } else fits(`${where}.value`, at, kind, s.value);
-    return { at, does: "set", value: s.value, ...clamp };
-  });
+  }
 
   const read: At[] = [];
-  for (const t of triggers) t.how === "holds" ? reads(t.cond, read) : read.push(t.at);
-  if (cond) reads(cond, read);
-  for (const s of steps) if ("does" in s && s.does === "from") read.push(s.from);
-  // What it adds to or multiplies, it reads first.
-  for (const s of steps) if ("does" in s && (s.does === "add" || s.does === "multiply")) read.push(s.at);
-  const writes = once(steps.flatMap((s) => ("at" in s ? [s.at] : [])));
+  for (const t of triggers) {
+    if (t.how === "holds") reads(t.cond, read);
+    else if (t.how !== "at") read.push(t.at);
+  }
+  for (const c of [cond, during, cancel]) if (c) reads(c, read);
+  const every = [...doing, ...otherwise];
+  for (const s of every) if ("does" in s && s.does === "from") read.push(s.from);
+  // What it adds to, multiplies or moves over time, it reads first.
+  for (const s of every) {
+    if ("does" in s && (s.does === "add" || s.does === "multiply" || ("over" in s && s.over !== undefined))) {
+      read.push(s.at);
+    }
+  }
+  if (follow) read.push(follow.from);
+  const writes = once([...every.flatMap((s) => ("at" in s ? [s.at] : [])), ...(follow ? [follow.to] : [])]);
 
   if (problems.length) return { problems, missing: [...missing] };
   return {
@@ -227,10 +319,15 @@ export function compile(
       id,
       name: rule.name,
       ...(rule.group ? { group: rule.group } : {}),
-      mode: rule.mode ?? "single",
+      form,
+      mode: rule.mode ?? (form === "while" ? "restart" : "single"),
       triggers,
       ...(cond ? { cond } : {}),
-      steps,
+      steps: doing,
+      ...(during ? { during } : {}),
+      otherwise,
+      ...(cancel ? { cancel } : {}),
+      ...(follow ? { follow } : {}),
       reads: once(read),
       writes,
     },

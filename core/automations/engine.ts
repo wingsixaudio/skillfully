@@ -24,6 +24,7 @@ import { type Log, newId } from "../log.ts";
 import type { Cause, SetContext, Source } from "../source.ts";
 import { compile, type Compiled, type CStep, type CTrigger, type World } from "./compile.ts";
 import {
+  asksTheTime,
   asNumber,
   type At,
   type CCond,
@@ -34,7 +35,7 @@ import {
   same,
   type Tri,
 } from "./evaluate.ts";
-import { GROUP, LIMITS, type Rule } from "./format.ts";
+import { GROUP, LIMITS, type Rule, type Scale } from "./format.ts";
 import type { KeptRule, RuleStore } from "./store.ts";
 import { conditionWords, sentence, shown, stepWords, triggerWords } from "./words.ts";
 
@@ -43,8 +44,21 @@ const RATE_WINDOW_MS = 10_000;
 /** Why the hub is acting: its own name in the log, never a person's. */
 const HUB = { actor: "hub", via: "automation" };
 
+/** A number moved from one range onto another. What falls outside the first is held at its nearer end. */
+export function scaleOf(n: number, scale: Scale): number {
+  const t = Math.min(1, Math.max(0, (n - scale.in[0]) / (scale.in[1] - scale.in[0])));
+  return scale.out[0] + t * (scale.out[1] - scale.out[0]);
+}
+
 /** Timings a test may shorten. */
+/** How far apart the steps of a fade are sent, in milliseconds. The device's own pacing keeps the newest. */
+const FADE_STEP_MS = 33;
+/** How far back the hub looks, when it starts, for schedules that came and went while it was off. */
+const MISSED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 export interface AutomationTuning {
+  /** What time it is. A test says. */
+  now?: () => Date;
   /** One of a rule's "seconds", in milliseconds. A test makes them short. */
   secondMs?: number;
 }
@@ -84,6 +98,8 @@ class Clock {
 }
 
 interface Run {
+  /** The steps it is doing: the rule's own, or, in the while form, the ones for when its condition stops. */
+  steps: CStep[];
   traceid: string;
   depth: number;
   cancelled?: string;
@@ -93,11 +109,20 @@ interface Run {
 interface Firing {
   why: string;
   cause?: Cause;
+  /** Left out, the rule's own steps. */
+  steps?: CStep[];
+}
+/** A value on its way somewhere over time. */
+interface Fade {
+  live: Live;
+  actor: string;
+  traceid: string;
+  end(): void;
 }
 /** What a trigger remembers between looks. */
 interface Memory {
   was: Tri;
-  /** For "changes": what the value last was, when the hub could vouch for it. */
+  /** For "changes": what the value last was, when the hub could vouch for it. For "at": the minute it last fired. */
   last?: Value;
 }
 interface Live {
@@ -109,6 +134,12 @@ interface Live {
   run?: Run;
   queue: Firing[];
   skipped: { minute: number; count: number };
+  /** The while form: what its condition last was, when the hub could tell. */
+  during?: boolean;
+  /** Some part of it asks what time it is, so it is looked at again every minute. */
+  clocked: boolean;
+  /** The follow form: the minute it last said in the log that it followed. */
+  told?: string;
 }
 
 /** How a rule stands, for a page. */
@@ -153,6 +184,9 @@ export class Automations {
   #second: number;
   #stopped = false;
   #leftAlone = false;
+  /** Fades under way, by device and value. A newer fade of the same value takes the place of an older one. */
+  #fades = new Map<string, Fade>();
+  #clockNow: () => Date;
 
   constructor(
     private deps: {
@@ -166,6 +200,7 @@ export class Automations {
     tuning: AutomationTuning = {},
   ) {
     this.#second = tuning.secondMs ?? 1000;
+    this.#clockNow = tuning.now ?? (() => new Date());
   }
 
   /**
@@ -190,12 +225,20 @@ export class Automations {
     hubDevice.onTags(() => this.refresh(true));
     devices.onChange((source, values, cause) => this.#changed(source, values, cause));
     devices.onHealth((source) => this.#health(source));
+    this.#missed();
+    // Once a minute, on the minute: schedules, and anything that asks what time it is.
+    const everyMinute = () => {
+      if (this.#stopped) return;
+      this.tick();
+      this.#clock.after(60_000 - (Date.now() % 60_000) + 20, everyMinute);
+    };
+    this.#clock.after(60_000 - (Date.now() % 60_000) + 20, everyMinute);
   }
 
   stop(): void {
     this.#stopped = true;
-    this.#clock.stop();
     for (const live of this.#live.values()) this.#cancel(live, "the hub stopped");
+    this.#clock.stop();
   }
 
   // --- What the hub knows that a rule can name ---
@@ -226,7 +269,12 @@ export class Automations {
   #name = (at: At): string => {
     const source = this.deps.devices.source(at.device);
     const title = source?.state.get(`${at.key}/title`);
-    const words = typeof title === "string" && title ? title : at.key;
+    // How a device is doing is held under the device's id, and reads better under its name.
+    const words = typeof title !== "string" || !title
+      ? at.key
+      : at.device === HUB_DEVICE && at.key.startsWith("device/connected/")
+      ? `the connection to ${title}`
+      : title;
     return at.device === HUB_DEVICE || !source ? words : `${words} on ${source.name}`;
   };
 
@@ -318,14 +366,27 @@ export class Automations {
       const same = was && was.kept.hash === kept.hash &&
         (was.c === compiled || JSON.stringify(was.c) === JSON.stringify(compiled));
       if (was && !same) this.#cancel(was, "it was changed");
-      const live: Live = same
-        ? was
-        : { kept, c: compiled, memory: [], runs: [], queue: [], skipped: { minute: 0, count: 0 } };
+      const live: Live = same ? was : {
+        kept,
+        c: compiled,
+        memory: [],
+        runs: [],
+        queue: [],
+        skipped: { minute: 0, count: 0 },
+        clocked: [
+          ...compiled.triggers.flatMap((t) => (t.how === "holds" ? [t.cond] : [])),
+          compiled.cond,
+          compiled.during,
+          compiled.cancel,
+        ]
+          .some((c) => c && asksTheTime(c)),
+      };
       live.kept = kept;
       if (!same) {
         // A rule that is new here starts by noting how things stand. Noting is not firing.
         live.memory = compiled.triggers.map((t) => this.#note(live, t));
-        if (compiled.cond) evaluate(compiled.cond, this.#read, this.#held(live));
+        if (compiled.cond) this.#is(live, compiled.cond);
+        if (compiled.during) live.during = this.#is(live, compiled.during) ?? undefined;
       }
       this.#live.set(kept.id, live);
       for (const at of this.#watched(compiled)) {
@@ -352,11 +413,17 @@ export class Automations {
   /** The values a rule has to be told about: what its triggers read, and anything timed with `for`. */
   #watched(c: Compiled): At[] {
     const out: At[] = [];
-    for (const t of c.triggers) t.how === "holds" ? reads(t.cond, out) : out.push(t.at);
+    for (const t of c.triggers) {
+      if (t.how === "holds") reads(t.cond, out);
+      else if (t.how !== "at") out.push(t.at);
+    }
     const timed = (n: CCond): boolean =>
       n.for !== undefined ||
       (n.how === "all" || n.how === "any" ? n.of.some(timed) : n.how === "not" && timed(n.of));
     if (c.cond && timed(c.cond)) reads(c.cond, out);
+    if (c.during) reads(c.during, out);
+    if (c.cancel) reads(c.cancel, out);
+    if (c.follow) out.push(c.follow.from);
     return out;
   }
 
@@ -394,12 +461,18 @@ export class Automations {
 
   // --- Triggers ---
 
+  /** A condition's answer now, with every timed part of it keeping its time. */
+  #is(live: Live, c: CCond): Tri {
+    return evaluate(c, this.#read, this.#held(live), this.#clockNow);
+  }
+
   /** How a trigger stands now. */
   #now(live: Live, t: CTrigger): Tri {
+    // A schedule is fired by the clock, once, and is never something that is true.
+    if (t.how === "at") return false;
     if (t.how === "holds") {
-      const held = this.#held(live);
-      const now = evaluate(t.cond, this.#read, held);
-      return t.for !== undefined ? held(t, now) : now;
+      const now = this.#is(live, t.cond);
+      return t.for !== undefined ? this.#held(live)(t, now) : now;
     }
     const value = this.#read(t.at);
     if (t.how === "becomes") return value === undefined ? null : same(value, t.value);
@@ -414,11 +487,32 @@ export class Automations {
 
   /** Look at a rule's triggers again. Whichever went from false to true fires. */
   #look(live: Live, changed?: { device: string; values: Values; cause?: Cause }): void {
+    if (live.c.follow) return this.#follow(live, changed);
     // Anything in its condition that is being timed keeps its time, whether or not a trigger fires.
-    if (live.c.cond) evaluate(live.c.cond, this.#read, this.#held(live));
+    if (live.c.cond) this.#is(live, live.c.cond);
+    if (live.c.cancel && live.run && this.#is(live, live.c.cancel) === true) {
+      this.#cancel(live, "its cancel condition became true");
+    }
+    if (live.c.during) {
+      // The while form acts on the two edges of its condition. While the hub cannot tell, it waits.
+      const now = this.#is(live, live.c.during);
+      if (now === null) return;
+      const was = live.during;
+      live.during = now;
+      if (was === undefined || was === now) return;
+      const steps = now ? live.c.steps : live.c.otherwise;
+      if (!steps.length) return this.#cancel(live, "its condition stopped being true");
+      this.#fire(live, {
+        why: now ? "its condition became true" : "its condition stopped being true",
+        cause: changed?.cause,
+        steps,
+      });
+      return;
+    }
     let fired: CTrigger | undefined;
     live.c.triggers.forEach((t, i) => {
       const memory = live.memory[i];
+      if (t.how === "at") return;
       if (t.how === "changes") {
         const value = this.#read(t.at);
         const told = changed?.device === t.at.device && t.at.key in changed.values;
@@ -444,6 +538,13 @@ export class Automations {
   }
 
   #changed(source: Source, values: Values, cause?: Cause): void {
+    if (this.#fades.size) {
+      // Anyone else setting a value that is on its way somewhere ends its fade there. A person always wins.
+      for (const key in values) {
+        const fade = this.#fades.get(`${source.id}\n${key}`);
+        if (fade && !(cause && cause.traceid === fade.traceid && cause.actor === fade.actor)) fade.end();
+      }
+    }
     const keys = this.#watching.get(source.id);
     if (!keys) return;
     let rules: Set<Live> | undefined;
@@ -464,10 +565,115 @@ export class Automations {
     if (!this.#watching.has(source.id)) return;
     for (const live of this.#live.values()) {
       live.c.triggers.forEach((t, i) => {
-        const read: At[] = t.how === "holds" ? reads(t.cond) : [t.at];
+        const read: At[] = t.how === "holds" ? reads(t.cond) : t.how === "at" ? [] : [t.at];
         if (read.some((at) => at.device === source.id)) live.memory[i] = this.#note(live, t);
       });
     }
+  }
+
+  // --- The clock: schedules, and conditions that ask the time ---
+
+  /**
+   * What happens each minute. A schedule set for this minute fires, once: if the clock goes back over the
+   * same minute, as it does when daylight saving ends, it does not fire again. Then every rule that asks
+   * what time it is looks again. The hub calls this on the minute. A test calls it whenever it likes.
+   */
+  tick(now: Date = this.#clockNow()): void {
+    if (this.#stopped) return;
+    const minute = now.getHours() * 60 + now.getMinutes(), day = now.getDay();
+    const stamp = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()} ${minute}`;
+    for (const live of [...this.#live.values()]) {
+      live.c.triggers.forEach((t, i) => {
+        if (t.how !== "at" || t.minute !== minute || (t.days && !t.days.includes(day))) return;
+        if (live.memory[i].last === stamp) return;
+        live.memory[i].last = stamp;
+        if (this.#live.get(live.kept.id) === live) this.#fire(live, { why: triggerWords(t, this.#name) });
+      });
+      if (live.clocked && this.#live.get(live.kept.id) === live) this.#look(live);
+    }
+    this.deps.kept.set("automations.minute", String(now.getTime()));
+  }
+
+  /**
+   * Schedules that came and went while the hub was off are not run late: a walk-in cue an hour after the
+   * doors opened helps nobody. Each is written to the log as missed, so that someone can see it was.
+   */
+  #missed(): void {
+    const last = Number(this.deps.kept.get("automations.minute")), now = this.#clockNow().getTime();
+    if (!Number.isFinite(last) || last <= 0 || now - last < 120_000) return;
+    const from = Math.max(last, now - MISSED_WINDOW_MS);
+    for (const live of this.#live.values()) {
+      for (const t of live.c.triggers) {
+        if (t.how !== "at") continue;
+        // Each day in the gap, at that minute: was it after the hub was last seen and before now?
+        for (const day = new Date(from); day.getTime() <= now; day.setDate(day.getDate() + 1)) {
+          const at = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, t.minute);
+          if (at.getTime() <= from || at.getTime() > now - 60_000) continue;
+          if (t.days && !t.days.includes(at.getDay())) continue;
+          this.#log("missed", live, undefined, { why: triggerWords(t, this.#name), at: at.toISOString() });
+          break;
+        }
+      }
+    }
+  }
+
+  // --- The follow form ---
+
+  /**
+   * Keep one value equal to another. Each time the followed value changes, the other is set to it, shaped
+   * on the way if the rule says so. There is no run and no limit on how often: the device takes what it
+   * can and keeps the newest. Nothing is set when the hub starts, only when the followed value moves.
+   */
+  #follow(live: Live, changed?: { device: string; values: Values; cause?: Cause }): void {
+    const f = live.c.follow!;
+    if (!changed || changed.device !== f.from.device || !(f.from.key in changed.values)) return;
+    if (this.#isPaused(live)) return;
+    if (live.c.cond && this.#is(live, live.c.cond) !== true) return;
+    let value = this.#read(f.from);
+    if (value === undefined) return;
+    if (f.scale) {
+      const n = asNumber(value);
+      if (n === null) return;
+      value = scaleOf(n, f.scale);
+    }
+    if (f.min !== undefined || f.max !== undefined) {
+      const n = asNumber(value);
+      if (n === null) return;
+      value = Math.min(f.max ?? Infinity, Math.max(f.min ?? -Infinity, n));
+    }
+    const source = this.deps.devices.source(f.to.device);
+    if (!source || source.state.get(f.to.key) === value) return;
+    const depth = (changed.cause?.depth ?? 0) + 1;
+    if (depth > MAX_DEPTH) {
+      return this.#halt(
+        live,
+        `It was part of a chain of rules setting each other off, more than ${MAX_DEPTH} deep.`,
+      );
+    }
+    const traceid = changed.cause?.traceid ?? newId();
+    // Said once a minute at most, however often the value moves: that it followed, or would have.
+    const stamp = `${Math.floor(Date.now() / 60_000)} ${live.kept.state}`;
+    const first = live.told !== stamp;
+    live.told = stamp;
+    if (live.kept.state === "test") {
+      if (first) {
+        this.#log("would", live, { traceid }, { writes: [{ device: f.to.device, key: f.to.key, value }] });
+      }
+      return;
+    }
+    if (first) {
+      const at = new Date().toISOString();
+      this.deps.store.ran(live.kept.id, at);
+      const view = this.#views.get(live.kept.id);
+      if (view) view.lastRan = at;
+    }
+    source.set(f.to.key, value, { actor: `automation/${live.kept.id}`, via: "automation", traceid, depth })
+      .then(
+        (r) => {
+          if (r.ok || !first) return;
+          this.#log("failed", live, { traceid }, { doing: `set ${this.#name(f.to)}`, why: r.error.message });
+        },
+      );
   }
 
   // --- Firing ---
@@ -515,7 +721,7 @@ export class Automations {
       return "It was stopped: it was part of a loop.";
     }
     if (live.c.cond) {
-      const holds = evaluate(live.c.cond, this.#read, this.#held(live));
+      const holds = this.#is(live, live.c.cond);
       if (holds !== true) {
         const unknown = holds === null ? firstUnknown(live.c.cond, this.#read) : undefined;
         return this.#skip(
@@ -524,6 +730,10 @@ export class Automations {
         );
       }
     }
+    if (live.c.cancel && this.#is(live, live.c.cancel) === true) {
+      return this.#skip(live, "Its cancel condition already held.");
+    }
+    const steps = firing.steps ?? live.c.steps;
     if (live.run) {
       if (live.c.mode === "single") return this.#skip(live, "It was already running.");
       if (live.c.mode === "queue") {
@@ -540,7 +750,7 @@ export class Automations {
       return "It was stopped: it ran too often.";
     }
     live.runs.push(now);
-    const run: Run = { traceid: firing.cause?.traceid ?? newId(), depth };
+    const run: Run = { steps, traceid: firing.cause?.traceid ?? newId(), depth };
     const at = new Date().toISOString();
     this.deps.store.ran(live.kept.id, at);
     const view = this.#views.get(live.kept.id);
@@ -549,7 +759,7 @@ export class Automations {
     for (const a of live.c.reads) read[`${a.device}:${a.key}`] = this.#read(a) ?? null;
     this.#log("fired", live, run, { why: firing.why, depth, read });
     if (live.kept.state === "test") {
-      this.#log("would", live, run, { writes: this.#would(live.c) });
+      this.#log("would", live, run, { writes: this.#would(steps) });
       return null;
     }
     live.run = run;
@@ -567,6 +777,11 @@ export class Automations {
       const from = this.#read(s.from);
       if (from === undefined) return { problem: `${this.#name(s.from)} is unknown` };
       value = from;
+      if (s.scale) {
+        const n = asNumber(from);
+        if (n === null) return { problem: `${this.#name(s.from)} is not a number` };
+        value = scaleOf(n, s.scale);
+      }
     } else {
       const held = asNumber(this.#read(s.at));
       if (held === null) return { problem: `${this.#name(s.at)} is unknown` };
@@ -579,15 +794,60 @@ export class Automations {
     return { value };
   }
 
+  /**
+   * Move a value to where it is going over some seconds: a step every thirtieth of a second, the last one
+   * exactly on the mark. The run that asked does not wait for it. It ends early if anyone else sets the
+   * value, if the rule is cancelled or paused, or if the device stops taking it.
+   */
+  #fade(live: Live, run: Run, at: At, from: number, to: number, seconds: number): void {
+    const id = `${at.device}\n${at.key}`;
+    this.#fades.get(id)?.end();
+    const total = seconds * this.#second, began = performance.now();
+    const actor = `automation/${live.kept.id}`;
+    let over = false, wait: (() => void) | undefined;
+    const fade: Fade = {
+      live,
+      actor,
+      traceid: run.traceid,
+      end: () => {
+        over = true;
+        wait?.();
+        if (this.#fades.get(id) === fade) this.#fades.delete(id);
+      },
+    };
+    const step = () => {
+      if (over) return;
+      const t = Math.min(1, (performance.now() - began) / total);
+      const source = this.deps.devices.source(at.device);
+      if (!source) return fade.end();
+      // Someone else has just asked for this value and not been answered yet. It is theirs: the fade ends.
+      const asking = source.asking?.(at.key);
+      if (asking && !(asking.actor === actor && asking.traceid === run.traceid)) return fade.end();
+      const value = t >= 1 ? to : from + (to - from) * t;
+      source.set(at.key, value, { actor, via: "automation", traceid: run.traceid, depth: run.depth }).then(
+        (r) => {
+          if (r.ok || over) return;
+          fade.end();
+          this.#log("failed", live, run, { doing: `fade ${this.#name(at)} to ${to}`, why: r.error.message });
+        },
+      );
+      if (t >= 1) return fade.end();
+      wait = this.#clock.after(Math.min(FADE_STEP_MS, total), step);
+    };
+    this.#fades.set(id, fade);
+    step();
+  }
+
   /** What a rule in Test would have sent. Waits are not waited for, and nothing is sent. */
-  #would(c: Compiled): unknown[] {
-    return c.steps.map((s) => {
+  #would(steps: CStep[]): unknown[] {
+    return steps.map((s) => {
       if ("wait" in s) return { wait: s.wait };
       const v = this.#valueOf(s);
       return {
         device: s.at.device,
         key: s.at.key,
         ..."value" in v ? { value: v.value } : { problem: v.problem },
+        ...("over" in s && s.over !== undefined ? { over: s.over } : {}),
       };
     });
   }
@@ -596,7 +856,7 @@ export class Automations {
     const began = performance.now();
     let done = 0;
     let failed: string | undefined;
-    for (const s of live.c.steps) {
+    for (const s of run.steps) {
       if (run.cancelled) break;
       if ("wait" in s) {
         await new Promise<void>((resolve) => {
@@ -616,6 +876,17 @@ export class Automations {
         failed = "problem" in v ? v.problem : `${s.at.device} is not on this hub`;
         break;
       }
+      if ("over" in s && s.over !== undefined && typeof v.value === "number") {
+        // A fade is started and left to run. The next step does not wait for it.
+        const from = asNumber(this.#read(s.at));
+        if (from === null) {
+          failed = `${this.#name(s.at)} is unknown`;
+          break;
+        }
+        this.#fade(live, run, s.at, from, v.value, s.over);
+        done++;
+        continue;
+      }
       const ctx: SetContext = {
         actor: `automation/${live.kept.id}`,
         via: "automation",
@@ -633,13 +904,13 @@ export class Automations {
     if (failed !== undefined) {
       this.#log("failed", live, run, {
         step: done + 1,
-        of: live.c.steps.length,
-        doing: stepWords(live.c.steps[done], this.#name),
+        of: run.steps.length,
+        doing: stepWords(run.steps[done], this.#name),
         why: failed,
         ms,
       });
     } else if (run.cancelled) {
-      this.#log("cancelled", live, run, { why: run.cancelled, done, of: live.c.steps.length, ms });
+      this.#log("cancelled", live, run, { why: run.cancelled, done, of: run.steps.length, ms });
     } else this.#log("finished", live, run, { steps: done, ms });
     if (live.run !== run) return;
     live.run = undefined;
@@ -651,6 +922,7 @@ export class Automations {
   /** Stop a rule in the middle of its steps. What it already did is not undone. */
   #cancel(live: Live, why: string): void {
     live.queue = [];
+    for (const fade of [...this.#fades.values()]) if (fade.live === live) fade.end();
     if (!live.run) return;
     live.run.cancelled = why;
     live.run.wake?.();
@@ -711,6 +983,7 @@ export class Automations {
         ? `${view.name} is waiting for ${view.missing.join(", ")}.`
         : `${view.name} is ${view.state === "stopped" ? "stopped" : "off"}.`;
     }
+    if (live.c.follow) return `${live.c.name} follows a value. There is nothing to run.`;
     const why = this.#fire(live, {
       why: "it was run",
       cause: { actor: ctx.actor, via: ctx.via, traceid: ctx.traceid, depth: ctx.depth ?? 0 },
@@ -764,36 +1037,57 @@ export class Automations {
       const v = this.#read(at);
       return v === undefined ? "unknown" : shown(v);
     };
+    const now = (c: CCond) => answer(evaluate(c, this.#read, undefined, this.#clockNow));
     const lines = (c: CCond, depth: number, out: Line[]): Line[] => {
-      const words = c.how === "all" ? "All of:" : c.how === "any" ? "Any of:" : c.how === "not" ? "Not:" : "";
-      if (c.how === "all" || c.how === "any" || c.how === "not") {
+      if (c.how === "time") out.push({ depth, words: conditionWords(c, this.#name), is: now(c) });
+      else if (c.how === "all" || c.how === "any" || c.how === "not") {
+        const words = c.how === "all" ? "All of:" : c.how === "any" ? "Any of:" : "Not:";
         out.push({
           depth,
           words: words + (c.for !== undefined ? ` (for ${c.for} seconds)` : ""),
-          is: answer(evaluate(c, this.#read)),
+          is: now(c),
         });
         for (const inner of c.how === "not" ? [c.of] : c.of) lines(inner, depth + 1, out);
       } else {
-        const leaf = { ...c, for: undefined } as CCond;
         out.push({
           depth,
           words: conditionWords(c, this.#name),
           reads: value(c.at),
-          is: answer(evaluate(leaf, this.#read)),
+          is: now({ ...c, for: undefined }),
         });
       }
       return out;
     };
-    return {
-      triggers: compiled.triggers.map((t) => ({
+    // What sets it off, in whichever form it is written: triggers, a condition's two edges, or a value moving.
+    const triggers: Line[] = compiled.follow
+      ? [{
+        depth: 0,
+        words: `${this.#name(compiled.follow.from)} changes`,
+        reads: value(compiled.follow.from),
+        is: "false",
+      }]
+      : compiled.during
+      ? lines(compiled.during, 0, [])
+      : compiled.triggers.map((t) => ({
         depth: 0,
         words: triggerWords(t, this.#name),
-        ...(t.how === "holds" ? {} : { reads: value(t.at) }),
-        is: answer(t.how === "holds" ? evaluate(t.cond, this.#read) : this.#now({} as Live, t)),
-      })),
-      condition: compiled.cond ? lines(compiled.cond, 0, []) : [],
-      steps: compiled.steps.map((s) => stepWords(s, this.#name)),
-      would: this.#would(compiled),
+        ...(t.how === "holds" || t.how === "at" ? {} : { reads: value(t.at) }),
+        is: t.how === "holds" ? now(t.cond) : answer(this.#now({} as Live, t)),
+      }));
+    return {
+      triggers,
+      condition: [
+        ...(compiled.cond ? lines(compiled.cond, 0, []) : []),
+        ...(compiled.cancel
+          ? [{ depth: 0, words: "Stops if:", is: now(compiled.cancel) }, ...lines(compiled.cancel, 1, [])]
+          : []),
+      ],
+      steps: [
+        ...compiled.steps.map((s) => stepWords(s, this.#name)),
+        ...compiled.otherwise.map((s) => `when it stops: ${stepWords(s, this.#name)}`),
+        ...(compiled.follow ? [sentence(compiled, this.#name)] : []),
+      ],
+      would: this.#would(compiled.steps),
     };
   }
 }

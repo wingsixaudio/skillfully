@@ -542,6 +542,11 @@ export class PluginHost implements Source {
     });
   }
 
+  /** The newest request to set this value that has not been answered yet, if there is one. */
+  asking(key: string): SetContext | undefined {
+    return (this.#pending.get(key) ?? this.#inflight?.items.get(key))?.ctx;
+  }
+
   /**
    * The device is sent commands no more often than it said it can take them. But the first change after a
    * quiet spell has nothing to wait behind, so it goes at once and the pacing starts from it: a button

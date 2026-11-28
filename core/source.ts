@@ -58,6 +58,12 @@ export interface Source {
   onHealth(listener: () => void): void;
   /** Ask for a value to be set. Resolves when it has been, or says why not. */
   set(key: string, value: Value, ctx: SetContext): Promise<SetOutcome>;
+  /**
+   * Who has asked for this value to be set and not yet been answered: the newest request, waiting or on
+   * its way to the device. Something that sets a value again and again, such as a fade, asks this first,
+   * so that it never overtakes a person who has just taken hold of the same value.
+   */
+  asking?(key: string): SetContext | undefined;
 }
 
 export const causeOf = (ctx: SetContext & { traceid: string }): Cause => ({
