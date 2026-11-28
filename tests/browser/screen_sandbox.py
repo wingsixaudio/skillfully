@@ -694,7 +694,7 @@ async def main():
                 {"type": "button", "at": [1, 1, 4, 1], "title": "Walk-in", "steps": [
                     {"key": "switch/outlet/1/on", "value": True},
                     {"key": "switch/outlet/2/brightness", "value": 42},
-                    {"wait": 0.6},
+                    {"wait": 1.5},
                     {"key": "switch/outlet/1/on", "value": False}]},
                 {"type": "button", "at": [1, 2, 4, 1], "title": "Broken scene", "steps": [
                     {"key": "switch/outlet/4/on", "value": True},
@@ -705,7 +705,12 @@ async def main():
         walk = cv.locator("#board button.piece", has_text="Walk-in")
         await walk.click()
         await cv.locator("#board button.piece.busy", has_text="Walk-in").wait_for(timeout=3000)
-        midway = await state("sim-switch")
+        # The first steps are done while it waits, before the last one.
+        midway = {}
+        for _ in range(30):
+            midway = await state("sim-switch")
+            if midway["switch/outlet/1/on"] is True or not await cv.locator("#board button.piece.busy").count(): break
+            await owner.wait_for_timeout(50)
         await cv.locator("#board button.piece.busy").wait_for(state="detached", timeout=8000)
         after = await state("sim-switch")
         check("a button with steps does them in turn, waiting where it says, and shows it is busy meanwhile", midway["switch/outlet/1/on"] is True and round(after["switch/outlet/2/brightness"]) == 42 and after["switch/outlet/1/on"] is False, f"{midway.get('switch/outlet/1/on')} {after.get('switch/outlet/2/brightness')} {after.get('switch/outlet/1/on')}")
