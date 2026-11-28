@@ -67,6 +67,8 @@ export function pretendModel(
     if (r instanceof Response) return r;
     const turn = Array.isArray(r) ? { content: r } : r;
     const asks = turn.content.some((b) => (b as { type?: string }).type === "tool_use");
+    // Asked the way Chat Completions is asked, it answers that way: whole, or in pieces when asked to stream.
+    if (one.path.endsWith("/chat/completions")) return chatAnswer(turn.content, one.body);
     return Response.json({
       id: "msg_pretend",
       type: "message",
@@ -161,4 +163,59 @@ export function pieces(content: unknown[], size = 4): Response {
     }),
     { headers: { "content-type": "text/event-stream" } },
   );
+}
+
+/** A turn as Chat Completions sends it. In pieces when `stream` was asked for, with what was used last. */
+// deno-lint-ignore no-explicit-any
+function chatAnswer(content: unknown[], body: any): Response {
+  // deno-lint-ignore no-explicit-any
+  const blocks = content as any[];
+  const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join("");
+  const calls = blocks.filter((b) => b.type === "tool_use").map((b) => ({
+    id: b.id,
+    type: "function",
+    function: { name: b.name, arguments: JSON.stringify(b.input) },
+  }));
+  const finish = calls.length ? "tool_calls" : "stop";
+  const usage = { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 };
+  if (!body.stream) {
+    return Response.json({
+      id: "chatcmpl-pretend",
+      object: "chat.completion",
+      model: body.model,
+      choices: [{
+        index: 0,
+        message: { role: "assistant", content: text || null, ...(calls.length ? { tool_calls: calls } : {}) },
+        finish_reason: finish,
+      }],
+      usage,
+    });
+  }
+  const chunk = (delta: unknown, finish_reason: string | null = null) => ({
+    id: "chatcmpl-pretend",
+    object: "chat.completion.chunk",
+    choices: [{ index: 0, delta, finish_reason }],
+  });
+  const events: unknown[] = [chunk({ role: "assistant", content: "" })];
+  for (let at = 0; at < text.length; at += 4) events.push(chunk({ content: text.slice(at, at + 4) }));
+  calls.forEach((c, index) => {
+    const half = Math.ceil(c.function.arguments.length / 2);
+    events.push(
+      chunk({
+        tool_calls: [{
+          index,
+          id: c.id,
+          type: "function",
+          function: { name: c.function.name, arguments: "" },
+        }],
+      }),
+    );
+    for (const part of [c.function.arguments.slice(0, half), c.function.arguments.slice(half)]) {
+      events.push(chunk({ tool_calls: [{ index, function: { arguments: part } }] }));
+    }
+  });
+  events.push(chunk({}, finish));
+  if (body.stream_options?.include_usage) events.push({ id: "chatcmpl-pretend", choices: [], usage });
+  const out = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("") + "data: [DONE]\n\n";
+  return new Response(out, { headers: { "content-type": "text/event-stream" } });
 }

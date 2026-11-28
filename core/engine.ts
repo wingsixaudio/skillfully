@@ -497,7 +497,7 @@ export class Engine {
         };
         try {
           turn = await askModel(
-            { address: about.address, key, model: about.model },
+            { address: about.address, key, model: about.model, speaks: about.speaks },
             { system, tools, messages, maxTokens: MAX_TOKENS },
             stop,
             this.tuning,
@@ -762,7 +762,7 @@ export class Engine {
       });
     try {
       const models = await listModels(
-        { address: agent.about(which).address, key },
+        { address: agent.about(which).address, key, speaks: agent.about(which).speaks },
         this.#stop.signal,
         this.tuning,
       );
