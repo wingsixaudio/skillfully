@@ -589,3 +589,262 @@ button:disabled {
   overflow-wrap: anywhere;
   text-align: right;
 }
+
+/* The page where a rule is written (rules.js): triggers, conditions and steps as rows of blanks. */
+.rule-top {
+  display: grid;
+  gap: 0 16px;
+}
+@media (min-width: 700px) {
+  .rule-top {
+    grid-template-columns: 3fr 2fr;
+  }
+}
+.rule-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rule-types button {
+  flex: 1 1 200px;
+  min-height: 44px;
+  padding: 10px 14px;
+  font-size: 14px;
+  text-align: left;
+  border: 1px solid transparent;
+}
+.rule-types button[aria-checked="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.rule-part {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rail);
+}
+.rule-part h3,
+.rule-summary h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+.rule-part h3 span {
+  color: var(--dim);
+  font-size: 13px;
+  font-weight: 400;
+}
+.rule-list {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+.rule-row {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: #18181b;
+  border: 1px solid var(--rail);
+  border-radius: 12px;
+}
+.rule-row input,
+.rule-row select,
+.rule-list > select {
+  width: auto;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+.rule-row input[type="text"] {
+  flex: 1 1 120px;
+}
+.rule-row input[type="number"] {
+  width: 96px;
+}
+.rule-row input.rule-short {
+  width: 72px;
+}
+.rule-row button {
+  min-height: 40px;
+  padding: 8px 12px;
+  font-size: 14px;
+}
+.rule-word {
+  color: var(--dim);
+  font-size: 14px;
+}
+button.rule-value {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 150px;
+  max-width: 340px;
+  text-align: left;
+  font-weight: 600;
+}
+button.rule-value span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.rule-value::after {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: -4px;
+  border-right: 2px solid var(--dim);
+  border-bottom: 2px solid var(--dim);
+  transform: rotate(45deg);
+}
+button.rule-value.empty {
+  color: var(--accent);
+  border: 1px dashed var(--accent);
+  background: none;
+}
+.rule-row .rule-x {
+  padding: 8px 10px;
+  font-size: 16px;
+  line-height: 1;
+  background: none;
+  color: var(--dim);
+}
+.rule-row .rule-x:hover:not(:disabled) {
+  background: var(--rail);
+  color: var(--text);
+}
+.rule-row .rule-x:disabled {
+  opacity: .3;
+  cursor: default;
+}
+.rule-end {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+.rule-row > .rule-x {
+  margin-left: auto;
+}
+.rule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.rule-days button.chip {
+  min-height: 32px;
+  padding: 4px 10px;
+}
+.rule-adder {
+  position: relative;
+}
+button.rule-add {
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+  padding-left: 4px;
+}
+.rule-menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 260px;
+  padding: 6px;
+  display: grid;
+  background: #1f1f23;
+  border: 1px solid var(--rail);
+  border-radius: 12px;
+}
+.rule-menu[hidden] {
+  display: none;
+}
+.rule-menu button {
+  min-height: 40px;
+  padding: 8px 12px;
+  background: none;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+}
+.rule-menu button:hover,
+.rule-menu button:focus-visible {
+  background: var(--rail);
+}
+.rule-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text);
+}
+.rule-check input {
+  width: 18px;
+  min-height: 18px;
+}
+.rule-more {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rail);
+}
+.rule-more summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 15px;
+}
+.rule-summary {
+  margin: 24px 0 16px;
+  padding: 14px 16px;
+  background: #18181b;
+  border: 1px solid var(--rail);
+  border-radius: 12px;
+}
+.rule-summary h3 {
+  color: var(--dim);
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.rule-summary p {
+  margin: 0;
+}
+.rule-summary .msg {
+  margin: 6px 0 0;
+}
+#pickFind {
+  margin-top: 4px;
+}
+#pickList {
+  margin-top: 8px;
+  max-height: 50vh;
+  overflow: auto;
+}
+#pickDevice {
+  margin-top: 8px;
+}
+button.pick-row {
+  padding: 10px 8px;
+  border-radius: 8px;
+}
+button.pick-row:hover,
+button.pick-row:focus-visible {
+  background: var(--rail);
+}
+button.pick-row > span:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+button.pick-row small {
+  color: var(--dim);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}

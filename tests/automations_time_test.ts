@@ -165,7 +165,7 @@ Deno.test("a fade moves a value there over time, does not hold up the next step,
   });
   assertEquals(
     hub.automations.describe("x", hub.automations.views()[0].rule).sentence,
-    'When it is run: fade console/input/1/bus/1/level on Simulated board to -40 over 15 seconds, then set note to "moved on".',
+    'When it is run: fade Send level (input 1, bus 1) on Simulated board to -40 over 15 seconds, then set note to "moved on".',
   );
   assert((await press(hub, "fade-up")).ok);
   await until("the next step ran at once", () => tag(hub, "tag/text/note") === "moved on");
@@ -305,7 +305,7 @@ Deno.test("the follow form keeps one value equal to another, as often as it move
   });
   assertEquals(
     hub.automations.views()[0].sentence,
-    "console/input/1/bus/1/level on Simulated board follows count, scaled from 0 to 100 onto -60 to 0 (at most -6), while Service live is on.",
+    "Send level (input 1, bus 1) on Simulated board follows count, scaled from 0 to 100 onto -60 to 0 (at most -6), while Service live is on.",
   );
   await sleep(60);
   assertEquals(desk.state.get(LEVEL), -90, "nothing is set when it is turned on");

@@ -252,14 +252,21 @@ they put it.
 
 How a rule comes to run:
 
-1. **It is proposed.** A person or an agent writes `config/automations/<id>.json`. A file is a proposal and
-   runs nothing.
+1. **It is proposed.** A person writes it on the Automations page, an agent drafts it, or someone puts a file
+   at `config/automations/<id>.json`. A proposal runs nothing.
 2. **It is checked.** Every value it names is looked up. A device the hub does not have, a value that cannot
    be set, a word a choice cannot be: each is refused with the reason. What comes out is the rule as a
    sentence and its reach, every value it reads and every value it can set, worked out from the text alone.
 3. **A superuser approves that exact text.** The approval names the text by its hash, so a yes cannot be spent
    on a file that has since changed. The hub runs rules from its database, never from the file.
 4. **It is enabled,** or put in **Test mode**, where it watches the real hub and logs what it would have sent.
+
+The page where a rule is written (`core/web/rules.js`) is a form over that same JSON document: triggers,
+conditions and steps are rows, and each blank is filled from a list of what the hub really has, so a rule made
+there names only values that exist and compares them only with what they can hold. The summary sentence is
+worked out by the hub as the rule is written (`automation/preview`), by the same code that will check it when
+it is saved. A rule that uses more than the form shows, such as conditions inside conditions, opens as JSON,
+whole. The form is a convenience and is not trusted: the hub checks every saved rule as before.
 
 What keeps it safe:
 
