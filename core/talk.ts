@@ -51,6 +51,16 @@ const BEFORE_CHARS = 12_000;
 const IDLE_MS = 12 * 60 * 60 * 1000;
 const THREADS_MAX = 500;
 const SAID_MAX = 200;
+/** How many of the things a question did are kept with it when it comes to nothing. */
+const DONE_MAX = 30;
+
+/** The last things a question did before it came to nothing, as one line. */
+function alreadyDone(looked: string[] = []): string {
+  if (!looked.length) return "";
+  const last = looked.slice(-DONE_MAX).map((w) => w.replace(/\s+/g, " ").slice(0, 160));
+  const more = looked.length - last.length;
+  return ` Completed before stopping${more ? ` (${more} earlier steps not shown)` : ""}: ${last.join("; ")}.`;
+}
 
 export class Talks {
   #threads = new Map<string, Thread>();
@@ -207,11 +217,12 @@ export class Talks {
         return;
       }
       t.waiting = undefined;
-      // Only what was answered is kept. A question that came to nothing is not part of the conversation.
-      if (r.ok) {
-        t.said.push(running.asked, { id: newId(), role: "assistant", text: r.raw });
-        if (t.said.length > SAID_MAX) t.said.splice(0, t.said.length - SAID_MAX);
-      }
+      // A question that came to nothing is kept too, with how it ended, marked as the hub's note. Otherwise
+      // "try again" would arrive with nothing before it, and the agent could not know what to try.
+      // What it had already done is kept with it, so that going on does not mean doing it all again.
+      const text = r.ok ? r.raw : `(Hub: no answer. ${r.message}${alreadyDone(r.looked)})`;
+      t.said.push(running.asked, { id: newId(), role: "assistant", text });
+      if (t.said.length > SAID_MAX) t.said.splice(0, t.said.length - SAID_MAX);
     };
 
     // The person's yes or no to what it asked to do. It goes on from where it stopped.

@@ -1050,6 +1050,13 @@ async def main():
         check("choosing the other API says its models can be chosen once that is saved", "that provider's models" in await owner.locator("#agentModelNote").inner_text())
         await owner.locator("#dlgForm button[value='cancel']").click(); await owner.wait_for_selector("#dlg:not([open])", state="attached")
 
+        # How far one question may go is on the card, and is changed there.
+        check("the agent's card shows its max steps and max output tokens", "Max steps: 12 · Max output tokens: 8,192" in await owner.locator("#secAgent").inner_text())
+        await owner.click("#agentLimitsSet"); await owner.fill("#agentSteps", "20"); await owner.fill("#agentTokens", "16000"); await ok_dialog()
+        await owner.wait_for_function("() => document.querySelector('#secAgent').innerText.includes('Max steps: 20 · Max output tokens: 16,000')")
+        check("both limits are changed from the card, and it says the new ones", True)
+        if shots: await owner.locator("#secAgent").screenshot(path=os.path.join(shots, "13b-agent-limits.png"))
+
         # A second agent, for someone with a key of their own. The first stays the default.
         check("one agent answers everyone who may ask", "Everyone who may ask." in await owner.locator("#secAgent").inner_text())
         await owner.click("#agentAdd"); await owner.fill("#agentName", "Kit"); await ok_dialog()

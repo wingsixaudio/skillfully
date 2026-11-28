@@ -1587,6 +1587,39 @@ function drawAgent(a) {
     ),
   );
   line(
+    "Limits",
+    "Max steps: " + a.maxSteps + " · Max output tokens: " + a.maxTokens.toLocaleString("en-US"),
+    button("Change", () =>
+      ask("Limits", (x) => {
+        input(x, "agentSteps", "Max steps", {
+          type: "number",
+          min: 2,
+          max: 40,
+          value: a.maxSteps,
+          required: true,
+        });
+        input(x, "agentTokens", "Max output tokens", {
+          type: "number",
+          min: 1024,
+          max: 32000,
+          value: a.maxTokens,
+          required: true,
+        });
+        x.append(
+          el("p", {
+            className: "help",
+            textContent:
+              "Max steps: how many model calls one request can use, including tool calls. Max output tokens: the cap on each model response. Large requests, such as building a canvas or several automations, need more of both. Higher limits cost more per request.",
+          }),
+        );
+      }, () =>
+        call("/admin/api/agent/set", {
+          ...me,
+          maxSteps: Number($("agentSteps").value),
+          maxTokens: Number($("agentTokens").value),
+        })), "agentLimitsSet"),
+  );
+  line(
     "Log access",
     a.readsLog ? "Allowed. Log entries it reads are sent to the model provider." : "Not allowed.",
     button(a.readsLog ? "Revoke log access" : "Allow log access", () => {

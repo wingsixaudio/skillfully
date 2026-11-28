@@ -48,10 +48,19 @@ export interface AboutAgent {
   speaks: Speaks;
   /** May it read the hub's log. Off until a superuser says so. */
   readsLog: boolean;
+  /** How many times it may go back to its model for one question, and how much its model may write each time. */
+  maxSteps: number;
+  maxTokens: number;
 }
 
 type Outcome<T = Record<never, never>> = ({ ok: true } & T) | { ok: false; code: string; message: string };
 const no = (code: string, message: string) => ({ ok: false as const, code, message });
+/** How far one question may go, unless a superuser says otherwise, and how far they may take it. */
+export const LIMITS = {
+  steps: { usual: 12, least: 2, most: 40 },
+  tokens: { usual: 8192, least: 1024, most: 32000 },
+};
+
 /** A hub's agents are a handful: one for most, another for someone with a key of their own. */
 const MAX_AGENTS = 8;
 
@@ -62,6 +71,8 @@ interface Row {
   address: string | null;
   reads_log: number;
   speaks: string | null;
+  max_steps: number | null;
+  max_tokens: number | null;
 }
 
 export class Agent {
@@ -78,7 +89,7 @@ export class Agent {
     db.exec(`
       CREATE TABLE IF NOT EXISTS agents (
         person TEXT PRIMARY KEY, is_on INTEGER NOT NULL DEFAULT 0, model TEXT, address TEXT,
-        reads_log INTEGER NOT NULL DEFAULT 0, speaks TEXT
+        reads_log INTEGER NOT NULL DEFAULT 0, speaks TEXT, max_steps INTEGER, max_tokens INTEGER
       );
       CREATE TABLE IF NOT EXISTS agent_keys (person TEXT PRIMARY KEY, key TEXT NOT NULL, set_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS agent_given (person TEXT PRIMARY KEY, agent TEXT NOT NULL);
@@ -163,6 +174,8 @@ export class Agent {
       address: row?.address || DEFAULT_ADDRESS,
       speaks: row?.speaks === "chat" ? "chat" : "messages",
       readsLog: !!row?.reads_log,
+      maxSteps: row?.max_steps || LIMITS.steps.usual,
+      maxTokens: row?.max_tokens || LIMITS.tokens.usual,
     };
   }
 
@@ -217,14 +230,17 @@ export class Agent {
     const like = this.person() ? this.about() : null;
     const made = this.accounts.addAgent(by, name);
     if (!made.ok) return made;
-    this.#db.prepare("INSERT INTO agents (person, model, address, reads_log, speaks) VALUES (?, ?, ?, ?, ?)")
-      .run(
-        made.person.id,
-        like ? like.model : null,
-        like ? like.address : null,
-        like?.readsLog ? 1 : 0,
-        like ? like.speaks : null,
-      );
+    this.#db.prepare(
+      "INSERT INTO agents (person, model, address, reads_log, speaks, max_steps, max_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      made.person.id,
+      like ? like.model : null,
+      like ? like.address : null,
+      like?.readsLog ? 1 : 0,
+      like ? like.speaks : null,
+      like ? like.maxSteps : null,
+      like ? like.maxTokens : null,
+    );
     if (!like) this.kept.set("agent.person", made.person.id);
     else if (like.person!.roles.length) this.accounts.setRoles(by, made.person.id, like.person!.roles);
     return { ok: true, person: this.accounts.person(made.person.id)! };
@@ -268,7 +284,14 @@ export class Agent {
   /** Choose its model, where the model is, and whether it may read the log. */
   set(
     by: string,
-    wanted: { model?: unknown; address?: unknown; readsLog?: unknown; speaks?: unknown },
+    wanted: {
+      model?: unknown;
+      address?: unknown;
+      readsLog?: unknown;
+      speaks?: unknown;
+      maxSteps?: unknown;
+      maxTokens?: unknown;
+    },
     id?: string,
   ): Outcome {
     const which = this.#which(id);
@@ -308,6 +331,15 @@ export class Agent {
       }
       if (wanted.speaks !== before.speaks) changed.speaks = wanted.speaks;
     }
+    for (const [name, limit] of [["maxSteps", LIMITS.steps], ["maxTokens", LIMITS.tokens]] as const) {
+      const n = wanted[name];
+      if (n === undefined) continue;
+      if (typeof n !== "number" || !Number.isInteger(n) || n < limit.least || n > limit.most) {
+        const label = name === "maxSteps" ? "Max steps" : "Max output tokens";
+        return no("bad_limit", `${label} must be a whole number from ${limit.least} to ${limit.most}.`);
+      }
+      if (n !== before[name]) changed[name] = n;
+    }
     if (wanted.readsLog !== undefined && !!wanted.readsLog !== before.readsLog) {
       changed.readsLog = !!wanted.readsLog;
     }
@@ -317,6 +349,8 @@ export class Agent {
     if ("address" in changed) put("address", changed.address as string);
     if ("readsLog" in changed) put("reads_log", changed.readsLog ? 1 : 0);
     if ("speaks" in changed) put("speaks", changed.speaks as string);
+    if ("maxSteps" in changed) put("max_steps", changed.maxSteps as number);
+    if ("maxTokens" in changed) put("max_tokens", changed.maxTokens as number);
     if (Object.keys(changed).length) this.#note("skillfully.agent.changed", by, which, changed);
     return { ok: true };
   }

@@ -36,6 +36,9 @@ export interface EngineTuning extends ModelTuning {
   answerMs?: number;
 }
 
+/** A number as it is shown: 8,192. */
+const count = (n: number) => n.toLocaleString("en-US");
+
 export type Answered =
   | {
     ok: true;
@@ -47,7 +50,7 @@ export type Answered =
     ms: number;
     /** The answer as the model gave it, with IDs where people are. What is kept to carry a conversation on. */
     raw: string;
-    /** The model ran out of room before it finished. */
+    /** The answer was cut off at the max output tokens limit. */
     cut: boolean;
     traceid: string;
   }
@@ -56,6 +59,8 @@ export type Answered =
     code: string;
     message: string;
     traceid?: string;
+    /** What it had looked at and done before it stopped, in a few words each, in order. */
+    looked?: string[];
     /** With the code "waiting": it has stopped to ask the person a yes or a no, and these are the questions. */
     waiting?: Interrupt[];
   };
@@ -116,11 +121,6 @@ class Namer {
 }
 
 const QUESTION_MAX = 2000;
-/**
- * The most its model may write in one turn. A model that thinks before it speaks spends from the same
- * allowance, so this has room for both.
- */
-const MAX_TOKENS = 4096;
 /** How long a person has to say yes or no. After that the moment has passed, and what was true then may not be. */
 const ANSWER_MS = 5 * 60 * 1000;
 const ANSWER_MAX = 8000;
@@ -419,7 +419,8 @@ export class Engine {
         ? "read"
         : "none",
     );
-    const maxSteps = this.tuning.maxSteps ?? 8;
+    // How far this question may go is the agent's own setting. A test may say otherwise.
+    const maxSteps = this.tuning.maxSteps ?? about.maxSteps;
     const tokens = { in: 0, out: 0 };
     const looked: string[] = [];
     // A run that stops to ask a yes or a no goes on later as another run of the same conversation, heard by
@@ -464,7 +465,7 @@ export class Engine {
         out: tokens.out,
       });
       hear({ type: "RUN_ERROR", message, code });
-      return { ok: false, code, message, traceid };
+      return { ok: false, code, message, traceid, looked };
     };
     hear({ type: "RUN_STARTED", threadId, runId });
 
@@ -498,7 +499,7 @@ export class Engine {
         try {
           turn = await askModel(
             { address: about.address, key, model: about.model, speaks: about.speaks },
-            { system, tools, messages, maxTokens: MAX_TOKENS },
+            { system, tools, messages, maxTokens: about.maxTokens },
             stop,
             this.tuning,
             talk.hear ? (words) => say(names.take(words)) : undefined,
@@ -527,7 +528,19 @@ export class Engine {
 
         if (!turn.uses.length) {
           const raw = turn.text.trim().slice(0, ANSWER_MAX);
-          if (!raw) return failed("no_answer", "Model returned an empty response.", step);
+          if (!raw) {
+            // Its allowance for one reply went on thinking, or on something it never got to finish.
+            return turn.stop === "max_tokens"
+              ? failed(
+                "max_tokens",
+                `Response cut off: the model reached Max output tokens (${
+                  count(about.maxTokens)
+                }) before it ` +
+                  "answered. Ask for less in one request, or raise Max output tokens in the agent's settings.",
+                step,
+              )
+              : failed("no_answer", "Model returned an empty response.", step);
+          }
           const cut = turn.stop === "max_tokens";
           const ms = Date.now() - began;
           note("skillfully.agent.answered", {
@@ -559,7 +572,10 @@ export class Engine {
         const result = (id: string, content: string, bad?: boolean) =>
           results.push({ type: "tool_result", tool_use_id: id, content, ...(bad ? { is_error: true } : {}) });
         const open: { use: (typeof turn.uses)[number]; id: string; proposal: Proposal }[] = [];
-        for (const use of turn.uses.slice(0, 8)) {
+        // Cut off in the middle of asking for something: the last thing it asked for is not whole. It is
+        // told so, in place of an answer made from half a request, and can ask again for less at a time.
+        const whole = turn.stop === "max_tokens" ? turn.uses.slice(0, -1) : turn.uses;
+        for (const use of whole.slice(0, 8)) {
           hear({
             type: "TOOL_CALL_START",
             toolCallId: use.id,
@@ -613,7 +629,18 @@ export class Engine {
           result(use.id, found.content, found.failed);
         }
         // Every request must be answered, or the model's service will not take the conversation back.
-        for (const use of turn.uses.slice(8)) result(use.id, "Too many at once. Ask for fewer.", true);
+        for (const use of whole.slice(8)) result(use.id, "Too many at once. Ask for fewer.", true);
+        if (whole.length < turn.uses.length) {
+          const cut = turn.uses.at(-1)!;
+          looked.push("Tool call cut off at Max output tokens; asked to retry in smaller pieces");
+          note("skillfully.agent.looked", { step, tool: cut.name, cut: true });
+          result(
+            cut.id,
+            `This tool call was cut off at the max output tokens limit (${count(about.maxTokens)}) and was ` +
+              "not run. Send it again in smaller pieces, one per response.",
+            true,
+          );
+        }
         const onward = () => {
           if (step >= maxSteps - 1) {
             results.push({
@@ -729,7 +756,12 @@ export class Engine {
           traceid,
         };
       }
-      return failed("too_much", "Stopped: too many steps without an answer.", maxSteps);
+      return failed(
+        "too_much",
+        `Stopped: reached Max steps (${maxSteps}) before finishing. Ask for less in one request, or raise ` +
+          "Max steps in the agent's settings.",
+        maxSteps,
+      );
     };
     return go(1);
   }

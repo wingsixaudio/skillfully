@@ -269,7 +269,7 @@ Deno.test("a conversation is one person's, on every phone of theirs, and nobody 
   await until("the owner is shown theirs", () => owner.heard.length === 1);
   assertEquals(owner.heard[0].messages, []);
 
-  // Stopped part way, it stops, says so, and the question that came to nothing is not kept.
+  // Stopped part way, it stops and says so.
   held = new Promise<void>((r) => (release = r));
   const before = one.heard.length;
   one.ask("Third?");
@@ -393,5 +393,51 @@ Deno.test("a model that thinks before it speaks: its thinking goes back as it ca
     { role: "assistant", content: [{ type: "text", text: "One board." }] },
   ]);
   await phone.close();
+  await t.done();
+});
+
+Deno.test("a question that came to nothing stays in the conversation, so that try again means something", async () => {
+  const t = await withTalk((_sent, nth) =>
+    nth === 1
+      ? [uses("devices")]
+      : nth === 2
+      ? { content: [], stop_reason: "max_tokens" }
+      : [says("Trying the canvas again, smaller.")]
+  );
+  const { hub, model } = t;
+  const phone = await Phone.connect(hub, await t.member("Sam"), "ask");
+  phone.ask("Build a canvas that shows off the board.");
+  await until("it comes to nothing", () => phone.heard.at(-1)?.type === "RUN_ERROR");
+  assertEquals(phone.heard.at(-1).code, "max_tokens");
+
+  phone.ask("try again");
+  await until("it answers", finished(phone, 2));
+  // The model is sent what was asked before, and what became of it, in the hub's own words.
+  const sent = model.sent[2].body.messages.map((m: { role: string; content: { text: string }[] }) => [
+    m.role,
+    m.content[0].text,
+  ]);
+  assertEquals(sent.length, 3);
+  assertEquals(sent[0], ["user", "Build a canvas that shows off the board."]);
+  assert(
+    sent[1][0] === "assistant" &&
+      sent[1][1].startsWith("(Hub: no answer. Response cut off: the model reached Max output tokens"),
+  );
+  // With what it had already done, so that going on is not starting over.
+  assert(
+    sent[1][1].includes("Completed before stopping: Listed devices: Simulated board"),
+    sent[1][1],
+  );
+  assertEquals(sent[2], ["user", "try again"]);
+  // The person sees the same when they open the conversation again.
+  const before = phone.heard.length;
+  phone.agent("open");
+  await until("it is shown", () => phone.heard.length > before);
+  assertEquals(phone.heard.at(-1).messages.map((m: { role: string }) => m.role), [
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+  ]);
   await t.done();
 });
