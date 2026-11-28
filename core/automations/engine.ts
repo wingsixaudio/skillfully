@@ -142,6 +142,8 @@ interface Live {
   during?: boolean;
   /** Some part of it asks what time it is, so it is looked at again every minute. */
   clocked: boolean;
+  /** The link form: what it last sent to each value and when, to know its own work coming back. */
+  sent?: Map<string, { value: Value; at: number }>;
   /** The follow form: the minute it last said in the log that it followed. */
   told?: string;
 }
@@ -187,6 +189,8 @@ export interface ValueAbout {
   /** No other device has a value of this name, so a rule can leave the device out. */
   only: boolean;
 }
+/** How long after a link sets a value the same value arriving from the device is taken as that set. */
+const LINK_ECHO_MS = 2000;
 /** How many values one search answers with. */
 const VALUES_SHOWN = 40;
 
@@ -589,6 +593,7 @@ export class Automations {
     if (c.during) reads(c.during, out);
     if (c.cancel) reads(c.cancel, out);
     if (c.follow) out.push(c.follow.from);
+    if (c.link) out.push(...c.link);
     return out;
   }
 
@@ -654,6 +659,7 @@ export class Automations {
   #look(live: Live, changed?: { device: string; values: Values; cause?: Cause }): void {
     if (this.#stopped) return;
     if (live.c.follow) return this.#follow(live, changed);
+    if (live.c.link) return this.#link(live, changed);
     // Anything in its condition that is being timed keeps its time, whether or not a trigger fires.
     if (live.c.cond) this.#is(live, live.c.cond);
     if (live.c.cancel && live.run && this.#is(live, live.c.cancel) === true) {
@@ -840,6 +846,68 @@ export class Automations {
           this.#log("failed", live, { traceid }, { doing: `set ${this.#name(f.to)}`, why: r.error.message });
         },
       );
+  }
+
+  // --- The link form ---
+
+  /**
+   * Keep several values equal to each other. When one of them is changed by anyone but this rule, the rest
+   * are set to match, all at once. What this rule set coming back from the device is not a change to pass
+   * on, so nothing goes round: one move by a person is one set of each other value, however many there are.
+   */
+  #link(live: Live, changed?: { device: string; values: Values; cause?: Cause }): void {
+    const members = live.c.link!;
+    if (!changed) return;
+    const moved = members.find((m) => m.device === changed.device && m.key in changed.values);
+    if (!moved) return;
+    const me = `automation/${live.kept.id}`;
+    if (changed.cause?.actor === me) return;
+    const value = changed.values[moved.key];
+    // A device that reports back without saying why: what this rule just sent it, arriving, is still its own.
+    const sent = (live.sent ??= new Map<string, { value: Value; at: number }>());
+    const echo = sent.get(`${moved.device}\n${moved.key}`);
+    if (echo && echo.value === value && performance.now() - echo.at < LINK_ECHO_MS) return;
+    if (this.#isPaused(live)) return;
+    if (live.c.cond && this.#is(live, live.c.cond) !== true) return;
+    const depth = (changed.cause?.depth ?? 0) + 1;
+    if (depth > MAX_DEPTH) {
+      return this.#halt(
+        live,
+        `Loop detected: automations triggered each other more than ${MAX_DEPTH} levels deep.`,
+      );
+    }
+    const others = members.filter((m) => m !== moved).flatMap((m) => {
+      const source = this.deps.devices.source(m.device);
+      return source && source.state.get(m.key) !== value ? [{ m, source }] : [];
+    });
+    if (!others.length) return;
+    const traceid = changed.cause?.traceid ?? newId();
+    // Said once a minute at most, however often the values move: that it linked them, or would have.
+    const stamp = `${Math.floor(Date.now() / 60_000)} ${live.kept.state}`;
+    const first = live.told !== stamp;
+    live.told = stamp;
+    if (live.kept.state === "test") {
+      if (first) {
+        this.#log("would", live, { traceid }, {
+          writes: others.map(({ m }) => ({ device: m.device, key: m.key, value })),
+        });
+      }
+      return;
+    }
+    if (first) {
+      const at = new Date().toISOString();
+      this.deps.store.ran(live.kept.id, at);
+      const view = this.#views.get(live.kept.id);
+      if (view) view.lastRan = at;
+    }
+    const now = performance.now();
+    for (const { m, source } of others) {
+      sent.set(`${m.device}\n${m.key}`, { value, at: now });
+      source.set(m.key, value, { actor: me, via: "automation", traceid, depth }).then((r) => {
+        if (r.ok || !first) return;
+        this.#log("failed", live, { traceid }, { doing: `set ${this.#name(m)}`, why: r.error.message });
+      });
+    }
   }
 
   // --- Firing ---
@@ -1151,6 +1219,7 @@ export class Automations {
         : `${view.name} is ${view.state === "stopped" ? "stopped" : "disabled"}.`;
     }
     if (live.c.follow) return `${live.c.name} follows a value. There is nothing to run.`;
+    if (live.c.link) return `${live.c.name} links values. There is nothing to run.`;
     const why = this.#fire(live, {
       why: "Run manually",
       cause: { actor: ctx.actor, via: ctx.via, traceid: ctx.traceid, depth: ctx.depth ?? 0 },
@@ -1226,7 +1295,14 @@ export class Automations {
       return out;
     };
     // What sets it off, in whichever form it is written: triggers, a condition's two edges, or a value moving.
-    const triggers: Line[] = compiled.follow
+    const triggers: Line[] = compiled.link
+      ? compiled.link.map((m) => ({
+        depth: 0,
+        words: `${this.#name(m)} changes`,
+        reads: value(m),
+        is: "false",
+      }))
+      : compiled.follow
       ? [{
         depth: 0,
         words: `${this.#name(compiled.follow.from)} changes`,
@@ -1252,7 +1328,7 @@ export class Automations {
       steps: [
         ...compiled.steps.map((s) => stepWords(s, this.#name)),
         ...compiled.otherwise.map((s) => `when it stops: ${stepWords(s, this.#name)}`),
-        ...(compiled.follow ? [sentence(compiled, this.#name)] : []),
+        ...(compiled.follow || compiled.link ? [sentence(compiled, this.#name)] : []),
       ],
       would: this.#would(compiled.steps),
     };

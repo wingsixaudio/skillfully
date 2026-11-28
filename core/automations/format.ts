@@ -4,11 +4,12 @@
 // works out what it would do. Nothing in a rule is ever run as code, and a word the hub does not know is
 // refused, not skipped: a misspelled "rise_past" must not turn into a rule that quietly never fires.
 //
-// A rule takes one of three forms, told apart by its first word:
+// A rule takes one of four forms, told apart by its first word:
 //   when     when something happens, if conditions hold, do a list of steps. With no `when`, it runs
 //            only when it is run.
 //   while    do one list of steps when a condition becomes true, and another when it stops.
 //   follow   keep one value equal to another, whenever that one changes.
+//   link     keep several values equal to each other: whichever one is changed, the rest are set to match.
 //
 // This file knows the shape only. Whether the devices and values a rule names exist is compile.ts.
 
@@ -93,6 +94,8 @@ export interface Rule {
   scale?: Scale;
   min?: number;
   max?: number;
+  /** The link form, in place of everything but `if`: these values are kept equal, whichever is changed. */
+  link?: Ref[];
 }
 
 export const LIMITS = {
@@ -107,6 +110,7 @@ export const LIMITS = {
   overSeconds: 600,
   forSeconds: 3600,
   queue: 10,
+  linked: 64,
 };
 
 export const RULE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -295,12 +299,14 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
 
   if (!isObject(candidate)) return { ok: false, problems: ["(root): a rule is a JSON object"] };
   const r = candidate;
-  const form = "follow" in r ? "follow" : "while" in r ? "while" : "when";
+  const form = "link" in r ? "link" : "follow" in r ? "follow" : "while" in r ? "while" : "when";
   const shared = ["kind", "name", "note", "group"];
   only(
     "(root)",
     r,
-    form === "follow"
+    form === "link"
+      ? [...shared, "if", "link"]
+      : form === "follow"
       ? [...shared, "if", "follow", "set", "scale", "min", "max"]
       : form === "while"
       ? [...shared, "while", "do", "otherwise", "mode", "cancel_when"]
@@ -317,7 +323,20 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     say("group", "must be lower-case letters, numbers and dashes, up to 40");
   }
   if (r.if !== undefined) condition("if", r.if, 1);
-  if (form === "follow") {
+  if (form === "link") {
+    if (!Array.isArray(r.link) || r.link.length < 2 || r.link.length > LIMITS.linked) {
+      say("link", `must be a list of 2 to ${LIMITS.linked} values`);
+    } else {
+      r.link.forEach((v, i) => refOnly(`link[${i}]`, v));
+      const seen = new Set<string>();
+      for (const v of r.link) {
+        if (!isObject(v)) continue;
+        const one = `${v.device ?? ""}\n${v.key}`;
+        if (seen.has(one)) say("link", `${v.key} is listed more than once`);
+        seen.add(one);
+      }
+    }
+  } else if (form === "follow") {
     refOnly("follow", r.follow);
     refOnly("set", r.set);
     if (r.scale !== undefined) scale("scale", r.scale);

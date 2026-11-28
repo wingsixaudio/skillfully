@@ -112,7 +112,7 @@ export const SAVE_RULE: Tool = {
 };
 
 /** How a rule is written, in words. Kept here so the words and the checker in format.ts are read together. */
-export const RULE_FORMAT = `A rule is one JSON object. It takes one of three forms.
+export const RULE_FORMAT = `A rule is one JSON object. It takes one of four forms.
 
 1. When something happens, if conditions hold, do a list of steps:
 { "kind": "automation", "name": "...", "note": "...", "group": "...", "when": [...], "if": {...}, "do": [...], "mode": "single", "cancel_when": {...} }
@@ -122,6 +122,9 @@ export const RULE_FORMAT = `A rule is one JSON object. It takes one of three for
 
 3. Keep one value equal to another, whenever that one changes:
 { "kind": "automation", "name": "...", "follow": { "key": K }, "set": { "key": K2 }, "scale": {...}, "min": n, "max": n, "if": {...} }
+
+4. Keep several values equal to each other, whichever one is changed:
+{ "kind": "automation", "name": "...", "link": [{ "key": K1 }, { "key": K2 }, { "key": K3 }], "if": {...} }
 
 kind   always "automation".
 name   1 to 60 characters, shown to people.
@@ -176,6 +179,12 @@ ends. It does not hold anything in place in between. While the hub cannot tell, 
 
 The follow form sets nothing when the hub starts. Each time the followed value changes, the other is set to
 it. It is not a run, so it may happen as often as the value moves.
+
+The link form is how values are ganged: 2 to 64 values of the same kind, all of which can be set. When
+anyone changes one of them, the hub sets all the others to match at once, and does not react to its own
+writes. Nothing is set when the hub starts or the rule is turned on. To make several values move together
+(pans, levels, mutes), always write ONE link rule listing them all. Never build this from follow rules, in a
+chain or a ring: a ring is a loop, the hub stops rules that loop, and each hop adds delay.
 
 A rule may run at most 10 times in 10 seconds, or the hub stops it. To do many things from one trigger, put
 them in one rule's steps, or have one rule set a tag that others react to.

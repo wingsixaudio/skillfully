@@ -606,7 +606,7 @@ button:disabled {
   gap: 8px;
 }
 .rule-types button {
-  flex: 1 1 200px;
+  flex: 1 1 170px;
   min-height: 44px;
   padding: 10px 14px;
   font-size: 14px;

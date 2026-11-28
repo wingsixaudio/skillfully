@@ -83,9 +83,21 @@ export function stepWords(s: CStep, name: Namer): string {
   }
 }
 
-/** The whole rule as a sentence, in whichever of its three forms it is written. */
+/** The whole rule as a sentence, in whichever of its four forms it is written. */
 export function sentence(c: Compiled, name: Namer): string {
   const list = (steps: CStep[]) => steps.map((s) => stepWords(s, name)).join(", then ");
+  if (c.link) {
+    // Every one of them is in what the rule can set, listed beside this. Here, enough to know the rule by.
+    const shown = c.link.slice(0, 3).map(name);
+    const more = c.link.length - shown.length;
+    const all = more > 0
+      ? `${shown.join(", ")} and ${more} more`
+      : `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}`;
+    return `${all} are linked: changing any one sets the ${
+      c.link.length === 2 ? "other" : "others"
+    } to match` +
+      (c.cond ? `, while ${conditionWords(c.cond, name)}` : "") + ".";
+  }
   if (c.follow) {
     const limits = [
       ...(c.follow.min !== undefined ? [`at least ${c.follow.min}`] : []),

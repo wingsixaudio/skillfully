@@ -29,7 +29,8 @@ const ruleEd = {
 const RULE_TYPES = [
   ["when", "When something happens"],
   ["while", "While a condition is true"],
-  ["follow", "Keep two values in sync"],
+  ["follow", "One value follows another"],
+  ["link", "Link values together"],
 ];
 const COMPARE_WORDS = [
   ["is", "is"],
@@ -94,7 +95,8 @@ function notInForm(rule) {
   }
   return "";
 }
-const typeOf = (rule) => ("follow" in rule ? "follow" : "while" in rule ? "while" : "when");
+const typeOf = (rule) =>
+  "link" in rule ? "link" : "follow" in rule ? "follow" : "while" in rule ? "while" : "when";
 
 // --- What the hub knows about the values a rule names ---
 
@@ -729,6 +731,9 @@ function retype(rule, to) {
   if (to === "follow") {
     return { ...keep, follow: { key: "" }, set: { key: "" }, ...(cond !== undefined ? { if: cond } : {}) };
   }
+  if (to === "link") {
+    return { ...keep, link: [{ key: "" }, { key: "" }], ...(cond !== undefined ? { if: cond } : {}) };
+  }
   // What stops a run in the middle goes with the steps, whichever way they are set off.
   const stop = rule.cancel_when !== undefined ? { cancel_when: rule.cancel_when } : {};
   if (to === "while") {
@@ -864,6 +869,38 @@ function drawRuleForm() {
         section("When it becomes true", "", stepList(rule, "do")),
         section("When it stops being true", "Optional.", stepList(rule, "otherwise")),
       );
+    } else if (type === "link") {
+      if (!Array.isArray(rule.link)) rule.link = [{ key: "" }, { key: "" }];
+      const linked = el("div", { className: "rule-list" });
+      linked.dataset.list = "link";
+      rule.link.forEach((m, i) => {
+        const row = el(
+          "div",
+          { className: "rule-row" },
+          valueButton(m, "write", (picked) => ((rule.link[i] = refOf(picked)), ruleChanged(true))),
+        );
+        // A link is two values or more.
+        if (rule.link.length > 2) {
+          row.append(removeButton("value", () => (rule.link.splice(i, 1), ruleChanged(true))));
+        }
+        linked.append(row);
+      });
+      const add = el("button", {
+        type: "button",
+        className: "small quiet rule-add",
+        textContent: "+ Add value",
+      });
+      add.onclick = () =>
+        pickValue("write", (picked) => {
+          ruleEd.focusList = "link";
+          rule.link.push(refOf(picked));
+          ruleChanged(true);
+        });
+      linked.append(add);
+      box.append(
+        section("Linked values", "Change any one and the others are set to match.", linked),
+        section("Only while", "Optional.", conditionList(rule, "if", "condition")),
+      );
     } else {
       const scaled = !!rule.scale;
       const scale = el("div", { className: "rule-row" });
@@ -939,7 +976,7 @@ function drawRuleForm() {
     const note = el("input", { type: "text", value: rule.note || "", maxLength: 300 });
     note.oninput = () => (setOrDrop(rule, "note", note.value), ruleChanged());
     field("ruleNote", "Note", note);
-    if (type !== "follow") {
+    if (type !== "follow" && type !== "link") {
       field(
         "ruleMode",
         "If triggered again while running",
