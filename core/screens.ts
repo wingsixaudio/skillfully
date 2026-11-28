@@ -11,7 +11,7 @@ import type { Accounts, Person } from "./accounts.ts";
 import type { Approvals } from "./approvals.ts";
 import type { Capabilities } from "./capabilities.ts";
 import type { Devices } from "./devices.ts";
-import type { PluginHost } from "./host.ts";
+import type { Source } from "./source.ts";
 import { type Log, type LogEntry, newId } from "./log.ts";
 import { Reach } from "./reach.ts";
 import type { Talks, Tell } from "./talk.ts";
@@ -113,7 +113,7 @@ export class Screens {
     return new Reach(
       this.manifests().map((screen) => ({ screen, access: this.accessFor(person, screen) })),
       this.deps.approvals,
-      () => this.deps.devices.hosts.values(),
+      () => this.deps.devices.sources(),
     );
   }
   /** The screens a person has anything to do on. */
@@ -138,9 +138,9 @@ export class Screens {
   // --- Which connections a screen has ---
 
   /** The connections a screen could be approved for: drivers with a kind of device the screen works with. */
-  eligible(screen: ScreenManifest): PluginHost[] {
-    return [...this.deps.devices.hosts.values()].filter((h) =>
-      Object.keys(h.manifest.capabilities).some((cap) => cap in screen.uses || ANY in screen.uses)
+  eligible(screen: ScreenManifest): Source[] {
+    return [...this.deps.devices.sources()].filter((h) =>
+      Object.keys(h.capabilities).some((cap) => cap in screen.uses || ANY in screen.uses)
     );
   }
   /** The screens that could be given a device of these kinds. */
@@ -154,10 +154,10 @@ export class Screens {
 
   // A screen reaches a connection only when a superuser approved that screen for it, and then only as far as
   // this person's roles go.
-  #visible(c: Connection): PluginHost[] {
-    return [...this.deps.devices.hosts.values()].filter((h) =>
+  #visible(c: Connection): Source[] {
+    return [...this.deps.devices.sources()].filter((h) =>
       this.deps.approvals.allowed(c.screen.id, h.id) &&
-      Object.keys(h.manifest.capabilities).some((cap) => c.access.sees(cap))
+      Object.keys(h.capabilities).some((cap) => c.access.sees(cap))
     );
   }
   /** The definitions of the kinds of device a screen can see, so it can draw values it was not written for. */
@@ -165,18 +165,18 @@ export class Screens {
     const visible = this.#visible(c);
     return Object.fromEntries(
       this.deps.capabilities.list().filter((d) =>
-        visible.some((h) => d.capability in h.manifest.capabilities) && c.access.sees(d.capability)
+        visible.some((h) => d.capability in h.capabilities) && c.access.sees(d.capability)
       ).map((d) => [d.capability, { title: d.title, values: d.values }]),
     );
   }
   /** A driver as a screen, or the hub's own pages, are told about it. */
-  describe(h: PluginHost, c?: Connection) {
+  describe(h: Source, c?: Connection) {
     return {
       id: h.id,
-      name: h.manifest.name,
+      name: h.name,
       capabilities: c
-        ? Object.fromEntries(Object.entries(h.manifest.capabilities).filter(([cap]) => c.access.sees(cap)))
-        : h.manifest.capabilities,
+        ? Object.fromEntries(Object.entries(h.capabilities).filter(([cap]) => c.access.sees(cap)))
+        : h.capabilities,
       mode: h.mode,
       status: h.status,
       health: h.health,
@@ -226,7 +226,7 @@ export class Screens {
    * not changed, and shared by everyone who may read the same things.
    */
   #whole = new Map<string, { rev: number; by: Map<string, string> }>();
-  #everything(c: Connection, h: PluginHost): string {
+  #everything(c: Connection, h: Source): string {
     let held = this.#whole.get(h.id);
     if (!held || held.rev !== h.rev || held.by.size > 64) {
       this.#whole.set(h.id, held = { rev: h.rev, by: new Map() });
@@ -516,11 +516,11 @@ export class Screens {
     }
     if (m.type === "set" && typeof m.key === "string" && typeof m.plugin === "string") {
       const traceid = newId();
-      const host = devices.hosts.get(m.plugin);
+      const host = devices.source(m.plugin);
       let outcome;
       if (
         !host || !approvals.allowed(c.screen.id, host.id) || !c.access.canWrite(m.key) ||
-        !(capabilityOf(m.key) in host.manifest.capabilities)
+        !(capabilityOf(m.key) in host.capabilities)
       ) {
         // What a person was not granted, they cannot do, whatever the screen sends. The attempt is on the record.
         const message = `Permission denied: cannot set ${m.key} on ${m.plugin} from ${c.screen.name}.`;

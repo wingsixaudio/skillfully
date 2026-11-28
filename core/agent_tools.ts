@@ -12,7 +12,7 @@
 import type { Value, ValueDef } from "../contract/mod.ts";
 import type { Keeping } from "./agent_docs.ts";
 import type { Capabilities } from "./capabilities.ts";
-import type { PluginHost } from "./host.ts";
+import type { Source } from "./source.ts";
 import type { Log, LogEntry } from "./log.ts";
 import type { Tool } from "./model.ts";
 import { readWatch, watches } from "./watching.ts";
@@ -20,7 +20,7 @@ import { readWatch, watches } from "./watching.ts";
 /** What one run may look at. */
 export interface Looking {
   /** The devices in reach. */
-  hosts(): PluginHost[];
+  hosts(): Source[];
   /** Is this kind of thing, on this device, in reach at all? */
   sees(host: string, capability: string): boolean;
   /** The screen through which this value may be changed in this run, if it may be at all. */
@@ -60,7 +60,7 @@ const LOG_SCAN = 5000;
  */
 function example(l: Looking): { starred: string; shape: string } | null {
   for (const h of l.hosts()) {
-    for (const cap of Object.keys(h.manifest.capabilities)) {
+    for (const cap of Object.keys(h.capabilities)) {
       if (!l.sees(h.id, cap)) continue;
       const defs = (l.capabilities.get(cap)?.def.values ?? []).filter((v) =>
         v.kind !== "trigger" && v.key.includes("{")
@@ -227,13 +227,13 @@ interface Kind {
   min?: number;
   max?: number;
 }
-const kinds = new WeakMap<PluginHost, Map<string, Kind | null>>();
-function kindOf(l: Looking, h: PluginHost, key: string): Kind | null {
+const kinds = new WeakMap<Source, Map<string, Kind | null>>();
+function kindOf(l: Looking, h: Source, key: string): Kind | null {
   let known = kinds.get(h);
   if (!known) kinds.set(h, known = new Map());
   let kind = known.get(key);
   if (kind === undefined) {
-    const found = l.capabilities.resolve(h.manifest.capabilities, key);
+    const found = l.capabilities.resolve(h.capabilities, key);
     kind = found
       ? {
         shape: `${found.capability}/${found.def.key}`,
@@ -310,7 +310,7 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
       }
       // A button with nothing beside it and no part of its name that varies is there if the device has
       // that kind of thing at all.
-      for (const cap of Object.keys(h.manifest.capabilities)) {
+      for (const cap of Object.keys(h.capabilities)) {
         for (const def of l.capabilities.get(cap)?.def.values ?? []) {
           const key = `${cap}/${def.key}`;
           if (def.kind !== "trigger" || def.key.includes("{") || pressed.has(key) || !see(key)) continue;
@@ -320,11 +320,11 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
       }
       out.push({
         id: h.id,
-        name: h.manifest.name,
-        is: Object.keys(h.manifest.capabilities).filter((cap) => l.sees(h.id, cap)).map((cap) =>
+        name: h.name,
+        is: Object.keys(h.capabilities).filter((cap) => l.sees(h.id, cap)).map((cap) =>
           l.capabilities.get(cap)?.def.title ?? cap
         ),
-        about: Object.keys(h.manifest.capabilities).filter((cap) => l.sees(h.id, cap)).map((cap) =>
+        about: Object.keys(h.capabilities).filter((cap) => l.sees(h.id, cap)).map((cap) =>
           l.capabilities.get(cap)?.def.description ?? ""
         ).filter(Boolean).join(" ").slice(0, 500),
         working: h.health.status === "ok" ? "yes" : `no: ${h.health.reason ?? h.health.status}`.slice(0, 200),
@@ -395,7 +395,7 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
     return {
       content: fitted(found, (values, cut) => ({ device: h.id, values, more: more + cut })),
       note: { ...note, found: found.length, more },
-      words: `Searched ${h.manifest.name} for “${words.join(" ")}”: ${found.length + more} found`,
+      words: `Searched ${h.name} for “${words.join(" ")}”: ${found.length + more} found`,
     };
   }
 
@@ -410,7 +410,7 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
       return no(
         "Give the names of the values to read, whole or with a star for any one part.",
         note,
-        `Asked ${h.manifest.name} for nothing it could name`,
+        `Asked ${h.name} for nothing it could name`,
       );
     }
     const limit = whole(input.limit, 1, 200, 100);
@@ -440,7 +440,7 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
         ...(values.length ? {} : { note: "Nothing by those names that you can see." }),
       })),
       note: { ...note, found: values.length, more },
-      words: `Read ${values.length} value${values.length === 1 ? "" : "s"} on ${h.manifest.name}`,
+      words: `Read ${values.length} value${values.length === 1 ? "" : "s"} on ${h.name}`,
     };
   }
 
@@ -513,7 +513,7 @@ export async function look(l: Looking, name: string, input: Record<string, unkno
       found: entries.length,
       looked,
     },
-    words: `Read the log${h ? ` about ${h.manifest.name}` : ""}: ${entries.length} entr${
+    words: `Read the log${h ? ` about ${h.name}` : ""}: ${entries.length} entr${
       entries.length === 1 ? "y" : "ies"
     }`,
   };

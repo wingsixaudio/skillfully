@@ -26,22 +26,18 @@ import {
   usageOf,
 } from "./process.ts";
 import { runtimeOf } from "./runtimes.ts";
+import {
+  type Cause,
+  causeOf,
+  type SetContext,
+  type SetOutcome,
+  type Source,
+  type SourceStatus,
+} from "./source.ts";
 
-export interface SetContext {
-  /** Who asked. An ID, never a name. */
-  actor?: string;
-  /** Through what: phone, agent, rule ... */
-  via: string;
-  traceid?: string;
-}
-
-export type SetOutcome =
-  | { ok: true; superseded: false; value: Value; requested: Value; adjusted: boolean }
-  | { ok: true; superseded: true }
-  | { ok: false; error: { code: string; message: string } };
-
+export type { SetContext, SetOutcome } from "./source.ts";
 /** quarantined: stopped by the hub and not restarted until a person releases it. */
-export type HostStatus = "starting" | "running" | "down" | "stopped" | "quarantined";
+export type HostStatus = SourceStatus;
 
 /** Timings a test may shorten. Real hubs use the defaults. */
 export interface Tuning {
@@ -97,7 +93,7 @@ const LOG_BURST = 100;
 const LOG_PER_SECOND = 20;
 const MAX_EVENT_DATA_CHARS = 4000;
 
-export class PluginHost {
+export class PluginHost implements Source {
   readonly state = new Map<string, Value>();
   health: { status: HealthStatus; reason?: string } = { status: "down", reason: "Not started" };
   /** The settings this driver says it takes, if it has said. */
@@ -143,7 +139,7 @@ export class PluginHost {
   #mutedAt = 0;
   #checking = false;
   #readyWaiters: (() => void)[] = [];
-  #changeListeners = new Set<(values: Values) => void>();
+  #changeListeners = new Set<(values: Values, cause?: Cause) => void>();
   #healthListeners = new Set<() => void>();
 
   constructor(
@@ -152,7 +148,7 @@ export class PluginHost {
     held: HeldByHub,
     private log: Log,
     private gateway: PluginGateway,
-    private capabilities: Capabilities,
+    private vocabulary: Capabilities,
     private tuning: Tuning = {},
   ) {
     this.settings = held.settings;
@@ -205,7 +201,14 @@ export class PluginHost {
     return `plugin/${this.id}`;
   }
 
-  onChange(l: (values: Values) => void): void {
+  get name(): string {
+    return this.manifest.name;
+  }
+  get capabilities(): Record<string, Record<string, unknown>> {
+    return this.manifest.capabilities;
+  }
+
+  onChange(l: (values: Values, cause?: Cause) => void): void {
     this.#changeListeners.add(l);
   }
   onHealth(l: () => void): void {
@@ -249,7 +252,7 @@ export class PluginHost {
 
   async #launchOnce(): Promise<void> {
     if (this.status === "stopped" || this.status === "quarantined") return;
-    this.status = "starting";
+    this.#become("starting");
     this.#cpuSamples = [];
     this.#messages = 0;
     this.#messagesSince = Date.now();
@@ -299,7 +302,7 @@ export class PluginHost {
           "Refused to start",
         );
       }
-      this.status = "down";
+      this.#become("down");
       this.#setHealth("down", "Failed to start");
       this.#lastProblem = String((err as Error).message).slice(0, 800);
       this.log.append({
@@ -401,8 +404,8 @@ export class PluginHost {
     let undeclared = 0;
     for (const [key, value] of Object.entries(values)) {
       // A value the manifest never promised, or of the wrong kind, is not taken on trust.
-      const found = this.capabilities.resolve(declared, key);
-      if (!found || found.def.kind === "trigger" || this.capabilities.kindProblem(found, value)) {
+      const found = this.vocabulary.resolve(declared, key);
+      if (!found || found.def.kind === "trigger" || this.vocabulary.kindProblem(found, value)) {
         undeclared++;
         continue;
       }
@@ -455,7 +458,7 @@ export class PluginHost {
       this.rev++;
     }
     if (firstFull) {
-      this.status = "running";
+      this.#become("running");
       this.#restartDelay = 250;
       this.log.append({
         type: "skillfully.plugin.ready",
@@ -467,8 +470,25 @@ export class PluginHost {
     }
     if (Object.keys(changed).length) {
       this.rev++;
-      for (const l of this.#changeListeners) l(changed);
+      // A value we are in the middle of setting changed because someone asked. The rest changed at the device.
+      const asked = new Map<string, { cause: Cause; values: Values }>();
+      const atTheDevice: Values = {};
+      for (const [key, value] of Object.entries(changed)) {
+        const item = this.#inflight?.items.get(key);
+        if (!item) atTheDevice[key] = value;
+        else this.#because(asked, item.ctx)[key] = value;
+      }
+      if (Object.keys(atTheDevice).length) { for (const l of this.#changeListeners) l(atTheDevice); }
+      for (const { cause, values } of asked.values()) for (const l of this.#changeListeners) l(values, cause);
     }
+  }
+
+  /** The changes one request caused, kept together under that request. */
+  #because(by: Map<string, { cause: Cause; values: Values }>, ctx: SetContext & { traceid: string }): Values {
+    const id = `${ctx.traceid} ${ctx.depth ?? 0}`;
+    let held = by.get(id);
+    if (!held) by.set(id, held = { cause: causeOf(ctx), values: {} });
+    return held.values;
   }
 
   /** Ask for a value to be set. Resolves when the device has read it back, or says why not. */
@@ -488,7 +508,7 @@ export class PluginHost {
       return Promise.resolve({ ok: false, error: { code, message } });
     };
 
-    const bad = this.capabilities.writeProblem(this.manifest.capabilities, key, value);
+    const bad = this.vocabulary.writeProblem(this.manifest.capabilities, key, value);
     if (bad) return refuse("skillfully.command.rejected", bad.code, bad.message);
     if (this.mode === "listen") {
       return refuse(
@@ -541,7 +561,7 @@ export class PluginHost {
   }
 
   #isTrigger(key: string): boolean {
-    return this.capabilities.resolve(this.manifest.capabilities, key)?.def.kind === "trigger";
+    return this.vocabulary.resolve(this.manifest.capabilities, key)?.def.kind === "trigger";
   }
 
   #flush(): void {
@@ -609,7 +629,7 @@ export class PluginHost {
     }
     clearTimeout(flight.timer);
     this.#inflight = undefined;
-    const changed: Values = {};
+    const changed = new Map<string, { cause: Cause; values: Values }>();
     for (const [key, item] of flight.items) {
       const base = {
         source: this.#source,
@@ -638,7 +658,7 @@ export class PluginHost {
         const value = values[key];
         const before = this.state.get(key) ?? null;
         this.state.set(key, value);
-        if (before !== value) changed[key] = value;
+        if (before !== value) this.#because(changed, item.ctx)[key] = value;
         const adjusted = value !== item.value;
         if (item.folded && this.#moves.has(key)) {
           this.#moves.step(key, value, item.value, adjusted, item.superseded);
@@ -676,9 +696,11 @@ export class PluginHost {
         item.resolve({ ok: false, error });
       }
     }
-    if (Object.keys(changed).length) {
+    if (changed.size) {
       this.rev++;
-      for (const l of this.#changeListeners) l(changed);
+      for (const { cause, values } of changed.values()) {
+        for (const l of this.#changeListeners) l(values, cause);
+      }
     }
   }
 
@@ -712,6 +734,13 @@ export class PluginHost {
     for (const { key, item } of this.#triggerQueue.splice(0)) {
       this.#failItems(new Map([[key, item]]), code, message);
     }
+  }
+
+  /** Its status changed. Whoever shows how it is doing is told, as for its health. */
+  #become(status: HostStatus): void {
+    if (this.status === status) return;
+    this.status = status;
+    for (const l of this.#healthListeners) l();
   }
 
   #setHealth(status: HealthStatus, reason?: string): void {
@@ -951,7 +980,7 @@ export class PluginHost {
   }
 
   #quarantine(type: string, data: Record<string, unknown>, reason: string): void {
-    this.status = "quarantined";
+    this.#become("quarantined");
     this.log.append({ type, source: "core", subject: this.id, data });
     this.#lastProblem = typeof data.message === "string" ? data.message : reason;
     this.#exitBecause = reason;
@@ -972,7 +1001,7 @@ export class PluginHost {
     });
     this.#strikes = 0;
     this.#restartDelay = 250;
-    this.status = "down";
+    this.#become("down");
     this.#launch();
   }
 
@@ -980,7 +1009,7 @@ export class PluginHost {
     this.#proc = undefined;
     this.#moves.restAll();
     const held = this.status === "stopped" || this.status === "quarantined";
-    if (!held) this.status = "down";
+    if (!held) this.#become("down");
     if (this.#inflight) {
       clearTimeout(this.#inflight.timer);
       const items = this.#inflight.items;
@@ -1043,7 +1072,7 @@ export class PluginHost {
   }
 
   async stop(): Promise<void> {
-    this.status = "stopped";
+    this.#become("stopped");
     this.#moves.restAll();
     clearInterval(this.#ticker);
     clearInterval(this.#watchdog);

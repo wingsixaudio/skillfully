@@ -1,0 +1,36 @@
+{
+  "capability": "device",
+  "version": 1,
+  "title": "Device status",
+  "description": "How each of the hub's devices is doing, by the device's ID. Held by the hub itself, so a screen can show a light for a device and a rule can react when one drops.",
+  "options": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "values": [
+    {
+      "key": "connected/{id}",
+      "title": "Connected",
+      "description": "True while the device's driver is running and can reach the device.",
+      "kind": "boolean",
+      "writable": false,
+      "names": ["id"]
+    },
+    {
+      "key": "connected/{id}/title",
+      "title": "Device name",
+      "kind": "text",
+      "writable": false,
+      "names": ["id"]
+    },
+    {
+      "key": "status/{id}",
+      "title": "Status",
+      "description": "One word: connected, degraded, unreachable, starting, down, stopped or quarantined.",
+      "kind": "text",
+      "writable": false,
+      "names": ["id"]
+    }
+  ]
+}

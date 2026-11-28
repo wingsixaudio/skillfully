@@ -20,6 +20,7 @@ import { Approvals } from "./approvals.ts";
 import { Capabilities, CAPABILITIES_DIR } from "./capabilities.ts";
 import { Devices, type DriverChoices } from "./devices.ts";
 import type { PluginHost } from "./host.ts";
+import { HUB_DEVICE, HubDevice } from "./hub_device.ts";
 import { cookieOf, go, json, outcome, readJson, refuse, setCookie, TYPES } from "./http.ts";
 import { Kept } from "./kept.ts";
 import { Log } from "./log.ts";
@@ -87,6 +88,8 @@ export interface Hub {
   devices: Devices;
   /** The plugin store, as this hub reads it. */
   store: Store;
+  /** The hub's own device: tags, and how each driver is doing. */
+  hubDevice: HubDevice;
   /** Drivers, by id. */
   hosts: Map<string, PluginHost>;
   screens: Map<string, Screen>;
@@ -176,7 +179,18 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     log,
   });
   const hosts = devices.hosts;
-  const taken = (id: string) => hosts.has(id) || screens.all.has(id) || skills.has(id);
+  // The hub's own device: tags, and how each driver is doing. A connection like any other, under its own id.
+  const hubDevice = new HubDevice({ db, log, capabilities, dataDir });
+  devices.attach(hubDevice);
+  devices.onHealth((source) => {
+    if (source !== hubDevice) hubDevice.watch(source);
+  });
+  devices.onReplaced((id) => {
+    const host = hosts.get(id);
+    if (host) hubDevice.watch(host);
+    else if (id !== HUB_DEVICE) hubDevice.forget(id);
+  });
+  const taken = (id: string) => id === HUB_DEVICE || hosts.has(id) || screens.all.has(id) || skills.has(id);
 
   // A plugin that cannot be loaded is logged and left out. It never stops the hub.
   for (const cfg of opts.plugins) {
@@ -195,6 +209,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       });
     }
   }
+  for (const host of hosts.values()) hubDevice.watch(host);
   await devices.startAll();
   await config.start();
 
@@ -221,6 +236,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     config,
     devices,
     engine,
+    hubDevice,
     screens,
     store,
     taken,
@@ -468,6 +484,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
     config,
     devices,
     store,
+    hubDevice,
     hosts,
     screens: screens.all,
     skills,
@@ -477,6 +494,7 @@ export async function startHub(opts: HubOptions): Promise<Hub> {
       screens.closeAll();
       await devices.stop();
       await config.settled();
+      await hubDevice.settled();
       await server.shutdown();
       await gateway.close();
       if (!dataDir && runDir) await Deno.remove(runDir, { recursive: true }).catch(() => {});

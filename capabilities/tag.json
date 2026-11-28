@@ -1,0 +1,80 @@
+{
+  "capability": "tag",
+  "version": 1,
+  "title": "Tags",
+  "description": "Values the hub holds for itself, under names a superuser gives them: a flag that is on or off, a number, a line of text, or one choice from a list. Tags are how screens and rules remember things and tell each other about them. They keep their values when the hub restarts.",
+  "options": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "values": [
+    {
+      "key": "flag/{name}",
+      "title": "Flag",
+      "description": "On or off.",
+      "kind": "boolean",
+      "writable": true,
+      "names": ["name"]
+    },
+    {
+      "key": "flag/{name}/title",
+      "title": "Flag name",
+      "kind": "text",
+      "writable": false,
+      "names": ["name"]
+    },
+    {
+      "key": "number/{name}",
+      "title": "Number",
+      "kind": "number",
+      "writable": true,
+      "names": ["name"]
+    },
+    {
+      "key": "number/{name}/title",
+      "title": "Number name",
+      "kind": "text",
+      "writable": false,
+      "names": ["name"]
+    },
+    {
+      "key": "text/{name}",
+      "title": "Text",
+      "description": "One line of words, up to 500 characters.",
+      "kind": "text",
+      "writable": true,
+      "names": ["name"]
+    },
+    {
+      "key": "text/{name}/title",
+      "title": "Text name",
+      "kind": "text",
+      "writable": false,
+      "names": ["name"]
+    },
+    {
+      "key": "choice/{name}",
+      "title": "Choice",
+      "description": "One of the options the tag was given. Anything else is refused.",
+      "kind": "text",
+      "writable": true,
+      "names": ["name"]
+    },
+    {
+      "key": "choice/{name}/title",
+      "title": "Choice name",
+      "kind": "text",
+      "writable": false,
+      "names": ["name"]
+    },
+    {
+      "key": "choice/{name}/options",
+      "title": "Choice options",
+      "description": "What the choice can be, as a JSON list of words.",
+      "kind": "text",
+      "writable": false,
+      "names": ["name"]
+    }
+  ]
+}

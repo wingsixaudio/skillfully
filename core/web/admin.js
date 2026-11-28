@@ -4,7 +4,7 @@
 //   /admin/screens    Screens  what people open, and which devices each may use
 //   /admin/people     People   who is on the team and what each can do
 //   /admin/hub        Hub      the hub's own settings
-let people = [], roles = [], offered = [], drivers = [], meId = "";
+let people = [], roles = [], offered = [], drivers = [], tags = [], meId = "";
 let proposed = { changes: 0, power: 0, problems: 0 };
 let canAdd = false;
 const SUPER = "superuser";
@@ -148,6 +148,7 @@ async function load() {
   if (r.away) return;
   if (!r.ok) return location.replace("/");
   ({ people, roles, offered, drivers } = r);
+  tags = r.tags || [];
   drawAgent(r.agent);
   drawVersion(r.version);
   proposed = r.config || proposed;
@@ -161,6 +162,7 @@ async function load() {
   drawRoles();
   drawScreens();
   drawDrivers();
+  drawTags();
   drawPolicy(r.policy);
   // Reading every file is more work than the rest of this, so it is done less often.
   if (here().place === "hub" && Date.now() - configDrawn > 15000) drawConfig();
@@ -415,6 +417,107 @@ function drawRoles() {
   }
 }
 $("newRole").onclick = () => editRole({});
+
+// --- Tags: values the hub holds itself ---
+const TAG_KINDS = { flag: "Flag", number: "Number", text: "Text", choice: "Choice" };
+const tagValue = (t, v) => t.kind === "flag" ? (v ? "On" : "Off") : String(v);
+function editTag(tag) {
+  const isNew = !tag.name;
+  ask(isNew ? "New tag" : "Edit tag", (b) => {
+    input(b, "tagTitle", "Name", { value: tag.title || "", maxLength: 60, required: true });
+    const id = input(b, "tagName", "ID", {
+      value: tag.name || "",
+      maxLength: 40,
+      required: true,
+      pattern: "[a-z0-9][a-z0-9-]*",
+      disabled: !isNew,
+    });
+    b.append(
+      el("p", {
+        className: "help",
+        textContent: "Lower-case letters, numbers and dashes. It cannot be changed later.",
+      }),
+    );
+    const kind = el("select", { id: "tagKind", disabled: !isNew });
+    for (const [value, textContent] of Object.entries(TAG_KINDS)) {
+      kind.append(el("option", { value, textContent }));
+    }
+    kind.value = tag.kind || "flag";
+    b.append(el("label", { htmlFor: "tagKind", textContent: "Kind" }), kind);
+    const options = el("div");
+    input(options, "tagOptions", "Options, separated by commas", {
+      value: (tag.options || []).join(", "),
+      maxLength: 1500,
+    });
+    b.append(options);
+    const start = input(b, "tagStart", "Starting value", {
+      value: tag.start === undefined ? "" : String(tag.start),
+      maxLength: 500,
+    });
+    const hint = el("p", { className: "help" });
+    b.append(hint);
+    // The ID follows the name until it is typed in by hand.
+    let typed = !isNew;
+    id.oninput = () => typed = true;
+    $("tagTitle").oninput = () => {
+      if (!typed) {
+        id.value = $("tagTitle").value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+          .slice(0, 40);
+      }
+    };
+    const show = () => {
+      options.hidden = kind.value !== "choice";
+      start.type = kind.value === "number" ? "number" : "text";
+      hint.textContent = {
+        flag: "On or off. Leave empty to start off.",
+        number: "Leave empty to start at 0.",
+        text: "Leave empty to start with no text.",
+        choice: "One of the options. Leave empty to start with the first.",
+      }[kind.value];
+    };
+    kind.onchange = show;
+    show();
+  }, () => {
+    const kind = $("tagKind").value, raw = $("tagStart").value.trim();
+    const tag = { name: $("tagName").value.trim(), kind, title: $("tagTitle").value.trim() };
+    if (kind === "choice") {
+      tag.options = $("tagOptions").value.split(",").map((o) => o.trim()).filter(Boolean);
+    }
+    if (raw !== "") {
+      tag.start = kind === "flag" ? /^(on|true|yes|1)$/i.test(raw) : kind === "number" ? Number(raw) : raw;
+    }
+    return call("/admin/api/tag", { tag });
+  });
+}
+function drawTags() {
+  const box = $("tags");
+  box.innerHTML = "";
+  for (const t of tags) {
+    const item = el("div", { className: "item" }, el("h3", { textContent: t.title }));
+    item.append(
+      el(
+        "p",
+        { className: "dim" },
+        TAG_KINDS[t.kind] + ", now ",
+        el("strong", { textContent: tagValue(t, t.value) }),
+      ),
+      el("p", { className: "help" }, el("code", { textContent: "tag/" + t.kind + "/" + t.name })),
+    );
+    const row = el("div", { className: "row", style: "margin-top:8px" });
+    const edit = el("button", { className: "small quiet", type: "button", textContent: "Edit" });
+    edit.onclick = () => editTag(t);
+    const del = el("button", { className: "small quiet", type: "button", textContent: "Remove" });
+    del.onclick = async () => {
+      const x = await call("/admin/api/tag/remove", { id: t.name });
+      say("tagsMsg", x.ok ? "" : x.message, "bad");
+      load();
+    };
+    row.append(edit, del);
+    item.append(row);
+    box.append(item);
+  }
+}
+$("newTag").onclick = () => editTag({});
 
 function drawScreens() {
   const box = $("screens");

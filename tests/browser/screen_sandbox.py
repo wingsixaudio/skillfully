@@ -501,6 +501,21 @@ async def main():
 
         # Canvases written straight into the config folder, the way an agent would write them.
         await owner.goto(base + "/admin/hub"); await owner.wait_for_selector("#secConfig:not([hidden]) #configTrust")
+
+        # Tags: values the hub holds itself, made on the Settings page.
+        await owner.click("#newTag"); await owner.fill("#tagTitle", "Service live")
+        check("a tag's ID follows its name", await owner.input_value("#tagName") == "service-live", await owner.input_value("#tagName"))
+        await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.wait_for_selector("#tags .item")
+        listed = await owner.locator("#tags").inner_text()
+        check("a tag made on the Settings page is listed with what it holds", "Flag, now Off" in listed and "tag/flag/service-live" in listed, listed)
+        await owner.click("#newTag"); await owner.fill("#tagTitle", "Phase"); await owner.select_option("#tagKind", "choice")
+        await owner.fill("#tagOptions", "closed, music, message")
+        await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.wait_for_selector("#tags .item:nth-child(2)")
+        listed = await owner.locator("#tags").inner_text()
+        check("a choice starts at the first of its options", "Choice, now closed" in listed, listed)
+        if shots: await owner.locator("#secTags").screenshot(path=os.path.join(shots, "tags.png"))
         canvas_dir = os.path.join(re.search(r"in (.+)/devices\.", await owner.locator("#configWhere").inner_text()).group(1), "screens", "canvas")
         fixtures = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "canvas")
         for name in ["switcher", "run-sheet"]:

@@ -539,7 +539,8 @@ Deno.test("the agent is told about buttons, which hold nothing, by what a device
     id: "lamp",
     mode: "act",
     health: { status: "ok" },
-    manifest: { name: "Stage lamp", capabilities: { generic: {} } },
+    name: "Stage lamp",
+    capabilities: { generic: {} },
     state: new Map<string, string>([
       ["generic/ready/lamp_on/title", "Lamp on"],
       ["generic/ready/lamp_on/group", "Power"],
