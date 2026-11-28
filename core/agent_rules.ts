@@ -177,6 +177,11 @@ do     1 to 32 steps, done in order. A step that fails stops the rest.
   { "if": CONDITION, "then": [STEPS], "else": [STEPS] }   one list or the other, by what is true at that
                                             moment. "else" is optional. If the hub cannot tell, the run
                                             stops. No "if" inside an "if"
+  { "save": [{ "key": K }, ...], "as": "before-talk" }   remember what those values hold now, under a name
+  { "restore": [{ "key": K }, ...], "saved_as": "before-talk", "over": 2 }   put back what was saved under
+                                            that name, for those of the listed values that were saved.
+                                            "over" is optional. The lists may use "range". One rule can
+                                            save and another restore: the name is shared by the whole hub
   { "together": [STEP, STEP, ...] }         2 to 256 steps done at the same moment. The next step waits for
                                             all of them. No "wait" and no "together" inside
 

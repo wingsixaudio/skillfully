@@ -358,3 +358,77 @@ Deno.test("a run can wait for a condition, and take one path or another by what 
   assertEquals(hub.hubDevice.state.get("tag/number/count"), 102);
   await hub.stop();
 });
+
+Deno.test("values are saved under a name and put back later, by the same rule or another", async () => {
+  const hub = await hubWithBoard();
+  const bad = (step: unknown, why: string) => {
+    const c = checkRule({ kind: "automation", name: "x", do: [step] });
+    assert(!c.ok && c.problems.some((p) => p.includes(why)), JSON.stringify(c));
+  };
+  bad({ save: [], as: "x" }, "must be a list of 1 to 256 values");
+  bad({ save: [{ key: "a/b" }], as: "Not A Name" }, "must be a name in lowercase");
+  bad({ restore: [{ key: "a/b" }], saved_as: "x", value: 1 }, 'unknown field "value"');
+  bad(
+    { together: [{ key: "a/b", value: 1 }, { save: [{ key: "a/b" }], as: "x" }] },
+    "cannot be among the steps done together",
+  );
+
+  const LEVELS = { key: "console/input/{input}/bus/1/level", range: { input: { from: 1, to: 4 } } };
+  await rule(hub, "duck", {
+    do: [{ save: [LEVELS, { key: "tag/flag/live" }], as: "before-talk" }, { ...LEVELS, value: -40 }, {
+      key: "tag/flag/live",
+      value: true,
+    }],
+  });
+  // Another rule puts them back. What it lists is what it can set, known when it is approved.
+  await rule(hub, "unduck", {
+    do: [{ restore: [LEVELS, { key: "tag/flag/live" }], saved_as: "before-talk" }],
+  });
+  assertEquals(
+    view(hub, "duck").sentence,
+    'When it is run: save Send level (input 1 to 4, bus 1) on Simulated board, Service live as "before-talk", then set Send level (input 1 to 4, bus 1) on Simulated board to -40, then set Service live to on.',
+  );
+  assertEquals(
+    view(hub, "unduck").sentence,
+    'When it is run: restore Send level (input 1 to 4, bus 1) on Simulated board, Service live from "before-talk".',
+  );
+  assertEquals(view(hub, "unduck").touches.writes.length, 5);
+  assert(view(hub, "duck").touches.reads.some((r) => r.key === level(4)));
+
+  // Nothing saved yet: restoring says so and sets nothing.
+  await press(hub, "unduck");
+  await until("it says nothing is saved", () => ofType(hub, "skillfully.automation.failed").length === 1);
+  assertEquals(ofType(hub, "skillfully.automation.failed")[0].data.why, 'Nothing is saved as "before-talk"');
+
+  const levels = () => [1, 2, 3, 4].map((n) => board(hub).state.get(level(n)));
+  for (const [n, v] of [[1, -3], [2, -6], [3, -9], [4, -12]]) {
+    assert((await board(hub).set(level(n), v, who)).ok);
+  }
+  assert((await press(hub, "duck")).ok);
+  await until("they are pulled down", () => levels().every((v) => v === -40));
+  assertEquals(hub.hubDevice.state.get("tag/flag/live"), true);
+  assert((await press(hub, "unduck")).ok);
+  await until("each is back where it was", () => JSON.stringify(levels()) === "[-3,-6,-9,-12]");
+  assertEquals(hub.hubDevice.state.get("tag/flag/live"), false);
+
+  // A rule that lists fewer values puts back only those. What was saved stays saved.
+  for (const n of [1, 2, 3, 4]) assert((await board(hub).set(level(n), 0, who)).ok);
+  await rule(hub, "just-two", {
+    do: [{
+      restore: [{ key: "console/input/{input}/bus/1/level", range: { input: [2, 3] } }],
+      saved_as: "before-talk",
+    }],
+  });
+  assert((await press(hub, "just-two")).ok);
+  await until("two are back", () => JSON.stringify(levels()) === "[0,-6,-9,0]");
+  // In test, a restore says what it would put back, value by value.
+  hub.rules.setState("unduck", "test", who);
+  assert((await press(hub, "unduck")).ok);
+  await until("it says what it would restore", () => ofType(hub, "skillfully.automation.would").length === 1);
+  const would = ofType(hub, "skillfully.automation.would")[0].data.writes as {
+    key: string;
+    value: unknown;
+  }[];
+  assertEquals(would.map((w) => w.value), [-3, -6, -9, -12, false]);
+  await hub.stop();
+});

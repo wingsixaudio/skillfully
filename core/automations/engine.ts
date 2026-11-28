@@ -200,6 +200,8 @@ export interface ValueAbout {
   /** No other device has a value of this name, so a rule can leave the device out. */
   only: boolean;
 }
+/** Where what a rule saved is kept, by the name it was saved under. */
+const SAVED = "automations.saved.";
 /** How long after a link sets a value the same value arriving from the device is taken as that set. */
 const LINK_ECHO_MS = 2000;
 /** How many values one search answers with. */
@@ -1121,6 +1123,15 @@ export class Automations {
     return steps.flatMap((s): unknown[] =>
       "wait" in s
         ? [{ wait: s.wait }]
+        : "save" in s
+        ? [{ save: s.save.map((m) => ({ device: m.device, key: m.key })), as: s.as }]
+        : "restore" in s
+        ? this.#saved(s.as, s.restore).map(({ at, value }) => ({
+          device: at.device,
+          key: at.key,
+          value,
+          ...(s.over !== undefined ? { over: s.over } : {}),
+        }))
         : "until" in s
         ? [{ wait_until: conditionWords(s.until, this.#name), timeout: s.timeout }]
         : "branch" in s
@@ -1151,6 +1162,19 @@ export class Automations {
       depth: run.depth,
     });
     return r.ok ? undefined : r.error.message;
+  }
+
+  /** Of these values, the ones saved under a name, each with what was saved. */
+  #saved(name: string, of: At[]): { at: At; value: Value }[] {
+    let all: { device: string; key: string; value: Value }[] = [];
+    try {
+      all = JSON.parse(this.deps.kept.get(SAVED + name) ?? "[]");
+    } catch { /* nothing that can be read was saved */ }
+    const by = new Map(all.map((x) => [`${x.device}\n${x.key}`, x.value]));
+    return of.flatMap((at) => {
+      const value = by.get(`${at.device}\n${at.key}`);
+      return value === undefined ? [] : [{ at, value }];
+    });
   }
 
   /** Wait for a time, or less if the run is woken. */
@@ -1190,6 +1214,27 @@ export class Automations {
           await this.#pause(run, left);
           run.waiting = false;
         }
+      } else if ("save" in s) {
+        // What the hub cannot vouch for is not saved: putting back a guess would be worse than leaving it.
+        const now = s.save.flatMap((at) => {
+          const value = this.#read(at);
+          return value === undefined ? [] : [{ device: at.device, key: at.key, value }];
+        });
+        if (!now.length) return `Nothing to save as "${s.as}": none of those values is known`;
+        this.deps.kept.set(SAVED + s.as, JSON.stringify(now));
+      } else if ("restore" in s) {
+        if (this.deps.kept.get(SAVED + s.as) === undefined) return `Nothing is saved as "${s.as}"`;
+        // All at once, like any steps done together. A value that was not saved is left where it is.
+        const back = this.#saved(s.as, s.restore).map(({ at, value }): CAct => ({
+          at,
+          does: "set",
+          value,
+          ...(s.over !== undefined && typeof value === "number" ? { over: s.over } : {}),
+        }));
+        const why = (await Promise.all(back.map((x) => this.#act(live, run, x)))).find((w) =>
+          w !== undefined
+        );
+        if (why !== undefined) return why;
       } else if ("branch" in s) {
         const now = this.#is(live, s.branch);
         // Unknown means no: when the hub cannot tell which side is right, it does neither.

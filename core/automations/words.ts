@@ -64,6 +64,15 @@ export function triggerWords(t: CTrigger, name: Namer): string {
 
 export function stepWords(s: CStep, name: Namer): string {
   if ("wait" in s) return `wait ${seconds(s.wait)}`;
+  if ("save" in s || "restore" in s) {
+    const names = [...new Set(("save" in s ? s.save : s.restore).map(name))];
+    const what = names.length > 3
+      ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`
+      : names.join(", ");
+    return "save" in s
+      ? `save ${what} as "${s.as}"`
+      : `restore ${what} from "${s.as}"` + (s.over !== undefined ? ` over ${seconds(s.over)}` : "");
+  }
   if ("until" in s) return `wait until ${conditionWords(s.until, name)} (up to ${seconds(s.timeout)})`;
   if ("branch" in s) {
     const side = (steps: CStep[]) => steps.map((x) => stepWords(x, name)).join(", then ");

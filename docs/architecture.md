@@ -268,6 +268,12 @@ cannot tell which side is right, it takes neither and the run stops: unknown mea
 `toggle` flips something that is on or off. There are no loops. A rule that should repeat is set off again by
 a trigger, where the run limit can see it.
 
+A `save` step remembers what a list of values holds now, under a name, and a `restore` step puts back what was
+saved under that name. One rule can save and another restore: pull levels down for an announcement, put them
+back after. The hub keeps what was saved in its database. A restore lists the values it may put back, so its
+reach is known when it is approved and does not depend on what happens to have been saved; of those, it sets
+the ones that were. A value the hub could not vouch for when saving is not saved.
+
 Time is the hub's own clock. A schedule fires once when the clock reaches its minute. One that passes while
 the hub is off is not run late, and is written to the log as missed. A fade is the hub sending steps toward
 the target thirty times a second. Anyone else setting that value, or already asking to, ends the fade where

@@ -52,13 +52,15 @@ export type CStep =
   | { wait: number }
   | { until: CCond; timeout: number }
   | { branch: CCond; then: CStep[]; else: CStep[] }
+  | { save: At[]; as: string }
+  | { restore: At[]; as: string; over?: number }
   /** Done at the same moment. `of` is the name with a range they were written out from, when they were. */
   | { together: CAct[]; of?: Ranged }
   | CAct;
 /** Every single thing a list of steps does, with what is done together laid flat. */
 export const acts = (steps: CStep[]): CAct[] =>
   steps.flatMap((s) =>
-    "wait" in s || "until" in s
+    "wait" in s || "until" in s || "save" in s || "restore" in s
       ? []
       : "branch" in s
       ? acts([...s.then, ...s.else])
@@ -69,6 +71,20 @@ export const acts = (steps: CStep[]): CAct[] =>
 /** What steps wait for: a run stopped at one of these has to be told when what it reads changes. */
 export const waitsIn = (steps: CStep[]): CCond[] =>
   steps.flatMap((s) => "until" in s ? [s.until] : "branch" in s ? waitsIn([...s.then, ...s.else]) : []);
+/** What steps save (read) and put back (set), wherever in the list they are. */
+export const kept = (steps: CStep[]): { saved: At[]; restored: At[] } => {
+  const saved: At[] = [], restored: At[] = [];
+  for (const s of steps) {
+    if ("save" in s) saved.push(...s.save);
+    else if ("restore" in s) restored.push(...s.restore);
+    else if ("branch" in s) {
+      const inner = kept([...s.then, ...s.else]);
+      saved.push(...inner.saved);
+      restored.push(...inner.restored);
+    }
+  }
+  return { saved, restored };
+};
 /** Every condition inside a list of steps: what a step waits for, and what an if chooses by. */
 export const conditionsIn = (steps: CStep[]): CCond[] =>
   steps.flatMap((s) =>
@@ -227,6 +243,20 @@ export function compile(
       if ("wait_until" in s) {
         return { until: condition(`${here}.wait_until`, s.wait_until), timeout: s.timeout };
       }
+      if ("save" in s) {
+        const each = s.save.map((r) => find(`${here}.save`, r, "read").at);
+        if (each.length > LIMITS.ranged) {
+          say(`${here}.save`, `stands for ${each.length} values; the most is ${LIMITS.ranged}`);
+        }
+        return { save: once(each), as: s.as };
+      }
+      if ("restore" in s) {
+        const each = s.restore.map((r) => find(`${here}.restore`, r, "write").at);
+        if (each.length > LIMITS.ranged) {
+          say(`${here}.restore`, `stands for ${each.length} values; the most is ${LIMITS.ranged}`);
+        }
+        return { restore: once(each), as: s.saved_as, ...(s.over !== undefined ? { over: s.over } : {}) };
+      }
       if ("then" in s) {
         return {
           branch: condition(`${here}.if`, s.if),
@@ -367,6 +397,8 @@ export function compile(
   }
   for (const c of [cond, during, cancel]) if (c) reads(c, read);
   for (const c of conditionsIn([...doing, ...otherwise])) reads(c, read);
+  const held = kept([...doing, ...otherwise]);
+  read.push(...held.saved);
   const every = acts([...doing, ...otherwise]);
   for (const s of every) if (s.does === "from") read.push(s.from);
   // What it adds to, multiplies or moves over time, it reads first.
@@ -399,6 +431,7 @@ export function compile(
   }
   const writes = once([
     ...every.map((s) => s.at),
+    ...held.restored,
     ...(follow ? [follow.to] : []),
     ...(link ?? []),
   ]);
