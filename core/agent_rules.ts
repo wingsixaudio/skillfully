@@ -304,7 +304,7 @@ export async function lookRules(
   return {
     content: JSON.stringify({ in_words: said.sentence, right_now: standing }).slice(0, 12_000),
     note: { tool: name, triggers: checked.rule.when?.length ?? 0, steps: checked.rule.do?.length ?? 0 },
-    words: `Tried the automation “${checked.rule.name.slice(0, 60)}”: nothing was sent`,
+    words: `Checked automation “${checked.rule.name.slice(0, 60)}” (dry run, no changes made)`,
   };
 }
 
