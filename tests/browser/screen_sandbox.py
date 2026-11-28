@@ -88,7 +88,7 @@ async def main():
         check("a new owner is shown what is left to do, in order", [t.split("\n")[0] for t in todo] == ["Connect a screen to a device", "Invite your team"], str(todo))
         if shots: await owner.screenshot(path=f"{shots}/1b-first-look.png")
 
-        # --- The admin is five places, each at its own address ---
+        # --- The admin is six places, each at its own address ---
         async def place(name):
             await owner.locator("#places a", has_text=name).click()
         async def places_shown():
@@ -101,7 +101,7 @@ async def main():
             await owner.wait_for_timeout(250)
             if await owner.locator("#dlg[open]").count():
                 await confirm(); await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
-        check("there are five places", await owner.locator("#places a").all_inner_texts() == ["Home", "Devices", "Screens", "People", "Settings"])
+        check("there are six places", await owner.locator("#places a").all_inner_texts() == ["Home", "Devices", "Screens", "Automations", "People", "Settings"])
         check("a new owner starts at Home, which says how the hub is", await places_shown() == [""] and "All systems normal" in await owner.locator("#homeStatus").inner_text(), await owner.locator("#home").inner_text())
         check("Home lists each device and how it is", await owner.locator("#homeDeviceList a.line").count() == 2 and "Connected" in await owner.locator("#homeDeviceList").inner_text(), await owner.locator("#homeDeviceList").inner_text())
         check("with nothing waiting, nothing claims to need you", not await owner.locator("#needs").is_visible())
@@ -516,6 +516,50 @@ async def main():
         listed = await owner.locator("#tags").inner_text()
         check("a choice starts at the first of its options", "Choice, now closed" in listed, listed)
         if shots: await owner.locator("#secTags").screenshot(path=os.path.join(shots, "tags.png"))
+
+        # Automations: a rule is written, read back as a sentence, approved, turned on, and then acts by itself.
+        await place("Automations"); await owner.wait_for_selector("#autoPause")
+        tabs = await owner.evaluate("() => [...document.querySelectorAll('#places a')].map((a) => { const r = a.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth + 0.5 && a.scrollWidth <= a.clientWidth + 1; })")
+        check("all six places fit across a phone, none cut off", len(tabs) == 6 and all(tabs), str(tabs))
+        await owner.click("#newAutomation"); await owner.fill("#ruleId", "go-live")
+        await owner.fill("#ruleText", '{"kind": "automation", "name": "Go live", "when": [{"key": "tag/choice/phase", "rise_past": 1}], "do": [{"key": "tag/flag/service-live", "value": true}]}')
+        await owner.click("#dlgOk"); await owner.locator("#dlgMsg", has_text="rise_past").wait_for(timeout=8000)
+        check("a rule with a word the hub does not know is refused where it was typed, with the word", "is not a word a rule uses here" in await owner.locator("#dlgMsg").inner_text())
+        await owner.fill("#ruleText", json.dumps({"kind": "automation", "name": "Go live", "group": "sound", "when": [{"key": "tag/choice/phase", "becomes": "music"}], "do": [{"key": "tag/flag/service-live", "value": True}, {"key": LEVEL, "add": 2, "max": 0}]}))
+        await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.wait_for_selector("#autoProposed .item")
+        told = await owner.locator("#autoProposed").inner_text()
+        check("a saved rule waits for approval, said as a sentence with what it can set", 'When Phase becomes "music": set Service live to on, then add 2 to' in told and "Can set: Service live," in told and "(at most 0)" in told, told)
+        check("until it is approved nothing is on", "0 on" in await owner.locator("#autoStatus").inner_text() and await owner.locator("#autoRules .item").count() == 0)
+        if shots: await owner.screenshot(path=f"{shots}/9c-automation-proposed.png", full_page=True)
+        await owner.locator("#autoProposed button", has_text="Approve").click(); await confirm()
+        await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.locator("#autoRules .chip", has_text="Off").wait_for(timeout=8000)
+        check("approved, it is the hub's and off", await owner.locator("#autoProposed .item").count() == 0)
+        await owner.locator("#autoRules button", has_text="Turn on").click()
+        await owner.locator("#autoRules .chip", has_text="On").first.wait_for(timeout=8000)
+        check("turned on, the page says one is on", "1 on" in await owner.locator("#autoStatus").inner_text())
+        before = (await state("sim-console")).get(LEVEL)
+        r = await owner.evaluate("() => fetch('/admin/api/automation/live', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({id:'go-live'})}).then(r => r.json())")
+        check("its trigger is shown with what it reads now, and is not true yet", r.get("triggers") == [{"depth": 0, "words": 'Phase becomes "music"', "reads": '"closed"', "is": "false"}], json.dumps(r)[:300])
+        await owner.locator("#autoRules button", has_text="Watch").click(); await owner.wait_for_selector("#ruleLive ol")
+        if shots: await owner.screenshot(path=f"{shots}/9d-automation-watch.png")
+        await owner.click("#dlgOk"); await owner.wait_for_selector("#dlg:not([open])", state="attached")
+        await owner.locator("#autoRules button", has_text="Run now").click()
+        for _ in range(50):
+            if (await state("sim-console")).get(LEVEL) == before + 2: break
+            await owner.wait_for_timeout(100)
+        check("run from the page, it does its steps on the real device", (await state("sim-console")).get(LEVEL) == before + 2, str((await state("sim-console")).get(LEVEL)))
+        await owner.wait_for_selector("#autoRules .chip:has-text('Last ran')")
+        await owner.click("#autoPause"); await owner.locator("#autoStatus", has_text="Paused").wait_for(timeout=8000)
+        await owner.locator("#autoRules button", has_text="Run now").click()
+        await owner.locator("#autoMsg", has_text="Automations are paused").wait_for(timeout=8000)
+        check("paused, a rule that is run says it did not and why", (await state("sim-console")).get(LEVEL) == before + 2)
+        if shots: await owner.screenshot(path=f"{shots}/9e-automations-paused.png", full_page=True)
+        await owner.click("#autoPause"); await owner.locator("#autoStatus", has_text="1 on").wait_for(timeout=8000)
+        await owner.locator("#autoRules button", has_text="Turn off").click()
+        await owner.locator("#autoRules .chip", has_text="Off").wait_for(timeout=8000)
+        await place("Settings"); await owner.wait_for_selector("#secConfig:not([hidden]) #configTrust")
         canvas_dir = os.path.join(re.search(r"in (.+)/devices\.", await owner.locator("#configWhere").inner_text()).group(1), "screens", "canvas")
         fixtures = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fixtures", "canvas")
         for name in ["switcher", "run-sheet"]:

@@ -1,7 +1,8 @@
-// The admin: five places, each at its own address, drawn by this one page. Superusers only.
+// The admin: six places, each at its own address, drawn by this one page. Superusers only.
 //   /admin            Home     is everything working, and what is waiting on you
 //   /admin/devices    Devices  what the hub talks to (/admin/devices/<id> is one of them)
 //   /admin/screens    Screens  what people open, and which devices each may use
+//   /admin/automations  Automations  rules the hub runs by itself
 //   /admin/people     People   who is on the team and what each can do
 //   /admin/hub        Hub      the hub's own settings
 let people = [], roles = [], offered = [], drivers = [], tags = [], agents = [], meId = "";
@@ -46,7 +47,14 @@ async function sureCall(path, body) {
 
 // --- Places ---
 // Which place the address names, and which device when it names one. An address nobody gave a place is Home.
-const PLACES = { "": "Home", devices: "Devices", screens: "Screens", people: "People", hub: "Hub" };
+const PLACES = {
+  "": "Home",
+  devices: "Devices",
+  screens: "Screens",
+  automations: "Automations",
+  people: "People",
+  hub: "Settings",
+};
 function here() {
   const [first = "", second = ""] = location.pathname.replace(/^\/admin\/?/, "").split("/");
   const place = Object.hasOwn(PLACES, first) ? first : "";
@@ -166,6 +174,7 @@ async function load() {
   drawScreens();
   drawDrivers();
   drawTags();
+  drawAutomations(r.automations);
   drawPolicy(r.policy);
   // Reading every file is more work than the rest of this, so it is done less often.
   if (here().place === "hub" && Date.now() - configDrawn > 15000) drawConfig();
@@ -547,6 +556,219 @@ function drawTags() {
   }
 }
 $("newTag").onclick = () => editTag({});
+
+// --- Automations: rules the hub runs by itself ---
+const RULE_STATES = { on: "On", off: "Off", test: "Test", stopped: "Stopped", waiting: "Waiting" };
+const STARTER = {
+  kind: "automation",
+  name: "",
+  when: [{ key: "tag/flag/example", becomes: true }],
+  do: [{ key: "tag/number/example", add: 1 }],
+};
+// A rule as text, to write or change. Saving proposes it. Nothing runs until it is approved.
+function editRule(id, rule) {
+  ask(id ? "Edit automation" : "New automation", (b) => {
+    input(b, "ruleId", "ID", {
+      value: id || "",
+      maxLength: 64,
+      required: true,
+      pattern: "[a-z0-9][a-z0-9-]*",
+      disabled: !!id,
+    });
+    const text = el("textarea", { id: "ruleText", rows: 14, spellcheck: false, required: true });
+    text.value = JSON.stringify(rule || STARTER, null, 2);
+    b.append(
+      el("label", { htmlFor: "ruleText", textContent: "Rule (JSON)" }),
+      text,
+      el("p", {
+        className: "help",
+        textContent: "Saving does not turn it on. It is listed for approval, with what it would do in words.",
+      }),
+    );
+  }, () => call("/admin/api/automation/save", { id: $("ruleId").value.trim(), text: $("ruleText").value }));
+}
+// How a rule stands right now: each trigger and condition with what it reads. Kept current while open.
+function watchRule(v) {
+  let timer;
+  ask(v.name, (b) => {
+    const box = el("div", { id: "ruleLive" });
+    b.append(el("p", { className: "dim", textContent: v.sentence }), box);
+    const part = (title, lines) => {
+      if (!lines.length) return;
+      box.append(el("h3", { textContent: title }));
+      for (const l of lines) {
+        box.append(
+          el(
+            "p",
+            { className: "live", style: "margin-left:" + l.depth * 14 + "px" },
+            el("span", { className: "chip" + (l.is === "true" ? " on" : ""), textContent: l.is }),
+            " " + l.words + (l.reads !== undefined ? " (now " + l.reads + ")" : ""),
+          ),
+        );
+      }
+    };
+    const draw = async () => {
+      const r = await call("/admin/api/automation/live", { id: v.id });
+      if (!box.isConnected || !$("dlg").open) return clearInterval(timer);
+      if (!r.ok) return;
+      box.innerHTML = "";
+      part("Triggers", r.triggers);
+      part("Condition", r.condition);
+      box.append(el("h3", { textContent: "Steps" }));
+      const list = el("ol");
+      for (const s of r.steps) list.append(el("li", { textContent: s }));
+      box.append(list);
+    };
+    draw();
+    timer = setInterval(draw, 1000);
+  }, () => {
+    clearInterval(timer);
+    return Promise.resolve({ ok: true });
+  }, "Done");
+}
+function drawAutomations(a) {
+  if (!a) return;
+  const done = (r) => {
+    say("autoMsg", r && r.ok === false ? r.message : "", "bad");
+    load();
+  };
+  const button = (text, fn) => {
+    const b = el("button", { className: "small quiet", type: "button", textContent: text });
+    b.onclick = fn;
+    return b;
+  };
+  const touches = (x) => [
+    ...(x.writes && x.writes.length
+      ? [el("p", { className: "help", textContent: "Can set: " + x.writes.join(", ") })]
+      : []),
+    ...(x.reads && x.reads.length
+      ? [el("p", { className: "help", textContent: "Reads: " + x.reads.join(", ") })]
+      : []),
+  ];
+  const status = $("autoStatus");
+  status.className = "status" + (a.paused.all ? " bad" : a.rules.some((r) => r.state === "on") ? " ok" : "");
+  status.textContent = a.paused.all
+    ? "Paused. No automation runs."
+    : a.rules.filter((r) => r.state === "on").length + " on";
+  const pauses = $("autoPauses");
+  pauses.innerHTML = "";
+  const pause = button(
+    a.paused.all ? "Resume" : "Pause all",
+    async () => done(await call("/admin/api/automation/pause", { on: !a.paused.all })),
+  );
+  pause.id = "autoPause";
+  pauses.append(pause);
+  for (const [group, on] of Object.entries(a.paused.groups)) {
+    pauses.append(
+      button(
+        (on ? "Resume " : "Pause ") + group,
+        async () => done(await call("/admin/api/automation/pause", { on: !on, group })),
+      ),
+    );
+  }
+
+  const waiting = $("autoProposed");
+  waiting.innerHTML = "";
+  if (a.proposed.length) waiting.append(el("h3", { textContent: "Waiting for approval" }));
+  for (const p of a.proposed) {
+    const changes = a.rules.some((r) => r.id === p.id);
+    const item = el(
+      "div",
+      { className: "item" },
+      el("h3", { textContent: (p.name || p.id) + (changes ? " (changed)" : "") }),
+    );
+    if (p.sentence) item.append(el("p", { className: "dim", textContent: p.sentence }));
+    item.append(...touches(p));
+    for (const problem of p.problems) item.append(el("p", { className: "msg bad", textContent: problem }));
+    const row = el("div", { className: "row", style: "margin-top:8px" });
+    if (!p.problems.length) {
+      row.append(button("Approve", () =>
+        ask("Approve " + p.name, (b) => {
+          b.append(
+            el("p", { className: "dim", textContent: p.sentence }),
+            ...touches(p),
+            el("p", {
+              className: "help",
+              textContent: changes
+                ? "This replaces the version running now."
+                : "It starts off. Turn it on, or try it in Test first.",
+            }),
+          );
+          confirmField(b);
+        }, () =>
+          sureCall("/admin/api/automation/approve", { id: p.id, hash: p.hash }), "Approve")));
+    }
+    if (p.rule) row.append(button("Edit", () => editRule(p.id, p.rule)));
+    if (!changes) {
+      row.append(
+        button("Remove", async () => done(await call("/admin/api/automation/remove", { id: p.id }))),
+      );
+    }
+    item.append(row);
+    waiting.append(item);
+  }
+
+  const box = $("autoRules");
+  box.innerHTML = "";
+  if (a.rules.length && a.proposed.length) box.append(el("h3", { textContent: "Approved" }));
+  for (const v of a.rules) {
+    const item = el("div", { className: "item" }, el("h3", { textContent: v.name }));
+    const chips = el("div");
+    chips.append(
+      el("span", { className: "chip" + (v.state === "on" ? " on" : ""), textContent: RULE_STATES[v.state] }),
+    );
+    if (v.active) chips.append(el("span", { className: "chip on", textContent: "Running" }));
+    if (v.group) chips.append(el("span", { className: "chip", textContent: "Group: " + v.group }));
+    if (v.lastRan) {
+      chips.append(
+        el("span", { className: "chip", textContent: "Last ran " + new Date(v.lastRan).toLocaleString() }),
+      );
+    }
+    item.append(chips);
+    if (v.sentence) item.append(el("p", { className: "dim", textContent: v.sentence }));
+    if (v.stopped) {
+      item.append(el("p", { className: "msg bad", textContent: "Stopped by the hub: " + v.stopped }));
+    }
+    if (v.missing.length) {
+      item.append(el("p", { className: "msg bad", textContent: "Waiting for: " + v.missing.join(", ") }));
+    }
+    for (const problem of v.problems) item.append(el("p", { className: "msg bad", textContent: problem }));
+    const row = el("div", { className: "row", style: "margin-top:8px" });
+    const state = (to) => async () => {
+      // Turning a rule on lets it act by itself, so that is confirmed. Off and Test are not.
+      const go = () => sureCall("/admin/api/automation/state", { id: v.id, state: to });
+      if (to !== "on" || unlocked()) {
+        const r = await go();
+        if (!r.locked) return done(r);
+      }
+      ask(
+        "Turn on " + v.name,
+        (x) => {
+          x.append(el("p", { className: "dim", textContent: v.sentence }));
+          confirmField(x);
+        },
+        go,
+        "Turn on",
+      );
+    };
+    if (v.state !== "on" && v.state !== "waiting") row.append(button("Turn on", state("on")));
+    if (v.state === "on" || v.state === "waiting" || v.state === "test") {
+      row.append(button("Turn off", state("off")));
+    }
+    if (v.state !== "test") row.append(button("Test", state("test")));
+    if (v.state === "on" || v.state === "test") {
+      row.append(button("Run now", async () => done(await call("/admin/api/automation/run", { id: v.id }))));
+    }
+    row.append(
+      button("Watch", () => watchRule(v)),
+      button("Edit", () => editRule(v.id, v.rule)),
+      button("Remove", async () => done(await call("/admin/api/automation/remove", { id: v.id }))),
+    );
+    item.append(row);
+    box.append(item);
+  }
+}
+$("newAutomation").onclick = () => editRule("", null);
 
 function drawScreens() {
   const box = $("screens");

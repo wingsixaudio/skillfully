@@ -59,6 +59,18 @@ const clean = (v: unknown, max: number) =>
   [...String(v ?? "")].map((c) => (c.charCodeAt(0) < 32 ? " " : c)).join("").trim().slice(0, max);
 
 type Told = { ok: true; tag: Tag } | { ok: false; message: string };
+
+/**
+ * Another part of the hub whose values are offered through this device, under a kind of their own. It
+ * decides what a set does. This device checks the request, writes it to the log and tells whoever watches.
+ */
+export interface Part {
+  set(
+    key: string,
+    value: Value,
+    ctx: SetContext & { traceid: string },
+  ): { ok: true; value: Value } | { ok: false; code: string; message: string };
+}
 interface Who {
   actor: string;
   via: string;
@@ -89,6 +101,7 @@ export class HubDevice implements Source {
   #healthListeners = new Set<() => void>();
   #staleListeners = new Set<() => void>();
   #writing: Promise<void> = Promise.resolve();
+  #parts = new Map<string, Part>();
 
   constructor(deps: { db: DatabaseSync; log: Log; capabilities: Capabilities; dataDir?: string }) {
     this.#db = deps.db;
@@ -167,6 +180,36 @@ export class HubDevice implements Source {
       : `${tag.title} can be ${(tag.options ?? []).map((o) => `"${o}"`).join(", ")}, not "${
         value.slice(0, 40)
       }"`;
+  }
+
+  /**
+   * Offer another part's values through this device, under a kind of their own. What comes back is how the
+   * part says what its values are now, and that some are gone.
+   */
+  extend(
+    capability: string,
+    part: Part,
+  ): { put(values: Values, cause?: Cause): void; drop(keys: string[]): void } {
+    this.capabilities[capability] = {};
+    this.#parts.set(capability, part);
+    return {
+      put: (values, cause) => {
+        const changed: Values = {};
+        for (const [key, v] of Object.entries(values)) {
+          if (this.state.get(key) === v) continue;
+          this.state.set(key, v);
+          changed[key] = v;
+        }
+        this.#tell(changed, cause);
+      },
+      drop: (keys) => {
+        let any = false;
+        for (const key of keys) any = this.state.delete(key) || any;
+        if (!any) return;
+        this.rev++;
+        for (const l of this.#staleListeners) l();
+      },
+    };
   }
 
   // --- Tags as a superuser makes them ---
@@ -318,6 +361,35 @@ export class HubDevice implements Source {
     };
     const bad = this.#vocabulary.writeProblem(this.capabilities, key, value);
     if (bad) return refuse(bad.code, bad.message);
+    const part = this.#parts.get(key.slice(0, key.indexOf("/")));
+    if (part) {
+      const done = part.set(key, value, full);
+      if (!done.ok) return refuse(done.code, done.message);
+      const pressed = this.#vocabulary.resolve(this.capabilities, key)?.def.kind === "trigger";
+      const before = this.state.get(key) ?? null;
+      this.#log.append({
+        type: pressed ? "skillfully.command.done" : "skillfully.command.confirmed",
+        source: "core",
+        subject,
+        actor: full.actor,
+        via: full.via,
+        traceid: full.traceid,
+        data: pressed
+          ? { key, requested: value, ms: 0 }
+          : { key, requested: value, value: done.value, before, adjusted: false, ms: 0 },
+      });
+      if (!pressed && before !== done.value) {
+        this.state.set(key, done.value);
+        this.#tell({ [key]: done.value }, causeOf(full));
+      }
+      return Promise.resolve({
+        ok: true,
+        superseded: false,
+        value: done.value,
+        requested: value,
+        adjusted: false,
+      });
+    }
     const [, kind, name] = key.split("/");
     const tag = this.#tags.get(name);
     if (!tag || tag.kind !== kind) return refuse("unknown_key", `There is no ${kind} called ${name}`);

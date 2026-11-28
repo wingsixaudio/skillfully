@@ -1,0 +1,771 @@
+// Running the rules.
+//
+// The engine listens to every change on every device and on the hub's own device. For each change it
+// looks only at the rules that read the value that changed, works out which triggers went from false to
+// true, and for each of those checks the rule's condition and starts its steps. It never polls, and a
+// change that no rule reads costs one lookup.
+//
+// What keeps it safe:
+//   - A rule runs only if a superuser approved its exact text, and it is on. The engine reads the database.
+//   - A trigger fires only on false to true. Unknown to true never fires, so starting the hub, turning a
+//     rule on, or a device coming back sets nothing off.
+//   - Every write goes through the same door a person's does, under the rule's own name, and is in the log.
+//   - A chain of rules setting each other off stops at 8 deep. A rule that runs too often is stopped.
+//   - Pause all stops every rule. A group's pause stops that group.
+//
+// Nothing in a rule is run as code. The engine reads data and does the few things this file knows how to do.
+
+import type { Value, Values } from "../../contract/mod.ts";
+import type { Capabilities } from "../capabilities.ts";
+import type { Devices } from "../devices.ts";
+import { HUB_DEVICE, type HubDevice } from "../hub_device.ts";
+import type { Kept } from "../kept.ts";
+import { type Log, newId } from "../log.ts";
+import type { Cause, SetContext, Source } from "../source.ts";
+import { compile, type Compiled, type CStep, type CTrigger, type World } from "./compile.ts";
+import {
+  asNumber,
+  type At,
+  type CCond,
+  evaluate,
+  firstUnknown,
+  type Read,
+  reads,
+  same,
+  type Tri,
+} from "./evaluate.ts";
+import { GROUP, LIMITS, type Rule } from "./format.ts";
+import type { KeptRule, RuleStore } from "./store.ts";
+import { conditionWords, sentence, shown, stepWords, triggerWords } from "./words.ts";
+
+export const MAX_DEPTH = 8;
+const RATE_WINDOW_MS = 10_000;
+/** Why the hub is acting: its own name in the log, never a person's. */
+const HUB = { actor: "hub", via: "automation" };
+
+/** Timings a test may shorten. */
+export interface AutomationTuning {
+  /** One of a rule's "seconds", in milliseconds. A test makes them short. */
+  secondMs?: number;
+}
+
+/** One timer for everything that waits: a `for`, a wait between steps. */
+class Clock {
+  #items: { at: number; fn: () => void }[] = [];
+  #timer?: ReturnType<typeof setTimeout>;
+
+  after(ms: number, fn: () => void): () => void {
+    const item = { at: performance.now() + ms, fn };
+    let i = this.#items.length;
+    while (i > 0 && this.#items[i - 1].at > item.at) i--;
+    this.#items.splice(i, 0, item);
+    if (i === 0) this.#arm();
+    return () => {
+      const at = this.#items.indexOf(item);
+      if (at < 0) return;
+      this.#items.splice(at, 1);
+      if (at === 0) this.#arm();
+    };
+  }
+  #arm(): void {
+    clearTimeout(this.#timer);
+    const next = this.#items[0];
+    if (!next) return;
+    this.#timer = setTimeout(() => {
+      const now = performance.now();
+      while (this.#items.length && this.#items[0].at <= now) this.#items.shift()!.fn();
+      this.#arm();
+    }, Math.max(0, next.at - performance.now()));
+  }
+  stop(): void {
+    clearTimeout(this.#timer);
+    this.#items = [];
+  }
+}
+
+interface Run {
+  traceid: string;
+  depth: number;
+  cancelled?: string;
+  /** Ends a wait early. */
+  wake?: () => void;
+}
+interface Firing {
+  why: string;
+  cause?: Cause;
+}
+/** What a trigger remembers between looks. */
+interface Memory {
+  was: Tri;
+  /** For "changes": what the value last was, when the hub could vouch for it. */
+  last?: Value;
+}
+interface Live {
+  kept: KeptRule;
+  c: Compiled;
+  memory: Memory[];
+  /** When each run of the last ten seconds began. */
+  runs: number[];
+  run?: Run;
+  queue: Firing[];
+  skipped: { minute: number; count: number };
+}
+
+/** How a rule stands, for a page. */
+export interface RuleView {
+  id: string;
+  name: string;
+  group?: string;
+  /** on, off, test, stopped, or waiting: on, and a device it names is not on this hub. */
+  state: string;
+  stopped?: string;
+  sentence: string;
+  /** Why it cannot run as it is: something it names is gone or changed. */
+  problems: string[];
+  missing: string[];
+  reads: string[];
+  writes: string[];
+  rate: number;
+  lastRan?: string;
+  active: boolean;
+  approvedBy: string;
+  approvedAt: string;
+  hash: string;
+  rule: Rule;
+}
+
+export class Automations {
+  #live = new Map<string, Live>();
+  /** Device, then value name, to the rules that have to look when it changes. */
+  #watching = new Map<string, Map<string, Set<Live>>>();
+  /** Since when each part that says `for` has been true. */
+  #since = new WeakMap<object, number>();
+  #clock = new Clock();
+  #paused = false;
+  #pausedGroups = new Set<string>();
+  #views = new Map<string, RuleView>();
+  #out?: ReturnType<HubDevice["extend"]>;
+  #second: number;
+  #stopped = false;
+  #leftAlone = false;
+
+  constructor(
+    private deps: {
+      devices: Devices;
+      hubDevice: HubDevice;
+      capabilities: Capabilities;
+      log: Log;
+      store: RuleStore;
+      kept: Kept;
+    },
+    tuning: AutomationTuning = {},
+  ) {
+    this.#second = tuning.secondMs ?? 1000;
+  }
+
+  /**
+   * Begin: read what was approved, and listen. Nothing fires because of this. `leftAlone` is for a hub
+   * started to get out of trouble: the rules are listed and none is live.
+   */
+  start(leftAlone = false): void {
+    this.#leftAlone = leftAlone;
+    const { devices, hubDevice, store, kept } = this.deps;
+    try {
+      const held = JSON.parse(kept.get("automations.paused") ?? "{}");
+      this.#paused = held.all === true;
+      for (const g of Array.isArray(held.groups) ? held.groups : []) {
+        if (typeof g === "string" && GROUP.test(g)) this.#pausedGroups.add(g);
+      }
+    } catch { /* nothing kept that can be read: nothing is paused */ }
+    this.#out = hubDevice.extend("automation", { set: (key, value, ctx) => this.#set(key, value, ctx) });
+    this.refresh();
+    store.onChange(() => this.refresh());
+    devices.onReplaced(() => this.refresh());
+    devices.onChange((source, values, cause) => this.#changed(source, values, cause));
+    devices.onHealth((source) => this.#health(source));
+  }
+
+  stop(): void {
+    this.#stopped = true;
+    this.#clock.stop();
+    for (const live of this.#live.values()) this.#cancel(live, "the hub stopped");
+  }
+
+  // --- What the hub knows that a rule can name ---
+
+  #world(): World {
+    const { devices, hubDevice, capabilities, store } = this.deps;
+    const part = (at: At, kind: string) => at.device === HUB_DEVICE && at.key.startsWith(`${kind}/`);
+    return {
+      sources: () => devices.sources(),
+      vocabulary: capabilities,
+      choices: (at) => part(at, "tag/choice") ? hubDevice.tag(at.key.split("/")[2])?.options : undefined,
+      exists: (at) => {
+        if (at.device !== HUB_DEVICE) return undefined;
+        const [kind, what, name] = at.key.split("/");
+        if (kind === "tag") return hubDevice.tag(name)?.kind === what;
+        if (kind === "device") return !!devices.hosts.get(name);
+        if (kind === "automation" && ["run", "enabled", "active"].includes(what)) return !!store.get(name);
+        return undefined;
+      },
+    };
+  }
+
+  #read: Read = (at) => {
+    const source = this.deps.devices.source(at.device);
+    return source && source.status === "running" ? source.state.get(at.key) : undefined;
+  };
+
+  #name = (at: At): string => {
+    const source = this.deps.devices.source(at.device);
+    const title = source?.state.get(`${at.key}/title`);
+    const words = typeof title === "string" && title ? title : at.key;
+    return at.device === HUB_DEVICE || !source ? words : `${words} on ${source.name}`;
+  };
+
+  /** Why a rule cannot be approved as written: what it names that this hub does not have. */
+  check = (id: string, rule: Rule): string[] => {
+    const { problems, missing } = compile(id, rule, this.#world());
+    return [...problems, ...missing.map((d) => `there is no device called ${d} on this hub`)];
+  };
+
+  /** A rule as a sentence, and what it can touch, whether or not it is approved. */
+  describe(
+    id: string,
+    rule: Rule,
+  ): { sentence: string; reads: string[]; writes: string[]; problems: string[] } {
+    const { compiled, problems, missing } = compile(id, rule, this.#world());
+    return {
+      sentence: compiled ? sentence(compiled, this.#name) : "",
+      reads: (compiled?.reads ?? []).map(this.#name),
+      writes: (compiled?.writes ?? []).map(this.#name),
+      problems: [...problems, ...missing.map((d) => `there is no device called ${d} on this hub`)],
+    };
+  }
+
+  // --- Which rules are live ---
+
+  /**
+   * Read what is approved and work out again what each rule reads. A rule that is as it was keeps what its
+   * triggers remember, so approving one rule does not make another forget where it stood.
+   */
+  refresh(): void {
+    if (this.#stopped) return;
+    const world = this.#world();
+    const before = this.#live;
+    this.#live = new Map();
+    this.#watching = new Map();
+    this.#views = new Map();
+    const values: Values = { "automation/paused": this.#paused };
+    const groups = new Set<string>();
+    for (const kept of this.deps.store.kept()) {
+      const { compiled, problems, missing } = compile(kept.id, kept.rule, world);
+      if (kept.rule.group) groups.add(kept.rule.group);
+      const was = before.get(kept.id);
+      const runs = !this.#leftAlone && (kept.state === "on" || kept.state === "test") && compiled &&
+        !missing.length;
+      this.#views.set(kept.id, {
+        id: kept.id,
+        name: kept.rule.name,
+        ...(kept.rule.group ? { group: kept.rule.group } : {}),
+        state: kept.state === "on" && compiled && missing.length ? "waiting" : kept.state,
+        ...(kept.stopped ? { stopped: kept.stopped } : {}),
+        sentence: compiled ? sentence(compiled, this.#name) : "",
+        problems,
+        missing,
+        reads: (compiled?.reads ?? []).map(this.#name),
+        writes: (compiled?.writes ?? []).map(this.#name),
+        rate: kept.rate,
+        ...(kept.lastRan ? { lastRan: kept.lastRan } : {}),
+        active: false,
+        approvedBy: kept.approvedBy,
+        approvedAt: kept.approvedAt,
+        hash: kept.hash,
+        rule: kept.rule,
+      });
+      values[`automation/enabled/${kept.id}`] = kept.state === "on";
+      values[`automation/enabled/${kept.id}/title`] = kept.rule.name;
+      values[`automation/active/${kept.id}`] = !!was?.run && !!runs && was.kept.hash === kept.hash;
+      if (!runs) {
+        if (was) this.#cancel(was, "it was switched off");
+        continue;
+      }
+      // The same rule, naming the same things: it carries on as it was, timers and all.
+      const same = was && was.kept.hash === kept.hash && JSON.stringify(was.c) === JSON.stringify(compiled);
+      if (was && !same) this.#cancel(was, "it was changed");
+      const live: Live = same
+        ? was
+        : { kept, c: compiled, memory: [], runs: [], queue: [], skipped: { minute: 0, count: 0 } };
+      live.kept = kept;
+      if (!same) {
+        // A rule that is new here starts by noting how things stand. Noting is not firing.
+        live.memory = compiled.triggers.map((t) => this.#note(live, t));
+        if (compiled.cond) evaluate(compiled.cond, this.#read, this.#held(live));
+      }
+      this.#live.set(kept.id, live);
+      for (const at of this.#watched(compiled)) {
+        let keys = this.#watching.get(at.device);
+        if (!keys) this.#watching.set(at.device, keys = new Map());
+        let rules = keys.get(at.key);
+        if (!rules) keys.set(at.key, rules = new Set());
+        rules.add(live);
+      }
+    }
+    for (const was of before.values()) {
+      if (!this.deps.store.get(was.kept.id)) this.#cancel(was, "it was removed");
+    }
+    for (const g of new Set([...groups, ...this.#pausedGroups])) {
+      values[`automation/paused/${g}`] = this.#pausedGroups.has(g);
+    }
+    const gone = [...this.deps.hubDevice.state.keys()].filter((k) =>
+      k.startsWith("automation/") && !(k in values)
+    );
+    this.#out?.drop(gone);
+    this.#out?.put(values);
+  }
+
+  /** The values a rule has to be told about: what its triggers read, and anything timed with `for`. */
+  #watched(c: Compiled): At[] {
+    const out: At[] = [];
+    for (const t of c.triggers) t.how === "holds" ? reads(t.cond, out) : out.push(t.at);
+    const timed = (n: CCond): boolean =>
+      n.for !== undefined ||
+      (n.how === "all" || n.how === "any" ? n.of.some(timed) : n.how === "not" && timed(n.of));
+    if (c.cond && timed(c.cond)) reads(c.cond, out);
+    return out;
+  }
+
+  views(): RuleView[] {
+    return [...this.#views.values()].map((v) => ({ ...v, active: !!this.#live.get(v.id)?.run }));
+  }
+  get paused(): { all: boolean; groups: Record<string, boolean> } {
+    const groups: Record<string, boolean> = {};
+    for (const v of this.#views.values()) if (v.group) groups[v.group] = this.#pausedGroups.has(v.group);
+    return { all: this.#paused, groups };
+  }
+
+  // --- Time ---
+
+  /** Has this part been true for as long as it says? Counting starts when it becomes true and ends when it stops. */
+  #held(live: Live): (c: object & { for?: number }, now: Tri) => Tri {
+    return (c, now) => {
+      if (now !== true) {
+        this.#since.delete(c);
+        return now;
+      }
+      const t = performance.now();
+      let since = this.#since.get(c);
+      if (since === undefined) {
+        this.#since.set(c, since = t);
+        // Looked at again the moment it has been true long enough.
+        this.#clock.after(
+          c.for! * this.#second + 1,
+          () => this.#live.get(live.kept.id) === live && this.#look(live),
+        );
+      }
+      return t - since >= c.for! * this.#second;
+    };
+  }
+
+  // --- Triggers ---
+
+  /** How a trigger stands now. */
+  #now(live: Live, t: CTrigger): Tri {
+    if (t.how === "holds") {
+      const held = this.#held(live);
+      const now = evaluate(t.cond, this.#read, held);
+      return t.for !== undefined ? held(t, now) : now;
+    }
+    const value = this.#read(t.at);
+    if (t.how === "becomes") return value === undefined ? null : same(value, t.value);
+    if (t.how === "changes") return value === undefined ? null : false;
+    const n = asNumber(value);
+    return n === null ? null : t.how === "rises" ? n >= t.mark : n <= t.mark;
+  }
+  #note(live: Live, t: CTrigger): Memory {
+    const was = this.#now(live, t);
+    return t.how === "changes" ? { was, last: this.#read(t.at) } : { was };
+  }
+
+  /** Look at a rule's triggers again. Whichever went from false to true fires. */
+  #look(live: Live, changed?: { device: string; values: Values; cause?: Cause }): void {
+    // Anything in its condition that is being timed keeps its time, whether or not a trigger fires.
+    if (live.c.cond) evaluate(live.c.cond, this.#read, this.#held(live));
+    let fired: CTrigger | undefined;
+    live.c.triggers.forEach((t, i) => {
+      const memory = live.memory[i];
+      if (t.how === "changes") {
+        const value = this.#read(t.at);
+        const told = changed?.device === t.at.device && t.at.key in changed.values;
+        if (told && value !== undefined && memory.last !== undefined && !same(value, memory.last)) {
+          fired ??= t;
+        }
+        memory.last = value;
+        memory.was = value === undefined ? null : false;
+        return;
+      }
+      const now = this.#now(live, t);
+      const edge = memory.was === false && now === true;
+      memory.was = now;
+      if (!edge) return;
+      if ((t.how === "rises" || t.how === "falls") && t.within !== undefined) {
+        // Passing the mark by a long way is someone jumping past it, not playing through it.
+        const n = asNumber(this.#read(t.at))!;
+        if (Math.abs(n - t.mark) > t.within) return;
+      }
+      fired ??= t;
+    });
+    if (fired) this.#fire(live, { why: triggerWords(fired, this.#name), cause: changed?.cause });
+  }
+
+  #changed(source: Source, values: Values, cause?: Cause): void {
+    const keys = this.#watching.get(source.id);
+    if (!keys) return;
+    let rules: Set<Live> | undefined;
+    for (const key in values) {
+      const reading = keys.get(key);
+      if (!reading) continue;
+      if (!rules) rules = new Set(reading);
+      else for (const live of reading) rules.add(live);
+    }
+    if (!rules) return;
+    const changed = { device: source.id, values, cause };
+    // Every rule looks at the same moment before any of them acts on it.
+    for (const live of rules) if (this.#live.get(live.kept.id) === live) this.#look(live, changed);
+  }
+
+  /** A device went away or came back. What rules knew of it is forgotten or noted afresh. Nothing fires. */
+  #health(source: Source): void {
+    if (!this.#watching.has(source.id)) return;
+    for (const live of this.#live.values()) {
+      live.c.triggers.forEach((t, i) => {
+        const read: At[] = t.how === "holds" ? reads(t.cond) : [t.at];
+        if (read.some((at) => at.device === source.id)) live.memory[i] = this.#note(live, t);
+      });
+    }
+  }
+
+  // --- Firing ---
+
+  #log(type: string, live: Live, run: { traceid: string } | undefined, data: Record<string, unknown>): void {
+    if (this.#stopped) return;
+    this.deps.log.append({
+      type: `skillfully.automation.${type}`,
+      source: "core",
+      subject: `${HUB_DEVICE}:automation/enabled/${live.kept.id}`,
+      actor: `automation/${live.kept.id}`,
+      via: "automation",
+      ...(run ? { traceid: run.traceid } : {}),
+      data: { name: live.c.name, ...data },
+    });
+  }
+
+  /** It was set off and did not run. Written once a minute for each rule, with how often. */
+  #skip(live: Live, why: string): string {
+    const minute = Math.floor(Date.now() / 60_000);
+    if (live.skipped.minute === minute) live.skipped.count++;
+    else {
+      this.#log("skipped", live, undefined, {
+        why,
+        ...(live.skipped.count ? { alsoBefore: live.skipped.count } : {}),
+      });
+      live.skipped = { minute, count: 0 };
+    }
+    return why;
+  }
+
+  #isPaused(live: Live): boolean {
+    return this.#paused || (!!live.c.group && this.#pausedGroups.has(live.c.group));
+  }
+
+  /** Set a rule off. Says in words why it did not run, or nothing when it did. */
+  #fire(live: Live, firing: Firing): string | null {
+    if (this.#isPaused(live)) return this.#skip(live, "Automations are paused.");
+    const depth = (firing.cause?.depth ?? 0) + 1;
+    if (depth > MAX_DEPTH) {
+      this.#halt(
+        live,
+        `It was part of a chain of rules setting each other off, more than ${MAX_DEPTH} deep.`,
+      );
+      return "It was stopped: it was part of a loop.";
+    }
+    if (live.c.cond) {
+      const holds = evaluate(live.c.cond, this.#read, this.#held(live));
+      if (holds !== true) {
+        const unknown = holds === null ? firstUnknown(live.c.cond, this.#read) : undefined;
+        return this.#skip(
+          live,
+          unknown ? `It could not tell: ${this.#name(unknown)} is unknown.` : "Its condition was not met.",
+        );
+      }
+    }
+    if (live.run) {
+      if (live.c.mode === "single") return this.#skip(live, "It was already running.");
+      if (live.c.mode === "queue") {
+        if (live.queue.length >= LIMITS.queue) return this.#skip(live, "Too many runs were already waiting.");
+        live.queue.push(firing);
+        return null;
+      }
+      this.#cancel(live, "it was set off again");
+    }
+    const now = performance.now();
+    live.runs = live.runs.filter((t) => now - t < RATE_WINDOW_MS);
+    if (live.runs.length >= live.kept.rate) {
+      this.#halt(live, `It ran ${live.kept.rate} times in 10 seconds.`);
+      return "It was stopped: it ran too often.";
+    }
+    live.runs.push(now);
+    const run: Run = { traceid: firing.cause?.traceid ?? newId(), depth };
+    const at = new Date().toISOString();
+    this.deps.store.ran(live.kept.id, at);
+    const view = this.#views.get(live.kept.id);
+    if (view) view.lastRan = at;
+    const read: Record<string, Value | null> = {};
+    for (const a of live.c.reads) read[`${a.device}:${a.key}`] = this.#read(a) ?? null;
+    this.#log("fired", live, run, { why: firing.why, depth, read });
+    if (live.kept.state === "test") {
+      this.#log("would", live, run, { writes: this.#would(live) });
+      return null;
+    }
+    live.run = run;
+    this.#out?.put({ [`automation/active/${live.kept.id}`]: true });
+    void this.#steps(live, run);
+    return null;
+  }
+
+  /** The value a step would send right now, or why it cannot say. */
+  #valueOf(s: Exclude<CStep, { wait: number }>): { value: Value } | { problem: string } {
+    let value: Value;
+    if (s.does === "press") return { value: true };
+    if (s.does === "set") value = s.value;
+    else if (s.does === "from") {
+      const from = this.#read(s.from);
+      if (from === undefined) return { problem: `${this.#name(s.from)} is unknown` };
+      value = from;
+    } else {
+      const held = asNumber(this.#read(s.at));
+      if (held === null) return { problem: `${this.#name(s.at)} is unknown` };
+      value = s.does === "add" ? held + s.by : held * s.by;
+    }
+    if (typeof value === "number") {
+      if (s.min !== undefined) value = Math.max(s.min, value);
+      if (s.max !== undefined) value = Math.min(s.max, value);
+    }
+    return { value };
+  }
+
+  /** What a rule in Test would have sent. Waits are not waited for, and nothing is sent. */
+  #would(live: Live): unknown[] {
+    return live.c.steps.map((s) => {
+      if ("wait" in s) return { wait: s.wait };
+      const v = this.#valueOf(s);
+      return {
+        device: s.at.device,
+        key: s.at.key,
+        ..."value" in v ? { value: v.value } : { problem: v.problem },
+      };
+    });
+  }
+
+  async #steps(live: Live, run: Run): Promise<void> {
+    const began = performance.now();
+    let done = 0;
+    let failed: string | undefined;
+    for (const s of live.c.steps) {
+      if (run.cancelled) break;
+      if ("wait" in s) {
+        await new Promise<void>((resolve) => {
+          const cancel = this.#clock.after(s.wait * this.#second, resolve);
+          run.wake = () => {
+            cancel();
+            resolve();
+          };
+        });
+        run.wake = undefined;
+        if (!run.cancelled) done++;
+        continue;
+      }
+      const v = this.#valueOf(s);
+      const source = this.deps.devices.source(s.at.device);
+      if ("problem" in v || !source) {
+        failed = "problem" in v ? v.problem : `${s.at.device} is not on this hub`;
+        break;
+      }
+      const ctx: SetContext = {
+        actor: `automation/${live.kept.id}`,
+        via: "automation",
+        traceid: run.traceid,
+        depth: run.depth,
+      };
+      const r = await source.set(s.at.key, v.value, ctx);
+      if (!r.ok) {
+        failed = r.error.message;
+        break;
+      }
+      done++;
+    }
+    const ms = Math.round(performance.now() - began);
+    if (failed !== undefined) {
+      this.#log("failed", live, run, {
+        step: done + 1,
+        of: live.c.steps.length,
+        doing: stepWords(live.c.steps[done], this.#name),
+        why: failed,
+        ms,
+      });
+    } else if (run.cancelled) {
+      this.#log("cancelled", live, run, { why: run.cancelled, done, of: live.c.steps.length, ms });
+    } else this.#log("finished", live, run, { steps: done, ms });
+    if (live.run !== run) return;
+    live.run = undefined;
+    this.#out?.put({ [`automation/active/${live.kept.id}`]: false });
+    const next = this.#live.get(live.kept.id) === live ? live.queue.shift() : undefined;
+    if (next) this.#fire(live, next);
+  }
+
+  /** Stop a rule in the middle of its steps. What it already did is not undone. */
+  #cancel(live: Live, why: string): void {
+    live.queue = [];
+    if (!live.run) return;
+    live.run.cancelled = why;
+    live.run.wake?.();
+  }
+
+  /** The hub turns a rule off, with the reason. A person turns it back on. */
+  #halt(live: Live, why: string): void {
+    this.#cancel(live, "the hub stopped it");
+    this.deps.store.setState(live.kept.id, "stopped", HUB, why);
+  }
+
+  // --- The hub device's side: run, on and off, pause ---
+
+  #keepPaused(): void {
+    this.deps.kept.set(
+      "automations.paused",
+      JSON.stringify({ all: this.#paused, groups: [...this.#pausedGroups].sort() }),
+    );
+  }
+
+  /** Pause every rule, or one group's. Rules in the middle of their steps stop there. */
+  pause(on: boolean, who: { actor?: string; via: string }, group?: string): void {
+    if (group ? this.#pausedGroups.has(group) === on : this.#paused === on) return;
+    if (group) on ? this.#pausedGroups.add(group) : this.#pausedGroups.delete(group);
+    else this.#paused = on;
+    this.#keepPaused();
+    this.deps.log.append({
+      type: on ? "skillfully.automation.paused" : "skillfully.automation.resumed",
+      source: "core",
+      subject: `${HUB_DEVICE}:automation/paused${group ? `/${group}` : ""}`,
+      actor: who.actor,
+      via: who.via,
+      data: group ? { group } : {},
+    });
+    for (const live of this.#live.values()) {
+      if (!this.#isPaused(live)) continue;
+      this.#cancel(live, "automations were paused");
+      // What triggers remember is noted afresh when rules resume, so nothing fires for what happened meanwhile.
+    }
+    if (!on) {
+      for (const live of this.#live.values()) {
+        if (!group || live.c.group === group) live.memory = live.c.triggers.map((t) => this.#note(live, t));
+      }
+    }
+    this.#out?.put({ [`automation/paused${group ? `/${group}` : ""}`]: on });
+  }
+
+  /** Run a rule now, as if a trigger had fired. Says in words why it did not, or nothing when it did. */
+  run(id: string, ctx: SetContext & { traceid: string }): string | null {
+    const live = this.#live.get(id);
+    if (!live) {
+      const view = this.#views.get(id);
+      return this.#leftAlone
+        ? "This hub was started with its automations left alone."
+        : !view
+        ? "Rule not found."
+        : view.state === "waiting"
+        ? `${view.name} is waiting for ${view.missing.join(", ")}.`
+        : `${view.name} is ${view.state === "stopped" ? "stopped" : "off"}.`;
+    }
+    const why = this.#fire(live, {
+      why: "it was run",
+      cause: { actor: ctx.actor, via: ctx.via, traceid: ctx.traceid, depth: ctx.depth ?? 0 },
+    });
+    return why === null ? null : `${live.c.name} did not run. ${why}`;
+  }
+
+  #set(
+    key: string,
+    value: Value,
+    ctx: SetContext & { traceid: string },
+  ): { ok: true; value: Value } | { ok: false; code: string; message: string } {
+    const [, what, name] = key.split("/");
+    const who = { actor: ctx.actor ?? "unknown", via: ctx.via };
+    if (what === "paused") {
+      if (name !== undefined && !(name in this.paused.groups) && !this.#pausedGroups.has(name)) {
+        return { ok: false, code: "unknown_key", message: `No rule is in a group called ${name}` };
+      }
+      this.pause(value === true, who, name);
+      return { ok: true, value };
+    }
+    if (what === "run") {
+      const why = this.run(name, ctx);
+      return why === null ? { ok: true, value: true } : { ok: false, code: "skipped", message: why };
+    }
+    if (what === "enabled") {
+      const r = this.deps.store.setState(name, value === true ? "on" : "off", who);
+      return r.ok ? { ok: true, value } : { ok: false, code: "unknown_key", message: r.message };
+    }
+    return { ok: false, code: "read_only", message: `${key} cannot be set` };
+  }
+
+  /** How each trigger and each part of the condition stands right now, for the page that shows a rule live. */
+  live(id: string): { triggers: Line[]; condition: Line[]; steps: string[] } | null {
+    const view = this.#views.get(id);
+    if (!view) return null;
+    const { compiled } = compile(id, view.rule, this.#world());
+    if (!compiled) return null;
+    const answer = (t: Tri) => (t === null ? "unknown" : t ? "true" : "false");
+    const value = (at: At) => {
+      const v = this.#read(at);
+      return v === undefined ? "unknown" : shown(v);
+    };
+    const lines = (c: CCond, depth: number, out: Line[]): Line[] => {
+      const words = c.how === "all" ? "All of:" : c.how === "any" ? "Any of:" : c.how === "not" ? "Not:" : "";
+      if (c.how === "all" || c.how === "any" || c.how === "not") {
+        out.push({
+          depth,
+          words: words + (c.for !== undefined ? ` (for ${c.for} seconds)` : ""),
+          is: answer(evaluate(c, this.#read)),
+        });
+        for (const inner of c.how === "not" ? [c.of] : c.of) lines(inner, depth + 1, out);
+      } else {
+        const leaf = { ...c, for: undefined } as CCond;
+        out.push({
+          depth,
+          words: conditionWords(c, this.#name),
+          reads: value(c.at),
+          is: answer(evaluate(leaf, this.#read)),
+        });
+      }
+      return out;
+    };
+    return {
+      triggers: compiled.triggers.map((t) => ({
+        depth: 0,
+        words: triggerWords(t, this.#name),
+        ...(t.how === "holds" ? {} : { reads: value(t.at) }),
+        is: answer(t.how === "holds" ? evaluate(t.cond, this.#read) : this.#now({} as Live, t)),
+      })),
+      condition: compiled.cond ? lines(compiled.cond, 0, []) : [],
+      steps: compiled.steps.map((s) => stepWords(s, this.#name)),
+    };
+  }
+}
+
+/** One line of a rule shown live: what it says, what it reads now, and whether it is true. */
+export interface Line {
+  depth: number;
+  words: string;
+  reads?: string;
+  is: string;
+}

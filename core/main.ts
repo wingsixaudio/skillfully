@@ -2,6 +2,7 @@
 //   deno task hub            listens on 127.0.0.1:8080
 //   deno task hub --lan      listens on every address, so a phone on the same network can connect
 //   deno task hub --act=a,b  those drivers start in Act the first time this hub sees them
+//   deno task hub --no-automations  no rule runs, whatever is switched on
 //
 // Everything else about a driver is decided on the admin page and kept in the hub's own record of it.
 
@@ -72,6 +73,9 @@ const hub = await startHub({
   // --no-store uses none: devices are then added from files.
   // --store-every=<seconds> says how often its list is read again. Five minutes unless told otherwise.
   ...(Deno.args.includes("--no-store") ? {} : store()),
+  // --no-automations starts the hub with every rule left alone: none fires and none can be run. For a
+  // hub whose rules are what is going wrong.
+  noAutomations: Deno.args.includes("--no-automations"),
   storeEverySeconds: Number(Deno.args.find((a) => a.startsWith("--store-every="))?.slice(14)) || undefined,
   updates: {
     home,

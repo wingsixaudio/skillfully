@@ -109,7 +109,8 @@ label {
   margin: 12px 0 6px;
 }
 input,
-select {
+select,
+textarea {
   width: 100%;
   font: inherit;
   color: var(--text);
@@ -118,8 +119,19 @@ select {
   border-radius: 10px;
   padding: 12px;
 }
+textarea {
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+}
+.live {
+  margin: 6px 0;
+}
 input:focus-visible,
 select:focus-visible,
+textarea:focus-visible,
 button:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--accent);
@@ -355,7 +367,8 @@ dialog::backdrop {
     max(4px,env(safe-area-inset-left));
 }
 #places a {
-  flex: 1;
+  flex: 1 1 auto;
+  padding: 0 4px;
   min-height: 52px;
   display: grid;
   place-items: center;
@@ -368,6 +381,21 @@ dialog::backdrop {
 #places a[aria-current] {
   color: var(--text);
   border-top-color: var(--accent);
+}
+/* Six places on a phone: each tab is as wide as its word, and the words get smaller before any is cut. */
+@media (max-width: 430px) {
+  #places a {
+    font-size: 12px;
+    padding: 0 2px;
+  }
+}
+@media (max-width: 350px) {
+  #places a {
+    font-size: 10.5px;
+  }
+}
+#autoPauses {
+  margin: 8px 0 14px;
 }
 body.admin {
   padding-bottom: calc(76px + env(safe-area-inset-bottom));
