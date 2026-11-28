@@ -371,6 +371,9 @@
         if (dragging) send(fromPointer(e));
       });
       const release = () => {
+        // Moved by hand, it is let go of when the hand lets go. Left holding the keyboard, the next arrow,
+        // Home or End pressed for something else would move it. Someone who came to it by keyboard keeps it.
+        if (dragging && document.activeElement === fader) fader.blur();
         dragging = false;
         // While the thumb was down the board's answers were not shown. If it has already answered the last
         // thing sent, show what it holds now. Otherwise the answer still to come will.

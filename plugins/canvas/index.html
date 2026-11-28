@@ -1716,6 +1716,9 @@
         });
         e.addEventListener("pointermove", (ev) => dragging && move(fromPointer(ev)));
         const release = () => {
+          // Moved by hand, it is let go of when the hand lets go. Left holding the keyboard, the next arrow,
+          // Home or End pressed for something else would move it. Someone who came to it by keyboard keeps it.
+          if (dragging && document.activeElement === e) e.blur();
           if (asked) {
             if (dragging) ask();
             dragging = false;

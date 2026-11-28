@@ -844,6 +844,20 @@ async def main():
             if (await now.inner_text()).strip() == "50": break
             await owner.wait_for_timeout(100)
         check("and drawn larger, a slider still lands where the pointer let it go", (await now.inner_text()).strip() == "50", await now.inner_text())
+        # Let go of, a slider does not keep the keyboard: a key pressed afterwards for something else moves nothing.
+        held = await knob.evaluate("(e) => document.activeElement === e")
+        await owner.keyboard.press("End"); await owner.keyboard.press("ArrowUp"); await owner.wait_for_timeout(400)
+        check("a slider moved by hand lets go of the keyboard when the hand lets go", not held and (await now.inner_text()).strip() == "50", f"{held} {await now.inner_text()}")
+        await knob.focus(); await owner.keyboard.press("ArrowUp")
+        for _ in range(40):
+            if (await now.inner_text()).strip() != "50": break
+            await owner.wait_for_timeout(100)
+        check("someone who goes to a slider with the keyboard still moves it with the keys", (await now.inner_text()).strip() != "50" and await knob.evaluate("(e) => document.activeElement === e"), await now.inner_text())
+        await owner.keyboard.press("ArrowDown")
+        for _ in range(40):
+            if (await now.inner_text()).strip() == "50": break
+            await owner.wait_for_timeout(100)
+        await knob.evaluate("(e) => e.blur()")
         await choose(cv, "every-piece"); await cv.locator("#board .updown").wait_for()
         await owner.wait_for_timeout(300)
         fits = await next(f for f in owner.frames if "/screens/canvas/" in f.url).evaluate("() => { const b = document.querySelector('#board').getBoundingClientRect(); return [Math.round(b.width), Math.round(b.bottom), innerHeight]; }")
