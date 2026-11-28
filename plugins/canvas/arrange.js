@@ -60,9 +60,15 @@
    */
   function start(host) {
     const { el, say } = host;
+    const which = host.which === "desktop" ? "desktop" : "mobile";
+    const begun = E.copy(host.doc);
+    if (which === "desktop" && !begun.desktop) begun.desktop = C.emptyDesktop(begun);
     const session = {
       id: host.id,
-      doc: E.copy(host.doc),
+      /** The whole canvas, both layouts. `doc` is the layout being arranged, as a canvas of its own. */
+      whole: begun,
+      which,
+      doc: C.face(begun, which),
       page: host.page,
       /** The chosen piece as it is written, and the one copy of it that was touched. */
       selected: null,
@@ -70,6 +76,7 @@
       sheet: host.fresh ? "canvas" : null,
       setPage,
       addPage,
+      setWhich,
       stop,
       /** What the devices hold has arrived or changed as a whole: a list being chosen from is drawn again. */
       heard: () => picker && drawPicker(),
@@ -79,6 +86,16 @@
     let drag = null, held = false;
 
     const piece = () => session.selected && E.spot(session.doc, session.page, session.selected);
+    /** The layout being arranged is now this one, and the whole canvas with it. */
+    function take(next) {
+      session.doc = next;
+      session.whole = C.unface(session.whole, next, session.which);
+    }
+    /** Remember how things were, for Undo: the whole canvas, which layout, which page, what was chosen. */
+    function keep(selected = session.selected, from = session.whole) {
+      undo.push({ whole: from, which: session.which, page: session.page, selected });
+      if (undo.length > 60) undo.shift();
+    }
 
     function redraw() {
       bar();
@@ -88,9 +105,8 @@
     /** Take a changed canvas as the one being worked on. The one before is what Undo goes back to. */
     function commit(next, select) {
       if (next !== session.doc) {
-        undo.push({ doc: session.doc, page: session.page, selected: session.selected });
-        if (undo.length > 60) undo.shift();
-        session.doc = next;
+        keep();
+        take(next);
       }
       if (select !== undefined) choose(select, select);
       redraw();
@@ -123,11 +139,28 @@
       if (session.doc.pages.length >= C.LIMITS.pages) return say("Maximum 20 pages per canvas.", true);
       const next = E.copy(session.doc);
       next.pages.push({ name: "Page " + (next.pages.length + 1), pieces: [] });
-      undo.push({ doc: session.doc, page: session.page, selected: null });
-      session.doc = next;
+      keep(null);
+      take(next);
       session.page = next.pages.length - 1;
       choose(null);
       session.sheet = "canvas";
+      redraw();
+    }
+
+    /**
+     * Arrange the other layout. A canvas with no desktop layout is given an empty one, a page for each of
+     * its pages, kept only if something is put on it or Done is pressed.
+     */
+    function setWhich(to) {
+      if (to === session.which) return;
+      if (to === "desktop" && !session.whole.desktop) {
+        keep(null);
+        session.whole = { ...session.whole, desktop: C.emptyDesktop(session.whole) };
+      }
+      session.which = to;
+      session.doc = C.face(session.whole, to);
+      session.page = Math.min(session.page, session.doc.pages.length - 1);
+      choose(null);
       redraw();
     }
 
@@ -172,9 +205,11 @@
       back.onclick = () => {
         const was = undo.pop();
         if (!was) return;
-        session.doc = was.doc;
-        session.page = Math.min(was.page, was.doc.pages.length - 1);
-        choose(was.selected && E.spot(was.doc, session.page, was.selected) ? was.selected : null);
+        session.whole = was.whole;
+        session.which = was.which === "desktop" && was.whole.desktop ? "desktop" : "mobile";
+        session.doc = C.face(was.whole, session.which);
+        session.page = Math.min(was.page, session.doc.pages.length - 1);
+        choose(was.selected && E.spot(session.doc, session.page, was.selected) ? was.selected : null);
         redraw();
       };
       const cancel = el("button", {
@@ -193,10 +228,14 @@
       const done = el("button", { type: "button", className: "on", id: "done", textContent: "Done" });
       done.onclick = () => {
         if (!undo.length && !host.fresh) return host.done(false);
-        const problems = C.check(session.doc);
+        // A desktop layout with nothing on it is not kept: on a computer the canvas shows as it is drawn for
+        // a phone, made larger, rather than an empty screen.
+        const made = E.copy(session.whole);
+        if (made.desktop && made.desktop.pages.every((pg) => !pg.pieces.length)) delete made.desktop;
+        const problems = C.check(made);
         if (problems.length) return say(problems[0], true);
         done.disabled = true;
-        host.save(session.id, session.doc, (m) => {
+        host.save(session.id, made, (m) => {
           done.disabled = false;
           if (!m.ok) return say(m.message, true);
           host.done(true);
@@ -354,7 +393,10 @@
         ? (E.spot(session.doc, session.page, into).piece.at[2] ?? 1)
         : session.doc.columns ?? 4;
       const put = (more) => {
-        const made = E.add(session.doc, session.page, into, { ...E.fresh(type, columns), ...more });
+        const made = E.add(session.doc, session.page, into, {
+          ...E.fresh(type, columns, !!session.doc.fixed),
+          ...more,
+        });
         if (made.path) commit(made.doc, made.path);
       };
       if (type === "label" || type === "clock" || type === "countdown") return put({});
@@ -873,12 +915,26 @@
         commit(next);
       };
       const least = E.widest(doc);
+      const [fewest, most] = doc.fixed ? C.LIMITS.desktop.columns : [1, C.LIMITS.columns];
       const columns = stepper("Columns", doc.columns ?? 4, (n) => {
         const want = (doc.columns ?? 4) + n;
         if (want < least) return say(`An element extends to column ${least}. Move or resize it first.`);
-        if (want > C.LIMITS.columns) return;
+        if (want < fewest || want > most) return;
         whole((x) => (x.columns = want));
       });
+      // A desktop grid is a whole screen: how many rows it has is part of it.
+      const lowest = Math.max(
+        C.LIMITS.desktop.rows[0],
+        ...doc.pages.flatMap((pg) => pg.pieces.map((p) => p.at[1] + C.tallOf(p) - 1)),
+      );
+      const rows = doc.fixed
+        ? stepper("Rows", doc.rows, (n) => {
+          const want = doc.rows + n;
+          if (want < lowest) return say(`An element extends to row ${lowest}. Move or resize it first.`);
+          if (want > C.LIMITS.desktop.rows[1]) return;
+          whole((x) => (x.rows = want));
+        })
+        : null;
       box.append(
         el("div", { className: "pickHead" }, el("h2", { textContent: "Canvas" }), close),
         field(
@@ -888,6 +944,7 @@
           }),
         ),
         columns,
+        ...(rows ? [rows] : []),
         field(
           "This page",
           text(
@@ -907,8 +964,8 @@
         b.onclick = () => {
           const next = E.copy(doc);
           next.pages.splice(to, 0, next.pages.splice(session.page, 1)[0]);
-          undo.push({ doc: session.doc, page: session.page, selected: null });
-          session.doc = next;
+          keep(null);
+          take(next);
           session.page = to;
           redraw();
         };
@@ -924,8 +981,8 @@
       drop.onclick = () => {
         const next = E.copy(doc);
         next.pages.splice(session.page, 1);
-        undo.push({ doc: session.doc, page: session.page, selected: null });
-        session.doc = next;
+        keep(null);
+        take(next);
         session.page = Math.min(session.page, next.pages.length - 1);
         redraw();
       };
@@ -941,9 +998,11 @@
       const style = getComputedStyle(board);
       const gap = parseFloat(style.columnGap) || 0;
       const columns = session.doc.columns ?? 4;
+      // Drawn larger or smaller to fit the screen, a cell is that much larger or smaller under the pointer.
+      const zoom = parseFloat(board.style.zoom) || 1;
       return {
-        wide: (board.getBoundingClientRect().width + gap) / columns,
-        tall: (parseFloat(style.gridAutoRows) || 60) + (parseFloat(style.rowGap) || 0),
+        wide: (board.getBoundingClientRect().width + gap * zoom) / columns,
+        tall: ((parseFloat(style.gridAutoRows) || 60) + (parseFloat(style.rowGap) || 0)) * zoom,
       };
     }
     function down(ev) {
@@ -955,6 +1014,7 @@
         x: ev.clientX,
         y: ev.clientY,
         from: session.doc,
+        whole: session.whole,
         size: ev.target.closest(".grip") !== null,
         cell: cell(),
         moved: false,
@@ -976,7 +1036,7 @@
         : E.move(drag.from, session.page, session.selected, across, along);
       if (next === session.doc || JSON.stringify(next) === JSON.stringify(session.doc)) return;
       drag.moved = true;
-      session.doc = next;
+      take(next);
       host.draw();
     }
     function up() {
@@ -986,7 +1046,7 @@
       // The click that ends this touch lands on the board, not on a piece. It is not a choice of nothing.
       setTimeout(() => (held = false), 80);
       if (was.moved && session.doc !== was.from) {
-        undo.push({ doc: was.from, page: session.page, selected: session.selected });
+        keep(session.selected, was.whole);
         redraw();
         // Dropped under the sheet, it would be out of sight.
         requestAnimationFrame(() =>

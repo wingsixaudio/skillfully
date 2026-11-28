@@ -14,6 +14,11 @@
    * connection of its own, and the hub holds each to what that screen may do for this person.
    * `lost` is called when the screen is no longer this person's.
    */
+  /** Whether this page is in full screen, as a screen is told it. */
+  function isFull() {
+    return !!(document.fullscreenElement ?? document.webkitFullscreenElement);
+  }
+
   function carry(frame, id, lost) {
     let ws, ready = false, stopped = false;
     const toScreen = (m) => frame.contentWindow?.postMessage(m, "*");
@@ -43,6 +48,7 @@
     const heard = (e) => {
       if (e.source !== frame.contentWindow || !e.data || typeof e.data !== "object") return;
       if (e.data.type === "ready") {
+        toScreen({ type: "full", on: isFull() });
         if (!ready) {
           ready = true;
           connect();
@@ -120,7 +126,6 @@
   // goes full screen, not the screen's frame, so this page keeps the way out: a screen cannot take the
   // display for itself, and cannot hide how to leave. A phone that cannot do it never shows the button.
   const root = document.documentElement;
-  const fullNow = () => document.fullscreenElement ?? document.webkitFullscreenElement ?? null;
   if (document.fullscreenEnabled || document.webkitFullscreenEnabled) {
     $("full").hidden = false;
     $("full").onclick = () => {
@@ -143,7 +148,11 @@
     $("unfull").addEventListener("pointerenter", () => clearTimeout(away));
     $("unfull").addEventListener("pointerleave", offer);
     const changed = () => {
-      const on = !!fullNow();
+      const on = isFull();
+      // Each screen shown is told, so one can give the room to its controls.
+      for (const f of document.querySelectorAll("iframe")) {
+        f.contentWindow?.postMessage({ type: "full", on }, "*");
+      }
       root.classList.toggle("full", on);
       $("unfull").hidden = $("edge").hidden = !on;
       if (on) offer();

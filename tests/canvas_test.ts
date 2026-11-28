@@ -539,3 +539,95 @@ Deno.test("what is typed for a value is taken as what it most plainly is", async
   assertEquals(parse("{not json: at all}"), "{not json: at all}");
   assertEquals(parse("{ears}"), "{ears}");
 });
+
+Deno.test("a canvas can have a desktop layout of its own: a whole screen of fine cells", async () => {
+  await import("../plugins/canvas/changes.js");
+  const E = C.edit;
+  const desk = {
+    columns: 48,
+    rows: 27,
+    pages: [
+      {
+        name: "Mix",
+        pieces: [
+          { type: "label", at: [1, 1, 16, 2], text: "Front of house", size: "large" },
+          { type: "slider", at: [1, 4, 3, 12], key: "console/input/1/bus/1/level", title: "In 1" },
+          { type: "goto", at: [43, 26, 6, 2], page: "Lights" },
+        ],
+      },
+      {
+        name: "Lights",
+        pieces: [{ type: "button", at: [1, 1, 8, 4], key: "switch/outlet/1/on", value: true }],
+      },
+    ],
+  };
+  // deno-lint-ignore no-explicit-any
+  const doc: any = canvas([{ type: "toggle", at: [1, 1, 2, 1], key: "switch/outlet/1/on" }], {
+    desktop: desk,
+  });
+  assertEquals(C.check(doc), []);
+  assert(valid(doc), "the schema refuses a desktop layout as the guide writes it");
+  // The guide's own example is a canvas.
+  const guide = await Deno.readTextFile(`${CANVAS}/README.md`);
+  const shown = JSON.parse(/## Desktop and mobile[\s\S]*?```json\n([\s\S]*?)```/.exec(guide)![1]);
+  assertEquals(C.check(shown), []);
+  assert(valid(shown), "the schema refuses the guide's desktop example");
+
+  // Each layout as a canvas of its own.
+  assertEquals(C.face(doc, "mobile"), doc);
+  const face = C.face(doc, "desktop");
+  assertEquals([face.columns, face.rows, face.fixed, face.pages.length], [48, 27, true, 2]);
+  assertEquals(C.face(canvas([]), "desktop"), null);
+  const plan = C.layout(face, 0);
+  assertEquals([plan.columns, plan.rows, plan.fixed, plan.pieces.length], [48, 27, true, 3]);
+  assertEquals(C.layout(doc, 0).fixed, false);
+  // Left out, the grid is 48 by 27.
+  const bare = C.face({ ...doc, desktop: { pages: desk.pages } }, "desktop");
+  assertEquals([bare.columns, bare.rows], [48, 27]);
+  assertEquals(C.face({ ...doc, desktop: { columns: 32, pages: desk.pages } }, "desktop").rows, 18);
+
+  // Changing one layout keeps the other.
+  const moved = E.move(face, 0, "2", 3, 1);
+  const back = C.unface(doc, moved, "desktop");
+  assertEquals(back.pages, doc.pages);
+  assertEquals(back.desktop.pages[0].pieces[1].at, [4, 5, 3, 12]);
+  assertEquals(C.check(back), []);
+  const mobile = C.unface(doc, E.move(doc, 0, "1", 1, 0), "mobile");
+  assertEquals(mobile.desktop, doc.desktop);
+  assertEquals(mobile.pages[0].pieces[0].at, [2, 1, 2, 1]);
+  assert(!("fixed" in mobile) && !("rows" in mobile));
+
+  // A desktop grid has no row past its last: a piece stops there, and one written past it is refused.
+  const low = E.move(face, 0, "2", 0, 40);
+  assertEquals(C.face(C.unface(doc, low, "desktop"), "desktop").pages[0].pieces[1].at, [1, 16, 3, 12]);
+  assertEquals(E.resize(face, 0, "1", 0, 40).pages[0].pieces[0].at, [1, 1, 16, 27]);
+  const past = {
+    ...doc,
+    desktop: { ...desk, pages: [{ name: "Mix", pieces: [{ type: "clock", at: [1, 26, 4, 4] }] }] },
+  };
+  assert(
+    C.check(past).some((p: string) => p.includes("Desktop page 1, piece 1 (clock) reaches below row 27")),
+  );
+  // A piece added to a desktop layout is about the size it would be on a phone, and lands where there is room.
+  const added = E.add(face, 1, null, E.fresh("button", 48, true));
+  assertEquals(added.doc.pages[1].pieces[1].at, [9, 1, 4, 2]);
+  // A goto goes to a page of its own layout.
+  const lost = { ...doc, desktop: { ...desk, pages: [desk.pages[0]] } };
+  assert(C.check(lost).some((p: string) => p.includes('"Lights", which this canvas does not have')));
+
+  // What a desktop layout may be.
+  const wrong: [string, unknown][] = [
+    ['"desktop.columns" is how many columns', { ...doc, desktop: { ...desk, columns: 200 } }],
+    ['"desktop.rows" is how many rows', { ...doc, desktop: { ...desk, rows: 3 } }],
+    ['"desktop" has "zoom"', { ...doc, desktop: { ...desk, zoom: 2 } }],
+    ['"desktop" needs "pages"', { ...doc, desktop: { columns: 48 } }],
+    ['"desktop" is the layout for a computer', { ...doc, desktop: [] }],
+  ];
+  for (const [words, bad] of wrong) {
+    const problems: string[] = C.check(bad);
+    assert(problems.some((p) => p.includes(words)), `${words}: ${JSON.stringify(problems)}`);
+    assert(!valid(bad), `the schema took: ${words}`);
+  }
+  // An empty desktop layout has a page for each of the canvas's pages.
+  assertEquals(C.emptyDesktop(doc), { columns: 48, rows: 27, pages: [{ name: "One", pieces: [] }] });
+});
