@@ -67,6 +67,10 @@ export type Step =
   | { wait: number }
   /** Steps done at the same moment. The next step waits for all of them. */
   | { together: Step[] }
+  /** Go on when this becomes true. If it has not by then, the run stops there. */
+  | { wait_until: Condition; timeout: number }
+  /** One list of steps or the other, by what is true at that moment. */
+  | { if: Condition; then: Step[]; else?: Step[] }
   | (Ref & {
     value?: Value;
     from?: Ref;
@@ -323,12 +327,34 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
     }
   };
 
-  const step = (where: string, s: unknown, inside = false): void => {
+  /** `within` says what this step is part of: steps done together, or one side of an if. */
+  const step = (where: string, s: unknown, within: "" | "together" | "if" = ""): void => {
     if (!isObject(s)) return say(where, "must be a step");
+    const inside = within === "together";
     if ("wait" in s) {
       only(where, s, ["wait"]);
       if (inside) say(where, "a wait cannot be one of the steps done together");
       return seconds(`${where}.wait`, s.wait, LIMITS.waitSeconds);
+    }
+    if ("wait_until" in s) {
+      only(where, s, ["wait_until", "timeout"]);
+      if (inside) say(where, "a wait cannot be one of the steps done together");
+      seconds(`${where}.timeout`, s.timeout, LIMITS.waitSeconds);
+      return condition(`${where}.wait_until`, s.wait_until, 1);
+    }
+    if ("then" in s || "else" in s) {
+      only(where, s, ["if", "then", "else"]);
+      if (inside) return say(where, "an if cannot be one of the steps done together");
+      if (within === "if") return say(where, "an if cannot be inside another if");
+      condition(`${where}.if`, s.if, 1);
+      for (const side of ["then", "else"]) {
+        if (side === "else" && s.else === undefined) continue;
+        const list = s[side];
+        if (!Array.isArray(list) || !list.length || list.length > LIMITS.steps) {
+          say(`${where}.${side}`, `must be a list of 1 to ${LIMITS.steps} steps`);
+        } else list.forEach((x, i) => step(`${where}.${side}[${i}]`, x, "if"));
+      }
+      return;
     }
     if ("together" in s) {
       only(where, s, ["together"]);
@@ -336,7 +362,7 @@ export function checkRule(candidate: unknown): { ok: true; rule: Rule } | { ok: 
       if (!Array.isArray(s.together) || s.together.length < 2 || s.together.length > LIMITS.ranged) {
         return say(`${where}.together`, `must be a list of 2 to ${LIMITS.ranged} steps`);
       }
-      return s.together.forEach((x, i) => step(`${where}.together[${i}]`, x, true));
+      return s.together.forEach((x, i) => step(`${where}.together[${i}]`, x, "together"));
     }
     only(where, s, [
       "key",

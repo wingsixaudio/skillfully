@@ -50,12 +50,30 @@ export type CAct =
   | ({ at: At; does: "add" | "multiply"; by: number } & Shaping);
 export type CStep =
   | { wait: number }
+  | { until: CCond; timeout: number }
+  | { branch: CCond; then: CStep[]; else: CStep[] }
   /** Done at the same moment. `of` is the name with a range they were written out from, when they were. */
   | { together: CAct[]; of?: Ranged }
   | CAct;
 /** Every single thing a list of steps does, with what is done together laid flat. */
 export const acts = (steps: CStep[]): CAct[] =>
-  steps.flatMap((s) => ("wait" in s ? [] : "together" in s ? s.together : [s]));
+  steps.flatMap((s) =>
+    "wait" in s || "until" in s
+      ? []
+      : "branch" in s
+      ? acts([...s.then, ...s.else])
+      : "together" in s
+      ? s.together
+      : [s]
+  );
+/** What steps wait for: a run stopped at one of these has to be told when what it reads changes. */
+export const waitsIn = (steps: CStep[]): CCond[] =>
+  steps.flatMap((s) => "until" in s ? [s.until] : "branch" in s ? waitsIn([...s.then, ...s.else]) : []);
+/** Every condition inside a list of steps: what a step waits for, and what an if chooses by. */
+export const conditionsIn = (steps: CStep[]): CCond[] =>
+  steps.flatMap((s) =>
+    "until" in s ? [s.until] : "branch" in s ? [s.branch, ...conditionsIn([...s.then, ...s.else])] : []
+  );
 
 export interface Compiled {
   id: string;
@@ -206,17 +224,27 @@ export function compile(
     list.map((s, i): CStep => {
       const here = `${where}[${i}]`;
       if ("wait" in s) return { wait: s.wait };
+      if ("wait_until" in s) {
+        return { until: condition(`${here}.wait_until`, s.wait_until), timeout: s.timeout };
+      }
+      if ("then" in s) {
+        return {
+          branch: condition(`${here}.if`, s.if),
+          then: steps(`${here}.then`, s.then),
+          else: steps(`${here}.else`, s.else ?? []),
+        };
+      }
       if ("together" in s) {
         const of = origins.get(s);
         // Written out from a range, what is wrong with one of them is wrong with the name they came from.
         const each = s.together.flatMap((x, j) =>
-          "wait" in x || "together" in x ? [] : [act(of ? here : `${here}.together[${j}]`, x)]
+          "key" in x ? [act(of ? here : `${here}.together[${j}]`, x)] : []
         );
         return { together: each, ...(of ? { of } : {}) };
       }
       return act(here, s);
     });
-  const act = (here: string, s: Exclude<Step, { wait: number } | { together: Step[] }>): CAct => {
+  const act = (here: string, s: Extract<Step, { key: string }>): CAct => {
     {
       const { at, kind } = find(here, s, "write");
       const shaping: Shaping = {
@@ -338,6 +366,7 @@ export function compile(
     else if (t.how !== "at") read.push(t.at);
   }
   for (const c of [cond, during, cancel]) if (c) reads(c, read);
+  for (const c of conditionsIn([...doing, ...otherwise])) reads(c, read);
   const every = acts([...doing, ...otherwise]);
   for (const s of every) if (s.does === "from") read.push(s.from);
   // What it adds to, multiplies or moves over time, it reads first.

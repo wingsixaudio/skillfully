@@ -22,7 +22,15 @@ import { HUB_DEVICE, type HubDevice } from "../hub_device.ts";
 import type { Kept } from "../kept.ts";
 import { type Log, newId } from "../log.ts";
 import type { Cause, SetContext, Source } from "../source.ts";
-import { type CAct, compile, type Compiled, type CStep, type CTrigger, type World } from "./compile.ts";
+import {
+  type CAct,
+  compile,
+  type Compiled,
+  type CStep,
+  type CTrigger,
+  waitsIn,
+  type World,
+} from "./compile.ts";
 import type { Ranged } from "./ranges.ts";
 import {
   asksTheTime,
@@ -110,6 +118,8 @@ interface Run {
   cancelled?: string;
   /** Ends a wait early. */
   wake?: () => void;
+  /** It is waiting for a condition, and is to look again whenever something that condition reads changes. */
+  waiting?: boolean;
 }
 interface Firing {
   why: string;
@@ -608,6 +618,7 @@ export class Automations {
     if (c.cond && timed(c.cond)) reads(c.cond, out);
     if (c.during) reads(c.during, out);
     if (c.cancel) reads(c.cancel, out);
+    for (const waited of waitsIn([...c.steps, ...c.otherwise])) reads(waited, out);
     if (c.follow) out.push(c.follow.from);
     if (c.link) out.push(...c.link);
     return out;
@@ -674,6 +685,8 @@ export class Automations {
   /** Look at a rule's triggers again. Whichever went from false to true fires. */
   #look(live: Live, changed?: { device: string; values: Values; cause?: Cause }): void {
     if (this.#stopped) return;
+    // A run waiting for a condition looks at it again now.
+    if (live.run?.waiting) live.run.wake?.();
     if (live.c.follow) return this.#follow(live, changed);
     if (live.c.link) return this.#link(live, changed);
     // Anything in its condition that is being timed keeps its time, whether or not a trigger fires.
@@ -1106,7 +1119,16 @@ export class Automations {
     };
     // What is done together is listed flat: each is a write of its own.
     return steps.flatMap((s): unknown[] =>
-      "wait" in s ? [{ wait: s.wait }] : "together" in s ? s.together.map(one) : [one(s)]
+      "wait" in s
+        ? [{ wait: s.wait }]
+        : "until" in s
+        ? [{ wait_until: conditionWords(s.until, this.#name), timeout: s.timeout }]
+        : "branch" in s
+        // Which side it would take is not known until it gets there, so both are listed.
+        ? [{ if: conditionWords(s.branch, this.#name), then: this.#would(s.then), else: this.#would(s.else) }]
+        : "together" in s
+        ? s.together.map(one)
+        : [one(s)]
     );
   }
 
@@ -1131,35 +1153,66 @@ export class Automations {
     return r.ok ? undefined : r.error.message;
   }
 
+  /** Wait for a time, or less if the run is woken. */
+  #pause(run: Run, ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const cancel = this.#clock.after(ms, resolve);
+      run.wake = () => {
+        cancel();
+        resolve();
+      };
+    }).then(() => void (run.wake = undefined));
+  }
+
+  /**
+   * Do a list of steps in order. Says why when one could not be done, and nothing when all were, or when the
+   * run was cancelled on the way. `count` is told each time one of these steps is finished.
+   */
+  async #each(
+    live: Live,
+    run: Run,
+    steps: CStep[],
+    count: () => void = () => {},
+  ): Promise<string | undefined> {
+    for (const s of steps) {
+      if (run.cancelled) return undefined;
+      if ("wait" in s) {
+        await this.#pause(run, s.wait * this.#second);
+      } else if ("until" in s) {
+        // Looked at again each time something it reads changes (#look), and once more when time is up.
+        const until = performance.now() + s.timeout * this.#second;
+        while (!run.cancelled && this.#is(live, s.until) !== true) {
+          const left = until - performance.now();
+          if (left <= 0) {
+            return `Timed out after ${s.timeout} s waiting until ${conditionWords(s.until, this.#name)}`;
+          }
+          run.waiting = true;
+          await this.#pause(run, left);
+          run.waiting = false;
+        }
+      } else if ("branch" in s) {
+        const now = this.#is(live, s.branch);
+        // Unknown means no: when the hub cannot tell which side is right, it does neither.
+        if (now === null) return `Cannot tell whether ${conditionWords(s.branch, this.#name)}`;
+        const why = await this.#each(live, run, now ? s.then : s.else);
+        if (why !== undefined) return why;
+      } else {
+        // Steps done together are all asked for at once, and the next step waits for every one of them.
+        // The first that could not be done is the reason the run stops. The rest were still asked for.
+        const why = "together" in s
+          ? (await Promise.all(s.together.map((x) => this.#act(live, run, x)))).find((w) => w !== undefined)
+          : await this.#act(live, run, s);
+        if (why !== undefined) return why;
+      }
+      if (!run.cancelled) count();
+    }
+    return undefined;
+  }
+
   async #steps(live: Live, run: Run): Promise<void> {
     const began = performance.now();
     let done = 0;
-    let failed: string | undefined;
-    for (const s of run.steps) {
-      if (run.cancelled) break;
-      if ("wait" in s) {
-        await new Promise<void>((resolve) => {
-          const cancel = this.#clock.after(s.wait * this.#second, resolve);
-          run.wake = () => {
-            cancel();
-            resolve();
-          };
-        });
-        run.wake = undefined;
-        if (!run.cancelled) done++;
-        continue;
-      }
-      // Steps done together are all asked for at once, and the next step waits for every one of them.
-      // The first that could not be done is the reason the run stops. The rest were still asked for.
-      const why = "together" in s
-        ? (await Promise.all(s.together.map((x) => this.#act(live, run, x)))).find((w) => w !== undefined)
-        : await this.#act(live, run, s);
-      if (why !== undefined) {
-        failed = why;
-        break;
-      }
-      done++;
-    }
+    const failed = await this.#each(live, run, run.steps, () => done++);
     const ms = Math.round(performance.now() - began);
     if (failed !== undefined) {
       this.#log("failed", live, run, {

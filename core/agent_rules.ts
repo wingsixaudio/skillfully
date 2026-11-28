@@ -172,6 +172,11 @@ do     1 to 32 steps, done in order. A step that fails stops the rest.
      several can move together. Put a "wait" after it when the next step should come once it has landed.
      If anyone else sets that value on the way, the fade ends where they put it
   { "wait": 3 }                             wait 3 seconds, up to 600
+  { "wait_until": CONDITION, "timeout": 30 }   go on as soon as the condition is true. If it is not within
+                                            the timeout (seconds, up to 600), the run stops there
+  { "if": CONDITION, "then": [STEPS], "else": [STEPS] }   one list or the other, by what is true at that
+                                            moment. "else" is optional. If the hub cannot tell, the run
+                                            stops. No "if" inside an "if"
   { "together": [STEP, STEP, ...] }         2 to 256 steps done at the same moment. The next step waits for
                                             all of them. No "wait" and no "together" inside
 
