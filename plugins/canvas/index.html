@@ -123,6 +123,37 @@
       background: var(--rail);
     }
 
+    /*
+     * In full screen a canvas is a control surface: the controls and nothing else. Its name and buttons go,
+     * the page tabs stay when there is more than one page, and the connection shows only when it is lost,
+     * in the corner.
+     */
+    body.kiosk {
+      padding-top: max(8px, env(safe-area-inset-top));
+      padding-bottom: max(8px, env(safe-area-inset-bottom));
+    }
+    body.kiosk main {
+      gap: 8px;
+    }
+    body.kiosk header {
+      min-height: 0;
+    }
+    body.kiosk header > :not(.link) {
+      display: none !important;
+    }
+    body.kiosk header .link {
+      position: fixed;
+      top: max(8px, env(safe-area-inset-top));
+      right: max(10px, env(safe-area-inset-right));
+      z-index: 6;
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 6px 12px;
+    }
+    body.kiosk header .link:has(.led.on) {
+      display: none;
+    }
+
     /* On a phone the canvas's name has a line of its own, and what can be done with it goes below. */
     @media (max-width: 640px) {
       header {
@@ -1869,6 +1900,8 @@
         draw();
       }
       for (const b of document.querySelectorAll("#layouts button")) b.onclick = () => showWhich(b.dataset.which);
+      // Full screen, as the hub's page tells it: the canvas is its controls and nothing else.
+      let full = false;
       let wasRoomy = roomy();
       addEventListener("resize", () => {
         if (roomy() === wasRoomy) return;
@@ -2297,6 +2330,7 @@
         const face = faceOf(c);
         if (face && !c.problems.length && page >= face.pages.length) page = 0;
         if (!canvases.length || arr || proposed) shelf = false;
+        document.body.classList.toggle("kiosk", full && !arr && !shelf && !proposed);
         drawHead();
         drawBoard();
         drawShelf();
@@ -2375,6 +2409,10 @@
       addEventListener("message", (ev) => {
         if (ev.source !== parent) return;
         const m = ev.data;
+        if (m.type === "full") {
+          full = !!m.on;
+          draw();
+        }
         if (m.type === "link") {
           linked = m.up;
           $("led").classList.toggle("on", m.up);

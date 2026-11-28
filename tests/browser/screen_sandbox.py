@@ -637,10 +637,12 @@ async def main():
             filled = await canvas_frame.evaluate("() => { const b = document.querySelector('#board').getBoundingClientRect(); return [Math.round(b.width), Math.round(b.bottom), innerWidth, innerHeight]; }")
             check("full screen hides the bar, offers the way out, and the canvas still fills the screen", await owner.locator("#bar").is_hidden() and await owner.locator("#unfull").is_visible() and filled[0] > filled[2] - 60 and filled[1] <= filled[3], str(filled))
             if shots: await owner.screenshot(path=f"{shots}/13c-canvas-full-screen.png")
+            check("in full screen a canvas is controls only: no name, no Arrange, no Canvases", await cv.locator("#arrange").is_hidden() and await cv.locator("#more").is_hidden() and await cv.locator("h1").is_hidden() and await cv.locator("#pick").is_hidden())
             await owner.mouse.move(700, 4)
             await owner.locator("#unfull").click()
             await owner.locator("#bar").wait_for(timeout=5000)
-            check("Exit full screen brings the bar back", await owner.locator("#bar").is_visible() and await owner.locator("#unfull").is_hidden())
+            await cv.locator("#arrange").wait_for()
+            check("Exit full screen brings the bar back, and the canvas's own buttons", await owner.locator("#bar").is_visible() and await owner.locator("#unfull").is_hidden())
 
         # --- A desktop layout of its own: a fine grid that is the whole screen ---
         await cv.locator("#layouts button", has_text="Desktop").click()
