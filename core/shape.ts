@@ -13,7 +13,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 /** The shape this hub's code reads and writes. */
-export const SHAPE = 4;
+export const SHAPE = 5;
 
 export type Steps = Record<number, (db: DatabaseSync) => void>;
 
@@ -44,6 +44,13 @@ const STEPS: Steps = {
       const has = count(`SELECT count(*) AS n FROM pragma_table_info('agents') WHERE name = '${column}'`);
       if (!has) db.exec(`ALTER TABLE agents ADD COLUMN ${column} INTEGER`);
     }
+  },
+  // 5: and how long it may take.
+  5: (db) => {
+    const count = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+    if (!count("SELECT count(*) AS n FROM sqlite_master WHERE name = 'agents'")) return;
+    const has = count("SELECT count(*) AS n FROM pragma_table_info('agents') WHERE name = 'max_seconds'");
+    if (!has) db.exec("ALTER TABLE agents ADD COLUMN max_seconds INTEGER");
   },
 };
 

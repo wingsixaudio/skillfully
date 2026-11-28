@@ -1580,7 +1580,8 @@ function drawAgent(a) {
   );
   line(
     "Limits",
-    "Max steps: " + a.maxSteps + " · Max output tokens: " + a.maxTokens.toLocaleString("en-US"),
+    "Max steps: " + a.maxSteps + " · Max output tokens: " + a.maxTokens.toLocaleString("en-US") +
+      " · Time limit: " + (a.maxSeconds % 60 ? a.maxSeconds + " s" : a.maxSeconds / 60 + " min"),
     button("Change", () =>
       ask("Limits", (x) => {
         input(x, "agentSteps", "Max steps", {
@@ -1597,11 +1598,18 @@ function drawAgent(a) {
           value: a.maxTokens,
           required: true,
         });
+        input(x, "agentSeconds", "Time limit (seconds)", {
+          type: "number",
+          min: 30,
+          max: 1800,
+          value: a.maxSeconds,
+          required: true,
+        });
         x.append(
           el("p", {
             className: "help",
             textContent:
-              "Max steps: how many model calls one request can use, including tool calls. Max output tokens: the cap on each model response. Large requests, such as building a canvas or several automations, need more of both. Higher limits cost more per request.",
+              "Max steps: how many model calls one request can use, including tool calls. Max output tokens: the cap on each model response. Time limit: how long one request can run, not counting time spent waiting for your approval. Large requests, such as building a canvas or several automations, need more of all three. Higher limits cost more per request.",
           }),
         );
       }, () =>
@@ -1609,6 +1617,7 @@ function drawAgent(a) {
           ...me,
           maxSteps: Number($("agentSteps").value),
           maxTokens: Number($("agentTokens").value),
+          maxSeconds: Number($("agentSeconds").value),
         })), "agentLimitsSet"),
   );
   line(
